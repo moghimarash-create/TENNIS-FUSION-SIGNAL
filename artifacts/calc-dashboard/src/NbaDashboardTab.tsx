@@ -389,7 +389,6 @@ type NbaGamePred = {
       a_p12?: { fn: string; no: string; pos: string; st: boolean; mpg: number; ep: string; ef?: string; gf: string; gff?: number; pwr?: number }[];
     };
   };
-  wtp_day?: any;
   wtp?: {
     mon: string;
     htp: number;
@@ -856,6 +855,8 @@ export type FusionModeKey =
   | "tri_gf_ultralock"
   | "anti_nobet_smart"
   | "total_elem_12"
+  | "fusion4_elem"
+  | "referee6_ranked"
   | "tri_gf_routed"
   | "pos_inv_lock"
   | "dual_pillar"
@@ -1685,10 +1686,12 @@ export default function NbaDashboardTab({
   fusionMode = "tri_gf_ultralock",
   twinDbKind = "team",
   tour = "ATP",
+  deg3Opt = "opt3",
 }: {
   fusionMode?: FusionModeKey;
   twinDbKind?: TwinDbKind;
-  tour?: "ATP" | "WTA";
+  tour?: "ATP" | "WTA" | "ALL";
+  deg3Opt?: "opt1" | "opt2" | "opt3";
 }) {
   const [rawGames, setRawGames] = useState<NbaGamePred[]>([]);
   type CardBoxKey = "referee6" | "sixboxes" | "box1" | "smart" | "box2" | "dom" | "elem" | "fusion4" | "lineup";
@@ -1760,7 +1763,11 @@ export default function NbaDashboardTab({
           ? evalSmartAntiNoBet(g)
           : fusionMode === "total_elem_12"
             ? evalSmartMode14(g)
-            : g.fusion_meta?.modes?.[fusionMode];
+            : fusionMode === "fusion4_elem"
+              ? g.fusion_meta?.modes?.fusion4_elem
+              : fusionMode === "referee6_ranked"
+                ? g.fusion_meta?.modes?.referee6_ranked
+                : g.fusion_meta?.modes?.[fusionMode];
       if (!m) return g;
       const inOverlap = g.fusion_meta?.in_auth_overlap !== false;
       const pick = m.pick || g.sys_win || g.h;
@@ -1768,7 +1775,7 @@ export default function NbaDashboardTab({
       const vip = Boolean(m.vip && inOverlap);
       const melDy = String((g.wtp_day ?? g.wtp)?.mel ?? "AIR");
       const done = Boolean(g.done && g.aw && g.aw !== "PENDING");
-      const hit = done ? (pick === g.aw ? "WIN" : "LOSS") : "";
+      const hit: "WIN" | "LOSS" = pick === g.aw ? "WIN" : "LOSS";
       const allowMode1VetoHint = isPure2EngineMode && Boolean(g.fusion_meta?.vetoed);
       const bypassDailyEarth =
         fusionMode === "pos_inv_lock" ||
@@ -1776,7 +1783,9 @@ export default function NbaDashboardTab({
         fusionMode === "tri_gf_routed" ||
         fusionMode === "tri_gf_ultralock" ||
         fusionMode === "anti_nobet_smart" ||
-        fusionMode === "total_elem_12";
+        fusionMode === "total_elem_12" ||
+        fusionMode === "fusion4_elem" ||
+        fusionMode === "referee6_ranked";
       return {
         ...g,
         sys_win: pick,
@@ -1792,8 +1801,8 @@ export default function NbaDashboardTab({
         f1_wtp_day: bypassDailyEarth ? sig : Boolean(sig && melDy !== "EARTH"),
         vip_idx3_day: bypassDailyEarth ? vip : Boolean(vip && melDy !== "EARTH"),
         st: done ? hit : g.st,
-        fst: done && sig ? hit : "",
-      };
+        fst: done && sig ? hit : undefined,
+      } as NbaGamePred;
     });
   }, [rawGames, fusionMode, isPure2EngineMode]);
   const [histGames, setHistGames] = useState<HistGameRow[]>([]);
@@ -1906,20 +1915,26 @@ export default function NbaDashboardTab({
   const PAGE_SIZE = 30;
   const MASTER_DATA_VERSION = "v68";
 
+  const buildFusionShardUrls = (t: string, opt: string, bust?: number) => {
+    const tours = t === "ALL" ? ["atp", "wta"] : [t.toLowerCase()];
+    const yrs = ["2024", "2025", "2026"];
+    const qs = bust ? `?t=${bust}` : "";
+    return tours.flatMap((tr) => yrs.map((yr) => `/fusion_${tr}_${opt}_${yr}.json${qs}`));
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/fusion_nba_master.json?v=${MASTER_DATA_VERSION}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d: { games?: NbaGamePred[] }) => {
-        if (!cancelled && d?.games) {
-          setRawGames(d.games);
-          if (!didAutoPickDateRef.current) {
+    const urls = buildFusionShardUrls(tour, deg3Opt);
+    Promise.all(urls.map((u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { games: [] }))))
+      .then((docs: { games?: NbaGamePred[] }[]) => {
+        if (!cancelled) {
+          const merged = docs.flatMap((d) => d?.games ?? []);
+          merged.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n));
+          setRawGames(merged);
+          if (merged.length > 0 && !didAutoPickDateRef.current) {
             didAutoPickDateRef.current = true;
-            const nextPending =
-              d.games.find((x) => x.s === "2026-27" && x.d >= "2026-11-16" && !x.done)?.d ||
-              "2026-11-18";
-            setDailyCardDate(nextPending);
+            setDailyCardDate(merged[merged.length - 1].d);
           }
         }
       })
@@ -1930,15 +1945,19 @@ export default function NbaDashboardTab({
     return () => {
       cancelled = true;
     };
-  }, [twinDbKind, MASTER_DATA_VERSION]);
+  }, [tour, deg3Opt, MASTER_DATA_VERSION]);
 
   useEffect(() => {
     let cancelled = false;
     setHistLoading(true);
-    const histUrl = twinDbKind === "player" ? "/player_nba_hist_mode_c.json" : "/nba_history_pack_2010_2026.json";
-    fetch(histUrl)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((rawRows: any[]) => {
+    const suffix = twinDbKind === "player" ? "p" : deg3Opt;
+    const histUrls =
+      tour === "ALL"
+        ? [`/tennis_hist_atp_${suffix}.json`, `/tennis_hist_wta_${suffix}.json`]
+        : [`/tennis_hist_${tour.toLowerCase()}_${suffix}.json`];
+    Promise.all(histUrls.map((u) => fetch(u).then((r) => (r.ok ? r.json() : []))))
+      .then((arrList: any[][]) => {
+        const rawRows = arrList.flat();
         if (!cancelled && Array.isArray(rawRows)) {
           const parsed: HistGameRow[] = rawRows.map((arr) => {
             const h12 = Array.isArray(arr[8]) ? arr[8].map(String) : [];
@@ -2013,7 +2032,7 @@ export default function NbaDashboardTab({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tour, deg3Opt, twinDbKind]);
 
   const matchTwin = useCallback((g: NbaGamePred, p: TwinPatternKey) => {
     if (p === "twVipIdx3") return Boolean(oddsFreqMode === "daily" ? (g.vip_idx3_day ?? g.vip_idx3) : g.vip_idx3);
@@ -2079,40 +2098,47 @@ export default function NbaDashboardTab({
       });
       if (d?.ok) {
         const ts = Date.now();
-        const rp = await fetch(`/fusion_nba_master.json?t=${ts}`);
-        if (rp.ok) {
-          const dp = await rp.json();
-          if (dp?.games) setRawGames(dp.games);
+        const docs = await Promise.all(
+          buildFusionShardUrls(tour, deg3Opt, ts).map((u) =>
+            fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { games: [] }))
+          )
+        );
+        const merged = docs.flatMap((doc: any) => doc?.games ?? []);
+        if (merged.length > 0) {
+          merged.sort((a: any, b: any) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n));
+          setRawGames(merged);
         }
         if ((d.updatedScores ?? 0) > 0) {
-          const histUrl = twinDbKind === "player" ? "/player_nba_hist_mode_c.json" : "/nba_history_pack_2010_2026.json";
-          const rh = await fetch(`${histUrl}?t=${ts}`);
-          if (rh.ok) {
-            const rawRows = await rh.json();
-            if (Array.isArray(rawRows)) {
-              const parsed: HistGameRow[] = rawRows.map((arr: any) => {
-                const h12 = Array.isArray(arr[8]) ? arr[8].map(String) : [];
-                const a12 = Array.isArray(arr[10]) ? arr[10].map(String) : [];
-                return {
-                  d: String(arr[0]),
-                  day: String(arr[1]),
-                  s: String(arr[2]),
-                  h: String(arr[3]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[3]),
-                  a: String(arr[4]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[4]),
-                  hp: Number(arr[5]),
-                  ap: Number(arr[6]),
-                  mg: Number(arr[7]),
-                  h12,
-                  hGeo: elemCodeFromFinal4(h12),
-                  a12,
-                  aGeo: elemCodeFromFinal4(a12),
-                  f30: Number(arr[12] ?? 0),
-                  hGeoDyn: String(arr[9] ?? ""),
-                  aGeoDyn: String(arr[11] ?? ""),
-                };
-              });
-              setHistGames(parsed);
-            }
+          const suffix = twinDbKind === "player" ? "p" : deg3Opt;
+          const hUrls =
+            tour === "ALL"
+              ? [`/tennis_hist_atp_${suffix}.json?t=${ts}`, `/tennis_hist_wta_${suffix}.json?t=${ts}`]
+              : [`/tennis_hist_${tour.toLowerCase()}_${suffix}.json?t=${ts}`];
+          const rawLists = await Promise.all(hUrls.map((u) => fetch(u).then((r) => (r.ok ? r.json() : []))));
+          const rawRows = rawLists.flat();
+          if (Array.isArray(rawRows) && rawRows.length > 0) {
+            const parsed: HistGameRow[] = rawRows.map((arr: any) => {
+              const h12 = Array.isArray(arr[8]) ? arr[8].map(String) : [];
+              const a12 = Array.isArray(arr[10]) ? arr[10].map(String) : [];
+              return {
+                d: String(arr[0]),
+                day: String(arr[1]),
+                s: String(arr[2]),
+                h: String(arr[3]),
+                a: String(arr[4]),
+                hp: Number(arr[5]),
+                ap: Number(arr[6]),
+                mg: Number(arr[7]),
+                h12,
+                hGeo: elemCodeFromFinal4(h12),
+                a12,
+                aGeo: elemCodeFromFinal4(a12),
+                f30: Number(arr[12] ?? 0),
+                hGeoDyn: String(arr[9] ?? ""),
+                aGeoDyn: String(arr[11] ?? ""),
+              };
+            });
+            setHistGames(parsed);
           }
         }
         const rm = await apiRpcFetch("/api/kalshi/markets");
@@ -2122,10 +2148,10 @@ export default function NbaDashboardTab({
         }
         try { sessionStorage.removeItem('nba_sync_toast_v1'); } catch {}
         setSyncMsg(
-          `بروزرسانی زنده نتایج واقعی ESPN انجام شد (${d.updatedScores ?? 0} نتیجه جدید ثبت شد • کل بازی‌های انجام‌شده: ${d.totalDone ?? 0} • دقت فصل جاری: ${d.s2627?.pct ?? 84.6}% [${d.s2627?.w ?? 22}/${d.s2627?.n ?? 26}])`
+          `بروزرسانی زنده نتایج واقعی تنیس (ATP/WTA) از ESPN انجام شد (${d.updatedScores ?? 0} نتیجه جدید ثبت شد • کل بازی‌های انجام‌شده: ${d.totalDone ?? 0})`
         );
       } else {
-        setSyncMsg(d?.error ?? "خطا در بروزرسانی نتایج واقعی NBA");
+        setSyncMsg(d?.error ?? "خطا در بروزرسانی نتایج واقعی تنیس");
       }
     } catch (e) {
       try { sessionStorage.removeItem('nba_sync_toast_v1'); } catch {}
@@ -2146,10 +2172,15 @@ export default function NbaDashboardTab({
       });
       if (d?.ok) {
         const ts = Date.now();
-        const rp = await fetch(`/fusion_nba_master.json?t=${ts}`, { cache: "no-store" });
-        if (rp.ok) {
-          const dp = await rp.json();
-          if (dp?.games) setRawGames(dp.games);
+        const docs = await Promise.all(
+          buildFusionShardUrls(tour, deg3Opt, ts).map((u) =>
+            fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { games: [] }))
+          )
+        );
+        const merged = docs.flatMap((doc: any) => doc?.games ?? []);
+        if (merged.length > 0) {
+          merged.sort((a: any, b: any) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n));
+          setRawGames(merged);
         }
         try {
           const rm = await apiRpcFetch("/api/kalshi/markets");
@@ -2196,7 +2227,7 @@ export default function NbaDashboardTab({
   const patternWins = patternCompleted.filter((g) => getGameStatus(g) === "WIN").length;
   const patternAcc = patternCompleted.length > 0 ? ((100 * patternWins) / patternCompleted.length).toFixed(2) : "0.00";
 
-  const seasons = ["2024-25", "2025-26", "2026-27"];
+  const seasons = ["2024", "2025", "2026"];
   const seasonStats = seasons.map((s) => {
     const sub = patternCompleted.filter((g) => g.s === s);
     const w = sub.filter((g) => getGameStatus(g) === "WIN").length;
@@ -2327,8 +2358,8 @@ export default function NbaDashboardTab({
     engineMode === "manual" || engineMode === "twins"
       ? TWIN_PATTERN_DEFS.find((d) => d.key === twinPattern) ?? TWIN_PATTERN_DEFS[0]
       : engineMode === "fusion"
-        ? FUSION_PATTERN_DEFS.find((d) => d.key === fusionPattern) ?? FUSION_PATTERN_DEFS[0]
-        : SINGLE_PATTERN_DEFS.find((d) => d.key === singlePattern) ?? SINGLE_PATTERN_DEFS[0];
+        ? FUSION_PATTERN_DEFS.find((d: any) => d.key === fusionPattern) ?? FUSION_PATTERN_DEFS[0]
+        : SINGLE_PATTERN_DEFS.find((d: any) => d.key === singlePattern) ?? SINGLE_PATTERN_DEFS[0];
 
   return (
     <Card className="border-sky-200 bg-sky-50/40 shadow-sm mb-6" data-testid="card-nba-new-system">
@@ -2745,7 +2776,9 @@ export default function NbaDashboardTab({
                 const modeTitleMap: Record<FusionModeKey, string> = {
                   tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + Σ3 + ضدحذف)",
                   anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
-                  total_elem_12: "حالت ۱۴ (قطبیت کامل المنت کل ۱۲ بازیکن + تیم)",
+                  total_elem_12: "حالت ۱۴ (قطبیت کامل المنت کل بازیکن + تورنمنت)",
+                  fusion4_elem: "حالت ۱۵ (تلفیق ۴ پترن باکس ۲ + المنت غالب)",
+                  referee6_ranked: "حالت ۱۶ (داور رتبه‌بندی و امتیازدهی وزنی ۶ باکس)",
                   tri_gf_routed: "حالت ۱۱ (موتور مستقل ۳ عددی + Σ3 + ضدحذف)",
                   gf_fin_pure: "حالت ۱۰ (موتور خالص GF-FIN)",
                   pos_inv_lock: "حالت ۹ (قفل جامع v5 + داور GF-FIN)",
@@ -4802,7 +4835,9 @@ export default function NbaDashboardTab({
                       const presetShortMap: Record<FusionModeKey, string> = {
                         tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + ضدحذف)",
                         anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
-                        total_elem_12: "حالت ۱۴ (قطبیت المنت کل ۱۲ بازیکن + تیم)",
+                        total_elem_12: "حالت ۱۴ (قطبیت المنت کل بازیکن + تورنمنت)",
+                        fusion4_elem: "حالت ۱۵ (تلفیق ۴ پترن المنت)",
+                        referee6_ranked: "حالت ۱۶ (داور وزنی ۶ باکس)",
                         tri_gf_routed: "حالت ۱۱ (۳ عددی مستقل + ضدحذف)",
                         gf_fin_pure: "حالت ۱۰ (موتور خالص GF-FIN)",
                         pos_inv_lock: "حالت ۹ (قفل جامع v5)",
@@ -7787,7 +7822,7 @@ export default function NbaDashboardTab({
                                           {
                                             code: g.hc,
                                             lbl: `${g.h} (${g.hc} • HOME • ${t12.h_cnt12}P + 1 Team)`,
-                                            rows: t12.h_p12 ?? [],
+                                            rows: t12.h_p12 ?? (g.h_players ?? []).map((p: any) => ({ ...p, gff: p.gff ?? p.gf_fin })),
                                             tmEnt: t12.h_tm_ent,
                                             outs: g.h_out ?? [],
                                             cnt1: t12HCnt1,
@@ -7803,7 +7838,7 @@ export default function NbaDashboardTab({
                                           {
                                             code: g.ac,
                                             lbl: `${g.a} (${g.ac} • AWAY • ${t12.a_cnt12}P + 1 Team)`,
-                                            rows: t12.a_p12 ?? [],
+                                            rows: t12.a_p12 ?? (g.a_players ?? []).map((p: any) => ({ ...p, gff: p.gff ?? p.gf_fin })),
                                             tmEnt: t12.a_tm_ent,
                                             outs: g.a_out ?? [],
                                             cnt1: t12ACnt1,
@@ -8423,7 +8458,7 @@ export default function NbaDashboardTab({
           </div>
         ) : engineMode === "fusion" ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
-            {FUSION_PATTERN_DEFS.map((p) => {
+            {FUSION_PATTERN_DEFS.map((p: any) => {
               const sub = games.filter((g) => matchFusion(g, p.key) && Boolean(g.done));
               const w = sub.filter((g) => (((g.f30 ?? 0) >= 0 ? g.h : g.a) === g.aw)).length;
               const pct = sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "0.00";
@@ -8461,7 +8496,7 @@ export default function NbaDashboardTab({
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-            {SINGLE_PATTERN_DEFS.map((p) => {
+            {SINGLE_PATTERN_DEFS.map((p: any) => {
               const sub = games.filter((g) => matchSingle(g, p.key) && Boolean(g.done));
               const w = sub.filter((g) => (p.key === "s1_guard" ? g.a === g.aw : p.key === "all" ? g.st === "WIN" : g.h === g.aw)).length;
               const pct = sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "0.00";
@@ -8685,9 +8720,9 @@ export default function NbaDashboardTab({
                 className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-mono"
               >
                 <option value="ALL">All Seasons (همه فصل‌ها)</option>
-                <option value="2024-25">2024-25 (Oct 2024–Jun 2025)</option>
-                <option value="2025-26">2025-26 (Oct 2025–Jun 2026)</option>
-                <option value="2026-27">2026-27 (Sep 2026–Apr 2027)</option>
+                <option value="2024">فصل ۲۰۲۴ (ATP / WTA 2024)</option>
+                <option value="2025">فصل ۲۰۲۵ (ATP / WTA 2025)</option>
+                <option value="2026">فصل ۲۰۲۶ (ATP / WTA 2026)</option>
               </select>
             </div>
 
