@@ -870,6 +870,7 @@ function buildKalshiNbaTicker(
 }
 
 export type FusionModeKey =
+  | "mode17"
   | "tri_gf_ultralock"
   | "anti_nobet_smart"
   | "total_elem_12"
@@ -1700,8 +1701,182 @@ function evalSmartAntiNoBet(g: NbaGamePred) {
   };
 }
 
+export type Mode17Tier = "black_diamond" | "pure_astro" | "daily_gold" | "standard" | "none";
+export type Mode17FilterKey = "all17" | "gold_plus" | "sniper_top" | "all_slate";
+
+export function evalMode17Gold(g: NbaGamePred) {
+  const fm = g.fusion_meta;
+  const inOverlap = fm?.in_auth_overlap !== false;
+  const wtp: any = g.wtp ?? {};
+  const g1 = fm?.geo1xxx;
+
+  const rawM13 = fm?.modes?.anti_nobet_smart;
+  const rawM15 = fm?.modes?.fusion4_elem;
+  const fallbackAnb = rawM13 ? null : evalSmartAntiNoBet(g);
+  const fallbackSm14 = rawM15 ? null : evalSmartMode14(g);
+
+  const m13Sig = Boolean((rawM13 ? rawM13.sig : fallbackAnb?.sig) && inOverlap);
+  const m13Pick = (rawM13 ? rawM13.pick : fallbackAnb?.pick) || "";
+  const m13Vip = Boolean(
+    rawM13
+      ? rawM13.vip
+      : fallbackAnb?.kind === "M12_CORE"
+        ? Boolean(fm?.modes?.diamond?.sig || (m13Pick === g.h ? Number(wtp.l5h ?? 50) : 100 - Number(wtp.l5h ?? 50)) >= 75.0)
+        : fallbackAnb?.vip
+  );
+
+  const m15Sig = Boolean((rawM15 ? rawM15.sig : fallbackSm14?.fusion4.active) && inOverlap);
+  const m15Pick = (rawM15 ? rawM15.pick : fallbackSm14?.fusion4.pick) || "";
+
+  const agreed = Boolean(m13Sig && m15Sig && m13Pick && m13Pick === m15Pick);
+  const pick = agreed
+    ? m13Pick
+    : (m13Sig && m13Pick) || (m15Sig && m15Pick) || g.sys_win || g.h;
+  const isHomePick = pick === g.h;
+
+  // CRITICAL: Strictly use Direct Surface Elo % (wtp.hpct / wtp.apct), NOT stretched Log5!
+  const rawDirectElo = Number(isHomePick ? (wtp.hpct ?? 50) : (wtp.apct ?? 50));
+  const directElo = Math.round(rawDirectElo * 10) / 10;
+  const pickElem = String(isHomePick ? (wtp.hel ?? "AIR") : (wtp.ael ?? "AIR"));
+  const oppElem = String(isHomePick ? (wtp.ael ?? "AIR") : (wtp.hel ?? "AIR"));
+  const pick0011 = Math.round(Number(isHomePick ? (g1?.h_0011 ?? 0) : (g1?.a_0011 ?? 0)) * 10) / 10;
+  const pick1xxx = Math.round(Number(isHomePick ? (g1?.h_sum ?? 0) : (g1?.a_sum ?? 0)) * 10) / 10;
+  const fmtVal = (v: number) => (v > 0 ? `+${v.toFixed(1)}` : v === 0 ? "0.0" : v.toFixed(1));
+
+  let tier: Mode17Tier = "none";
+  let tierRank = 0;
+  let badgeFa = "⛔ NO-BET (مهار قفل عدم توافق ۱۳ و ۱۵)";
+  let lockTitleFa = "NO-BET (مهار قفل عدم توافق ۱۳ و ۱۵)";
+  let reasonFa = "";
+  let calWinPct = 50.0;
+  let maxBuyCents = 0;
+
+  if (!agreed) {
+    if (m13Sig && m15Sig && m13Pick !== m15Pick) {
+      reasonFa = `تضاد جهت دو موتور: حالت ۱۳ روی ${getTeam3Code(m13Pick)} و حالت ۱۵ روی ${getTeam3Code(m15Pick)} حکم داده است (ورود ممنوع)`;
+    } else if (m13Sig && !m15Sig) {
+      reasonFa = `حالت ۱۳ (${getTeam3Code(m13Pick)}) فعال است اما حالت ۱۵ (تلفیق ۴ پترن المنت) سیگنال تایید نداده است`;
+    } else if (!m13Sig && m15Sig) {
+      reasonFa = `حالت ۱۵ (${getTeam3Code(m15Pick)}) فعال است اما حالت ۱۳ (ضد NO-BET هوشمند) سیگنال تایید نداده است`;
+    } else {
+      reasonFa = "هر دو موتور حالت ۱۳ و حالت ۱۵ در این مسابقه خارج از سیگنال هستند";
+    }
+  } else if (directElo >= 75.0 && pick0011 < 0 && m13Vip) {
+    tier = "black_diamond";
+    tierRank = 4;
+    badgeFa = "🖤 الماس سیاه • ۸۶٫۲٪";
+    lockTitleFa = "سطح ۱ سوپر-الماس (الماس سیاه • ۸۶٫۲٪): توافق ۱۳∩۱۵ + DirectElo≥75% + کد 0011<0 + M13 VIP";
+    reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} • تایید مستقیم M13 VIP`;
+    calWinPct = 86.2;
+    maxBuyCents = 82;
+  } else if (
+    (pick0011 <= -8.0 && pick1xxx < 0 && m13Vip) ||
+    (directElo >= 58.0 && pick0011 <= -8.0 && m13Vip)
+  ) {
+    tier = "pure_astro";
+    tierRank = 3;
+    badgeFa = "⚡ نجومی خالص • ۸۱٫۴٪";
+    if (pick1xxx < 0 && directElo < 58.0) {
+      lockTitleFa = "سطح ۲ تک‌تیرانداز (نجومی خالص • ۸۱٫۴٪): توافق ۱۳∩۱۵ + کد سرد 0011≤-8 + Σ(1xxx)<0 + M13 VIP";
+    } else if (pick1xxx < 0) {
+      lockTitleFa = "سطح ۲ تک‌تیرانداز (نجومی خالص + شکارچی • ۸۱٫۴٪–۸۴٫۸٪): 0011≤-8 + Σ(1xxx)<0 + DirectElo≥58% + M13 VIP";
+    } else {
+      lockTitleFa = "سطح ۲ تک‌تیرانداز (شکارچی ضریب نجومی • ۸۴٫۸٪): توافق ۱۳∩۱۵ + DirectElo≥58% + کد سرد 0011≤-8 + M13 VIP";
+    }
+    reasonFa = `کد سرد قوی 0011=${fmtVal(pick0011)} • قطب گرم Σ(1xxx)=${fmtVal(pick1xxx)} • DirectElo=${directElo.toFixed(1)}% • M13 VIP`;
+    calWinPct = directElo >= 58.0 ? 84.8 : 81.4;
+    maxBuyCents = 79;
+  } else if (
+    (directElo >= 75.0 && oppElem === "EARTH") ||
+    (directElo >= 60.0 && pick0011 < 0)
+  ) {
+    tier = "daily_gold";
+    tierRank = 2;
+    badgeFa = "🥇 طلایی روزانه • ۸۰٪–۸۳٪";
+    if (directElo >= 75.0 && oppElem === "EARTH") {
+      lockTitleFa = "سطح ۳ طلایی روزانه (۸۳٫۰٪): توافق ۱۳∩۱۵ + DirectElo≥75% + حریف در تله عنصر EARTH";
+      reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% (≥75%) • عنصر حریف=${oppElem} (تله خاک)${pick0011 < 0 ? ` • 0011=${fmtVal(pick0011)}` : ""}`;
+      calWinPct = 83.0;
+    } else {
+      lockTitleFa = "سطح ۳ طلایی روزانه (۷۹٫۴٪): توافق ۱۳∩۱۵ + DirectElo≥60% + تک‌کد سرد فعال 0011<0";
+      reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% (≥60%) • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} (<0)`;
+      calWinPct = 79.4;
+    }
+    maxBuyCents = 76;
+  } else {
+    tier = "standard";
+    tierRank = 1;
+    badgeFa = "✅ استاندارد طلایی • ۷۱٫۱٪";
+    lockTitleFa = "سطح ۴ استاندارد طلایی (۷۱٫۱٪): توافق هم‌جهت حالت ۱۳ (ضد NO-BET) ∩ حالت ۱۵ (تلفیق ۴ پترن)";
+    reasonFa = `هم‌جهتی کامل Pick_13 === Pick_15 روی ${getTeam3Code(pick)} • Direct Surface Elo=${directElo.toFixed(1)}%`;
+    calWinPct = 71.1;
+    maxBuyCents = 68;
+  }
+
+  const vip = tier === "black_diamond" || tier === "pure_astro" || tier === "daily_gold";
+
+  return {
+    sig: agreed,
+    vip,
+    pick,
+    tier,
+    tierRank,
+    badgeFa,
+    lockTitleFa,
+    reasonFa,
+    calWinPct,
+    maxBuyCents,
+    directElo,
+    pick0011,
+    pick1xxx,
+    pickElem,
+    oppElem,
+    m13Vip,
+    m13Sig,
+    m13Pick,
+    m15Sig,
+    m15Pick,
+  };
+}
+
+export type ModeBenchSummary = {
+  modeNum: number;
+  title: string;
+  "2024": { w: number; n: number; pct: number; rec: string };
+  "2025": { w: number; n: number; pct: number; rec: string };
+  "2026": { w: number; n: number; pct: number; rec: string };
+  total: { w: number; n: number; pct: number; rec: string };
+  last50: { w: number; n: number; pct: number; rec: string };
+};
+
+export function computeMode17BenchStats(gamesList: NbaGamePred[]): ModeBenchSummary {
+  const sorted = [...gamesList].sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n));
+  const activeDone: { s: string; won: boolean }[] = [];
+  for (const g of sorted) {
+    if (!g.done || !g.aw || g.aw === "PENDING") continue;
+    const r = evalMode17Gold(g);
+    if (!r.sig) continue;
+    activeDone.push({ s: String(g.s || g.d?.slice(0, 4) || ""), won: r.pick === g.aw });
+  }
+  const fmtStat = (arr: { won: boolean }[]) => {
+    const n = arr.length;
+    const w = arr.filter((x) => x.won).length;
+    const pct = n > 0 ? Math.round((10000 * w) / n) / 100 : 0;
+    return { w, n, pct, rec: `${w}/${n}` };
+  };
+  return {
+    modeNum: 17,
+    title: "Mode 17: Golden Intersection (Mode 13 ∩ Mode 15)",
+    "2024": fmtStat(activeDone.filter((x) => x.s === "2024")),
+    "2025": fmtStat(activeDone.filter((x) => x.s === "2025")),
+    "2026": fmtStat(activeDone.filter((x) => x.s === "2026")),
+    total: fmtStat(activeDone),
+    last50: fmtStat(activeDone.slice(-50)),
+  };
+}
+
 export default function NbaDashboardTab({
-  fusionMode = "tri_gf_ultralock",
+  fusionMode = "mode17",
   twinDbKind = "team",
   tour = "ATP",
   deg3Opt = "opt3",
@@ -1712,19 +1887,25 @@ export default function NbaDashboardTab({
   deg3Opt?: "opt1" | "opt2" | "opt3";
 }) {
   const [rawGames, setRawGames] = useState<NbaGamePred[]>([]);
+  const [mode17TierFilter, setMode17TierFilter] = useState<Mode17FilterKey>("all17");
   type CardBoxKey = "referee6" | "sixboxes" | "box1" | "smart" | "box2" | "dom" | "elem" | "fusion4" | "lineup";
-  const [defaultCardBoxes, setDefaultCardBoxes] = useState<Record<CardBoxKey, boolean>>({
+  const [defaultCardBoxes, setDefaultCardBoxes] = useState<Record<CardBoxKey, boolean>>(() => ({
     referee6: false,
     sixboxes: false,
-    box1: false,
+    box1: fusionMode === "mode17",
     smart: false,
     box2: true,
     dom: false,
     elem: false,
     fusion4: false,
     lineup: false,
-  });
+  }));
   const [cardBoxOverrides, setCardBoxOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (fusionMode === "mode17") {
+      setDefaultCardBoxes((prev) => ({ ...prev, box1: true, box2: true }));
+    }
+  }, [fusionMode]);
   const isCardBoxOpen = (gameNo: number, key: CardBoxKey) => {
     const k = `${gameNo}:${key}`;
     return k in cardBoxOverrides ? cardBoxOverrides[k] : defaultCardBoxes[key];
@@ -1777,15 +1958,17 @@ export default function NbaDashboardTab({
   const games = useMemo(() => {
     return rawGames.map((g) => {
       const m =
-        fusionMode === "anti_nobet_smart"
-          ? evalSmartAntiNoBet(g)
-          : fusionMode === "total_elem_12"
-            ? evalSmartMode14(g)
-            : fusionMode === "fusion4_elem"
-              ? g.fusion_meta?.modes?.fusion4_elem
-              : fusionMode === "referee6_ranked"
-                ? g.fusion_meta?.modes?.referee6_ranked
-                : g.fusion_meta?.modes?.[fusionMode];
+        fusionMode === "mode17"
+          ? evalMode17Gold(g)
+          : fusionMode === "anti_nobet_smart"
+            ? evalSmartAntiNoBet(g)
+            : fusionMode === "total_elem_12"
+              ? evalSmartMode14(g)
+              : fusionMode === "fusion4_elem"
+                ? g.fusion_meta?.modes?.fusion4_elem
+                : fusionMode === "referee6_ranked"
+                  ? g.fusion_meta?.modes?.referee6_ranked
+                  : g.fusion_meta?.modes?.[fusionMode];
       if (!m) return g;
       const inOverlap = g.fusion_meta?.in_auth_overlap !== false;
       const pick = m.pick || g.sys_win || g.h;
@@ -1796,6 +1979,7 @@ export default function NbaDashboardTab({
       const hit: "WIN" | "LOSS" = pick === g.aw ? "WIN" : "LOSS";
       const allowMode1VetoHint = isPure2EngineMode && Boolean(g.fusion_meta?.vetoed);
       const bypassDailyEarth =
+        fusionMode === "mode17" ||
         fusionMode === "pos_inv_lock" ||
         fusionMode === "gf_fin_pure" ||
         fusionMode === "tri_gf_routed" ||
@@ -1952,7 +2136,14 @@ export default function NbaDashboardTab({
           setRawGames(merged);
           if (merged.length > 0 && !didAutoPickDateRef.current) {
             didAutoPickDateRef.current = true;
-            setDailyCardDate(merged[merged.length - 1].d);
+            let bestDate = merged[merged.length - 1].d;
+            for (let idx = merged.length - 1; idx >= 0; idx--) {
+              if (evalMode17Gold(merged[idx]).sig) {
+                bestDate = merged[idx].d;
+                break;
+              }
+            }
+            setDailyCardDate(bestDate);
           }
         }
       })
@@ -2220,15 +2411,35 @@ export default function NbaDashboardTab({
     }
   };
 
-  const patternGames = games.filter((g) =>
-    engineMode === "manual"
-      ? (manualDayFilter === "ALL" || g.day === manualDayFilter) && matchTwin(g, twinPattern)
-      : engineMode === "twins"
-        ? matchTwin(g, twinPattern)
-        : engineMode === "fusion"
-          ? matchFusion(g, fusionPattern)
-          : matchSingle(g, singlePattern)
-  );
+  const matchesMode17Filter = useCallback((g: NbaGamePred, f: Mode17FilterKey) => {
+    if (f === "all_slate") return true;
+    const r = evalMode17Gold(g);
+    if (!r.sig) return false;
+    if (f === "sniper_top") return r.tier === "black_diamond" || r.tier === "pure_astro";
+    if (f === "gold_plus") return r.tier === "black_diamond" || r.tier === "pure_astro" || r.tier === "daily_gold";
+    return true;
+  }, []);
+
+  const patternGames = games.filter((g) => {
+    const baseMatch =
+      engineMode === "manual"
+        ? (manualDayFilter === "ALL" || g.day === manualDayFilter) && matchTwin(g, twinPattern)
+        : engineMode === "twins"
+          ? matchTwin(g, twinPattern)
+          : engineMode === "fusion"
+            ? matchFusion(g, fusionPattern)
+            : matchSingle(g, singlePattern);
+    if (!baseMatch) return false;
+    if (
+      fusionMode === "mode17" &&
+      (engineMode === "manual" || engineMode === "twins") &&
+      twinPattern === "twF1Wtp" &&
+      (mode17TierFilter === "gold_plus" || mode17TierFilter === "sniper_top")
+    ) {
+      return matchesMode17Filter(g, mode17TierFilter);
+    }
+    return true;
+  });
   const patternCompleted = patternGames.filter((g) => {
     const st = getGameStatus(g);
     return st === "WIN" || st === "LOSS";
@@ -2276,14 +2487,108 @@ export default function NbaDashboardTab({
   const allGameDates = Array.from(new Set(games.map((g) => g.d))).sort();
   const activeDailyDate = allGameDates.includes(dailyCardDate)
     ? dailyCardDate
-    : allGameDates.includes("2026-11-14")
-      ? "2026-11-14"
+    : allGameDates.includes("2026-11-21")
+      ? "2026-11-21"
       : allGameDates[allGameDates.length - 1] ?? "2026-11-14";
   const dailyDateIdx = allGameDates.indexOf(activeDailyDate);
   const gamesOnDailyDateRaw = games.filter((g) => g.d === activeDailyDate);
   const gamesOnDailyDate = [...gamesOnDailyDateRaw].sort(
     (a, b) => Math.abs(b.f30 ?? 0) - Math.abs(a.f30 ?? 0)
   );
+
+  const mode17ScopeStats = useMemo(() => {
+    const calcBucket = (arr: { won: boolean | null }[]) => {
+      const doneArr = arr.filter((x) => x.won !== null);
+      const w = doneArr.filter((x) => x.won === true).length;
+      const n = doneArr.length;
+      const pct = n > 0 ? Math.round((10000 * w) / n) / 100 : 0;
+      return { total: arr.length, w, n, pct };
+    };
+    const q = teamQuery.trim().toLowerCase();
+    const scoped = games.filter((g) => {
+      if (manualDayFilter !== "ALL" && g.day !== manualDayFilter) return false;
+      if (seasonFilter !== "ALL" && g.s !== seasonFilter) return false;
+      if (monthFilter !== "ALL" && g.ym !== monthFilter) return false;
+      if (q) {
+        const hay = [g.h, g.a, g.hc, g.ac, g.city, g.tourney, g.venue, g.surface, g.h_ioc, g.a_ioc]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const evals = scoped.map((g) => {
+      const r = evalMode17Gold(g);
+      const isDone = Boolean(g.done && g.aw && g.aw !== "PENDING");
+      const won = isDone ? r.pick === g.aw : null;
+      return { g, r, won };
+    });
+    const all17 = evals.filter((e) => e.r.sig);
+    const t1 = all17.filter((e) => e.r.tier === "black_diamond");
+    const t2 = all17.filter((e) => e.r.tier === "pure_astro");
+    const t3 = all17.filter((e) => e.r.tier === "daily_gold");
+    const t4 = all17.filter((e) => e.r.tier === "standard");
+    const sniper = all17.filter((e) => e.r.tier === "black_diamond" || e.r.tier === "pure_astro");
+    const goldPlus = all17.filter(
+      (e) => e.r.tier === "black_diamond" || e.r.tier === "pure_astro" || e.r.tier === "daily_gold"
+    );
+    const atp17 = all17.filter((e) => (e.g.tour ?? "").toUpperCase() === "ATP");
+    const wta17 = all17.filter((e) => (e.g.tour ?? "").toUpperCase() === "WTA");
+    const l50 = all17.filter((e) => e.won !== null).slice(-50);
+    return {
+      all17: calcBucket(all17),
+      goldPlus: calcBucket(goldPlus),
+      sniper: calcBucket(sniper),
+      t1: calcBucket(t1),
+      t2: calcBucket(t2),
+      t3: calcBucket(t3),
+      t4: calcBucket(t4),
+      atp17: calcBucket(atp17),
+      wta17: calcBucket(wta17),
+      l50: calcBucket(l50),
+      lastDateAll17: all17.length > 0 ? all17[all17.length - 1].g.d : "",
+      lastDateGold: goldPlus.length > 0 ? goldPlus[goldPlus.length - 1].g.d : "",
+      lastDateSniper: sniper.length > 0 ? sniper[sniper.length - 1].g.d : "",
+    };
+  }, [games, manualDayFilter, seasonFilter, monthFilter, teamQuery]);
+
+  const mode17DayCounts = useMemo(() => {
+    let all17 = 0;
+    let goldPlus = 0;
+    let sniper = 0;
+    for (const g of gamesOnDailyDate) {
+      const r = evalMode17Gold(g);
+      if (!r.sig) continue;
+      all17++;
+      if (r.tier === "black_diamond" || r.tier === "pure_astro") {
+        sniper++;
+        goldPlus++;
+      } else if (r.tier === "daily_gold") {
+        goldPlus++;
+      }
+    }
+    return { all17, goldPlus, sniper, slate: gamesOnDailyDate.length };
+  }, [gamesOnDailyDate]);
+
+  const switchMode17TierChip = (nextKey: Mode17FilterKey) => {
+    setMode17TierFilter(nextKey);
+    setDailyCardFilter("all");
+    if (nextKey !== "all_slate") {
+      const dayHas = gamesOnDailyDate.some((x) => matchesMode17Filter(x, nextKey));
+      if (!dayHas) {
+        const targetDate =
+          nextKey === "sniper_top"
+            ? mode17ScopeStats.lastDateSniper
+            : nextKey === "gold_plus"
+              ? mode17ScopeStats.lastDateGold
+              : mode17ScopeStats.lastDateAll17;
+        if (targetDate) {
+          setDailyCardDate(targetDate);
+        }
+      }
+    }
+  };
 
   const histByDay = useMemo(() => {
     const map: Record<string, HistGameRow[]> = {};
@@ -2760,6 +3065,7 @@ export default function NbaDashboardTab({
               {/* Live Daily Win/Loss Scoreboard Driven by Active Fusion Engine */}
               {(() => {
                 const modeTitleMap: Record<FusionModeKey, string> = {
+                  mode17: "حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ۷۱٫۱٪)",
                   tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + Σ3 + ضدحذف)",
                   anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
                   total_elem_12: "حالت ۱۴ (قطبیت کامل المنت کل بازیکن + تورنمنت)",
@@ -3178,11 +3484,13 @@ export default function NbaDashboardTab({
                     const m7 = fm?.modes?.earth_neg_lock;
                     const m8 = fm?.modes?.safe_dl_core;
                     const mCur =
-                      fusionMode === "anti_nobet_smart"
-                        ? evalSmartAntiNoBet(g)
-                        : fusionMode === "total_elem_12"
-                          ? evalSmartMode14(g)
-                          : fm?.modes?.[fusionMode];
+                      fusionMode === "mode17"
+                        ? evalMode17Gold(g)
+                        : fusionMode === "anti_nobet_smart"
+                          ? evalSmartAntiNoBet(g)
+                          : fusionMode === "total_elem_12"
+                            ? evalSmartMode14(g)
+                            : fm?.modes?.[fusionMode];
                     const m12Sig = Boolean(m12?.sig);
                     const m11Sig = Boolean(m11?.sig);
                     const m9Sig = Boolean(m9?.sig);
@@ -3197,7 +3505,7 @@ export default function NbaDashboardTab({
                     const isEarthBlocked = Boolean(gd && !gd.earth_ok);
                     const usePosInvInCombo = fusionMode !== "earth_neg_lock";
                     const preferredFusionPick =
-                      fusionMode === "total_elem_12"
+                      fusionMode === "mode17" || fusionMode === "total_elem_12"
                         ? (curModeSig && mCur?.pick) || mCur?.pick || g.sys_win || ""
                         : (curModeSig && mCur?.pick) ||
                           (usePosInvInCombo && m12Sig && m12?.pick) ||
@@ -3253,6 +3561,7 @@ export default function NbaDashboardTab({
                     const pickPosInvOk = Boolean(
                       usePosInvInCombo && !manualOverridden && !cardFlipDir[g.n] && posInvWin && posInvWin === winnerTeam
                     );
+                    const pickM17Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "mode17" && curModeSig && mCur?.pick === winnerTeam);
                     const pickM12Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "tri_gf_ultralock" && m12Sig && m12?.pick === winnerTeam);
                     const pickM14Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "total_elem_12" && curModeSig && mCur?.pick === winnerTeam);
                     const pickAnbOk = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "anti_nobet_smart" && curModeSig && mCur?.pick === winnerTeam);
@@ -3265,6 +3574,7 @@ export default function NbaDashboardTab({
                         : safeDlWin === winnerTeam && !pickEarthBlocked && !pickPosInvTrap
                     );
                     const isUltraOrAnbMode =
+                      fusionMode === "mode17" ||
                       fusionMode === "tri_gf_ultralock" ||
                       fusionMode === "anti_nobet_smart" ||
                       fusionMode === "total_elem_12";
@@ -3283,31 +3593,41 @@ export default function NbaDashboardTab({
                         g1?.m12_route?.code === "ULTRA_3OF3_CLASH_HOLD"
                     );
                     const comboTier: 0 | 1 | 2 | 3 =
-                      fusionMode === "total_elem_12"
-                        ? pickDualEarthHold
-                          ? 0
-                          : pickM14Ok && Boolean(mCur?.vip)
-                            ? 3
-                            : pickM14Ok
-                              ? 2
-                              : 0
-                        : pickDualEarthHold || pick3of3ClashHold
-                          ? 0
-                          : pickM12Ok || (pickAnbOk && Boolean(mCur?.vip)) || pickM7Ok || pickPosInvOk || (pickM11Ok && Boolean(m11?.vip))
-                            ? 3
-                            : pickAnbOk || pickM8Ok || pickM11Ok
-                              ? 2
-                              : pickSafeOk
-                                ? 1
-                                : 0;
-                    const lockStatusLabel =
-                      pickDualEarthHold
-                        ? "⛔ رد تقابل دو EARTH"
+                      fusionMode === "mode17"
+                        ? pickM17Ok && Boolean(mCur?.vip)
+                          ? 3
+                          : pickM17Ok
+                            ? 2
+                            : 0
                         : fusionMode === "total_elem_12"
-                          ? pickM14Ok
-                            ? `🧬 حالت ۱۴: ${g.fusion_meta?.total_elem_12?.flipped ? "معکوس ضد EARTH" : "قفل قطبیت المنت کل"}`
-                            : "— خارج از سیگنال موتور ۱۴"
-                          : pick3of3ClashHold
+                          ? pickDualEarthHold
+                            ? 0
+                            : pickM14Ok && Boolean(mCur?.vip)
+                              ? 3
+                              : pickM14Ok
+                                ? 2
+                                : 0
+                          : pickDualEarthHold || pick3of3ClashHold
+                            ? 0
+                            : pickM12Ok || (pickAnbOk && Boolean(mCur?.vip)) || pickM7Ok || pickPosInvOk || (pickM11Ok && Boolean(m11?.vip))
+                              ? 3
+                              : pickAnbOk || pickM8Ok || pickM11Ok
+                                ? 2
+                                : pickSafeOk
+                                  ? 1
+                                  : 0;
+                    const lockStatusLabel =
+                      fusionMode === "mode17"
+                        ? pickM17Ok
+                          ? (mCur as ReturnType<typeof evalMode17Gold>).badgeFa
+                          : "⛔ NO-BET (عدم توافق ۱۳ و ۱۵)"
+                        : pickDualEarthHold
+                          ? "⛔ رد تقابل دو EARTH"
+                          : fusionMode === "total_elem_12"
+                            ? pickM14Ok
+                              ? `🧬 حالت ۱۴: ${g.fusion_meta?.total_elem_12?.flipped ? "معکوس ضد EARTH" : "قفل قطبیت المنت کل"}`
+                              : "— خارج از سیگنال موتور ۱۴"
+                            : pick3of3ClashHold
                             ? "⛔ مهار همزاد برابر ۳/۳"
                             : pickAnbOk
                               ? "🛡️ ضد NO-BET هوشمند"
@@ -4036,7 +4356,7 @@ export default function NbaDashboardTab({
                         <div className="p-3 space-y-2.5 bg-indigo-50/30 border-t border-indigo-200/80">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 border border-emerald-400 text-[11px] font-extrabold">
-                              استراتزی کمبو: {fusionMode === "tri_gf_ultralock" ? "حالت ۱۲ (ابرقفل ۳ عددی)" : fusionMode === "anti_nobet_smart" ? "حالت ۱۳ (ضد NO-BET هوشمند)" : fusionMode === "total_elem_12" ? "حالت ۱۴ (المنت کل بازیکن+کورت)" : fusionMode === "tri_gf_routed" ? "حالت ۱۱ (۳ عددی مستقل)" : fusionMode === "earth_neg_lock" ? "حالت ۷ (خالص منفی)" : "حالت ۹ (قفل ایمن)"} • کل قفل ایمن: {safePoolOrders.length} مسابقه
+                              استراتزی کمبو: {fusionMode === "mode17" ? "حالت ۱۷ (تقاطع طلایی ۱۳ ∩ ۱۵)" : fusionMode === "tri_gf_ultralock" ? "حالت ۱۲ (ابرقفل ۳ عددی)" : fusionMode === "anti_nobet_smart" ? "حالت ۱۳ (ضد NO-BET هوشمند)" : fusionMode === "total_elem_12" ? "حالت ۱۴ (المنت کل بازیکن+کورت)" : fusionMode === "tri_gf_routed" ? "حالت ۱۱ (۳ عددی مستقل)" : fusionMode === "earth_neg_lock" ? "حالت ۷ (خالص منفی)" : "حالت ۹ (قفل ایمن)"} • کل قفل ایمن: {safePoolOrders.length} مسابقه
                             </span>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <button
@@ -4386,10 +4706,177 @@ export default function NbaDashboardTab({
                 );
               })()}
 
+              {/* Quick Tier Filter Chips Bar for Mode 17 (Golden Intersection 13 ∩ 15) */}
+              {fusionMode === "mode17" && (
+                <div
+                  data-testid="bar-mode17-tier-chips"
+                  dir="rtl"
+                  className="rounded-xl border-2 border-amber-400/90 bg-gradient-to-l from-amber-50/95 via-white to-emerald-50/90 p-2.5 shadow-xs space-y-2"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-1 rounded-md bg-slate-900 text-amber-300 text-[11px] font-extrabold shrink-0">
+                        فیلتر سریع سطوح حالت ۱۷:
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="chip-mode17-all"
+                        onClick={() => switchMode17TierChip("all17")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border transition-all inline-flex items-center gap-1.5 ${
+                          mode17TierFilter === "all17"
+                            ? "bg-emerald-700 text-white border-emerald-900 shadow-xs ring-1 ring-emerald-400"
+                            : "bg-white text-slate-900 border-emerald-300 hover:bg-emerald-50"
+                        }`}
+                      >
+                        <span>همه سیگنال‌های ۱۷ (۷۱٪+)</span>
+                        <span
+                          dir="ltr"
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                            mode17TierFilter === "all17"
+                              ? "bg-emerald-900/70 text-emerald-100"
+                              : "bg-emerald-100 text-emerald-950"
+                          }`}
+                        >
+                          {mode17ScopeStats.all17.total} ({mode17ScopeStats.all17.pct}%) • امروز:{mode17DayCounts.all17}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="chip-mode17-gold"
+                        onClick={() => switchMode17TierChip("gold_plus")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border transition-all inline-flex items-center gap-1.5 ${
+                          mode17TierFilter === "gold_plus"
+                            ? "bg-amber-500 text-slate-950 border-amber-700 shadow-xs ring-1 ring-amber-400"
+                            : "bg-white text-slate-900 border-amber-300 hover:bg-amber-50"
+                        }`}
+                      >
+                        <span>🥇 فقط طلایی و الماس (۸۰٪+)</span>
+                        <span
+                          dir="ltr"
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                            mode17TierFilter === "gold_plus"
+                              ? "bg-slate-950 text-amber-300"
+                              : "bg-amber-100 text-amber-950"
+                          }`}
+                        >
+                          {mode17ScopeStats.goldPlus.total} ({mode17ScopeStats.goldPlus.pct}%) • امروز:{mode17DayCounts.goldPlus}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="chip-mode17-sniper"
+                        onClick={() => switchMode17TierChip("sniper_top")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border transition-all inline-flex items-center gap-1.5 ${
+                          mode17TierFilter === "sniper_top"
+                            ? "bg-slate-950 text-amber-300 border-amber-500 shadow-xs ring-1 ring-amber-400"
+                            : "bg-white text-slate-900 border-violet-300 hover:bg-violet-50"
+                        }`}
+                      >
+                        <span>🖤⚡ فقط الماس سیاه و نجومی خالص (۸۱٪–۸۶٪)</span>
+                        <span
+                          dir="ltr"
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                            mode17TierFilter === "sniper_top"
+                              ? "bg-amber-400 text-slate-950"
+                              : "bg-violet-100 text-violet-950"
+                          }`}
+                        >
+                          {mode17ScopeStats.sniper.total} ({mode17ScopeStats.sniper.pct}%) • امروز:{mode17DayCounts.sniper}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="chip-mode17-slate"
+                        onClick={() => switchMode17TierChip("all_slate")}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                          mode17TierFilter === "all_slate"
+                            ? "bg-sky-700 text-white border-sky-900 shadow-2xs"
+                            : "bg-white/90 text-slate-700 border-slate-300 hover:bg-slate-100"
+                        }`}
+                      >
+                        کل اسلیت روز با NO-BET ({mode17DayCounts.slate})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-1.5 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-1.5 text-[10.5px]">
+                    <div className="flex flex-wrap items-center gap-1.5 font-extrabold">
+                      <span
+                        data-testid="count-m17-black-diamond"
+                        className="px-2 py-0.5 rounded bg-slate-950 text-amber-300 border border-amber-400 font-mono"
+                      >
+                        🖤 الماس سیاه: {mode17ScopeStats.t1.total} ({mode17ScopeStats.t1.pct}%)
+                      </span>
+                      <span
+                        data-testid="count-m17-pure-astro"
+                        className="px-2 py-0.5 rounded bg-violet-700 text-white border border-violet-500 font-mono"
+                      >
+                        ⚡ نجومی خالص: {mode17ScopeStats.t2.total}
+                      </span>
+                      <span
+                        data-testid="count-m17-daily-gold"
+                        className="px-2 py-0.5 rounded bg-amber-300 text-slate-950 border border-amber-500 font-mono"
+                      >
+                        🥇 طلایی روزانه: {mode17ScopeStats.t3.total} ({mode17ScopeStats.t3.pct}%)
+                      </span>
+                      <span
+                        data-testid="count-m17-standard"
+                        className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 border border-emerald-300 font-mono"
+                      >
+                        ✅ استاندارد طلایی: {mode17ScopeStats.t4.total}
+                      </span>
+                    </div>
+                    <span dir="ltr" className="font-mono font-bold text-slate-700 bg-white/90 px-2 py-0.5 rounded border border-slate-200">
+                      {tour === "ALL"
+                        ? `ATP: ${mode17ScopeStats.atp17.pct}% (${mode17ScopeStats.atp17.w}/${mode17ScopeStats.atp17.n}) • WTA: ${mode17ScopeStats.wta17.pct}% (${mode17ScopeStats.wta17.w}/${mode17ScopeStats.wta17.n}) • Last50: ${mode17ScopeStats.l50.pct}%`
+                        : `Active Scope (${seasonFilter}): ${mode17ScopeStats.all17.pct}% (${mode17ScopeStats.all17.w}/${mode17ScopeStats.all17.n}) • Last50: ${mode17ScopeStats.l50.pct}%`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Daily Cards Grid (2 to 3 Cards per Row, Exact GOLD-FORMULA-PRIORITY Card Structure in Light Pale-Blue) */}
               {histLoading ? (
                 <div className="p-6 text-center text-xs text-sky-800 bg-white rounded-lg border border-sky-200 flex items-center justify-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" /> در حال محاسبه کارت‌های روزانه از ۲۱٬۴۹۸ بازی تاریخی...
+                </div>
+              ) : fusionMode === "mode17" &&
+                dailyCardFilter === "all" &&
+                mode17TierFilter !== "all_slate" &&
+                !gamesOnDailyDate.some((x) => matchesMode17Filter(x, mode17TierFilter)) ? (
+                <div className="p-4 rounded-xl border border-amber-300 bg-white text-center space-y-2.5" dir="rtl">
+                  <div className="text-xs font-extrabold text-slate-800">
+                    در تاریخ انتخاب‌شده ({activeDailyDate}) سیگنال فعالی در این سطح ثبت نشده است ({gamesOnDailyDate.length} مسابقه این روز در وضعیت NO-BET قرار دارد).
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {(() => {
+                      const jumpDate =
+                        mode17TierFilter === "sniper_top"
+                          ? mode17ScopeStats.lastDateSniper
+                          : mode17TierFilter === "gold_plus"
+                            ? mode17ScopeStats.lastDateGold
+                            : mode17ScopeStats.lastDateAll17;
+                      return jumpDate ? (
+                        <button
+                          type="button"
+                          onClick={() => setDailyCardDate(jumpDate)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold"
+                        >
+                          پرش به آخرین تاریخ دارای سیگنال این سطح ({jumpDate})
+                        </button>
+                      ) : null;
+                    })()}
+                    <button
+                      type="button"
+                      onClick={() => setMode17TierFilter("all_slate")}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs font-extrabold"
+                    >
+                      نمایش کارت‌های NO-BET امروز ({gamesOnDailyDate.length})
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
@@ -4575,8 +5062,12 @@ export default function NbaDashboardTab({
                         isQualified && (g.is_nat === false || g.b2b_tag === "B2B_PICK" || isIdxRescueOnly)
                       );
                       const isVipMismatchRescue = false;
-                      const calibratedWinPct =
-                        isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
+                      const m17 = fusionMode === "mode17" ? evalMode17Gold(g) : null;
+                      const calibratedWinPct = m17
+                        ? isQualified
+                          ? m17.calWinPct
+                          : 50.0
+                        : isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
                           ? 78.5
                           : isQualified && wtpObj.matchElem === "WATER"
                             ? 70.5
@@ -4585,8 +5076,11 @@ export default function NbaDashboardTab({
                               : isQualified
                                 ? 74.5
                                 : 50.0;
-                      const maxBuyCents =
-                        isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
+                      const maxBuyCents = m17
+                        ? isQualified
+                          ? m17.maxBuyCents
+                          : 0
+                        : isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
                           ? 76
                           : isQualified && wtpObj.matchElem === "WATER"
                             ? 68
@@ -4614,6 +5108,7 @@ export default function NbaDashboardTab({
 
                       return {
                         g,
+                        m17,
                         ch3,
                         cardIdx,
                         wtpObj,
@@ -4660,6 +5155,9 @@ export default function NbaDashboardTab({
                       };
                     })
                     .filter((item) => {
+                      if (fusionMode === "mode17" && dailyCardFilter === "all") {
+                        return matchesMode17Filter(item.g, mode17TierFilter);
+                      }
                       if (dailyCardFilter === "qualified") return item.isQualified;
                       if (dailyCardFilter === "anti_nobet") return fusionMode === "total_elem_12" ? evalSmartMode14(item.g).sig : evalSmartAntiNoBet(item.g).sig;
                       if (dailyCardFilter === "referee6") return fusionMode === "total_elem_12" ? evalSmartMode14(item.g).referee6.active : item.isQualified;
@@ -4672,6 +5170,10 @@ export default function NbaDashboardTab({
                       return true;
                     })
                     .sort((a, b) => {
+                      if (a.m17 && b.m17) {
+                        if (b.m17.tierRank !== a.m17.tierRank) return b.m17.tierRank - a.m17.tierRank;
+                        if (b.m17.directElo !== a.m17.directElo) return b.m17.directElo - a.m17.directElo;
+                      }
                       if (Number(b.isVip3) !== Number(a.isVip3)) return Number(b.isVip3) - Number(a.isVip3);
                       if (Number(b.isQualified) !== Number(a.isQualified)) return Number(b.isQualified) - Number(a.isQualified);
                       if (Number(b.isPosEv) !== Number(a.isPosEv)) return Number(b.isPosEv) - Number(a.isPosEv);
@@ -4687,6 +5189,7 @@ export default function NbaDashboardTab({
                     .map((item) => {
                       const {
                         g,
+                        m17,
                         ch3,
                         cardIdx,
                         wtpObj,
@@ -4807,14 +5310,16 @@ export default function NbaDashboardTab({
                         isQualified || cardEnabled || Boolean(openManualKalshiCards[g.n]);
 
                       const showLegacyChannelBoxes = manualOverridden || !isNhlSysMode;
+                      const isMode17 = fusionMode === "mode17";
                       const isPureGfFinMode = fusionMode === "gf_fin_pure";
                       const isTriRoutedMode = fusionMode === "tri_gf_routed";
                       const isTriUltraMode = fusionMode === "tri_gf_ultralock";
                       const isAntiNoBetMode = fusionMode === "anti_nobet_smart";
                       const isTotalElem12Mode = fusionMode === "total_elem_12";
-                      const isTriUltraFamily = isTriUltraMode || isAntiNoBetMode;
+                      const isTriUltraFamily = isTriUltraMode || isAntiNoBetMode || isMode17;
                       const isTriAntiDropMode = isTriRoutedMode || isTriUltraFamily || isTotalElem12Mode;
                       const presetShortMap: Record<FusionModeKey, string> = {
+                        mode17: "حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵)",
                         tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + ضدحذف)",
                         anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
                         total_elem_12: "حالت ۱۴ (قطبیت المنت کل بازیکن + تورنمنت)",
@@ -5210,12 +5715,12 @@ export default function NbaDashboardTab({
                         key: "cold0",
                         testId: `row-geocold0-${g.n}`,
                         stepTitle: "قطب سرد Σ(0xxx)",
-                        stepSub: h0011Cnt > 0 || a0011Cnt > 0 ? "همراه کد سرد 0011" : undefined,
+                        stepSub: isMode17 || h0011Cnt > 0 || a0011Cnt > 0 ? "همراه کد سرد 0011" : undefined,
                         hText: `${fmtSigned(h0Val)} (${h0Cnt})`,
-                        hSub: h0011Cnt > 0 ? `0011:${fmtSigned(h0011Val)}` : undefined,
+                        hSub: isMode17 || h0011Cnt > 0 ? `0011:${fmtSigned(h0011Val)}` : undefined,
                         hTick: cold0Win === g.h ? "pass" : "none",
                         aText: `${fmtSigned(a0Val)} (${a0Cnt})`,
-                        aSub: a0011Cnt > 0 ? `0011:${fmtSigned(a0011Val)}` : undefined,
+                        aSub: isMode17 || a0011Cnt > 0 ? `0011:${fmtSigned(a0011Val)}` : undefined,
                         aTick: cold0Win === g.a ? "pass" : "none",
                       };
 
@@ -5239,16 +5744,18 @@ export default function NbaDashboardTab({
                         aTick: twinActiveWinner === g.a ? "pass" : "none",
                       };
 
+                      const hDirectElo = Math.round(Number(wtpAct.hpct ?? wtpWk.hpct ?? 50) * 10) / 10;
+                      const aDirectElo = Math.round(Number(wtpAct.apct ?? wtpWk.apct ?? 50) * 10) / 10;
                       const rowStandings: CheckRow = {
                         key: "standings",
                         testId: `row-standings-${g.n}`,
                         stepTitle: "قدرت پایه و زمین (Surface Elo %)",
-                        stepSub: hEl === "EARTH" && aEl === "EARTH" ? "تله دو EARTH" : undefined,
+                        stepSub: hEl === "EARTH" && aEl === "EARTH" ? "تله دو EARTH" : isMode17 ? "Direct Surface Elo % واقعی" : undefined,
                         hText: hEl === "EARTH" ? "تله EARTH" : hEl,
-                        hSub: `${hL5}%`,
+                        hSub: isMode17 ? `Elo:${hDirectElo}% (L5:${hL5}%)` : `${hL5}%`,
                         hTick: hEl === "EARTH" ? "trap" : "pass",
                         aText: aEl === "EARTH" ? "تله EARTH" : aEl,
-                        aSub: `${aL5}%`,
+                        aSub: isMode17 ? `Elo:${aDirectElo}% (L5:${aL5}%)` : `${aL5}%`,
                         aTick: aEl === "EARTH" ? "trap" : "pass",
                       };
 
@@ -5815,7 +6322,8 @@ export default function NbaDashboardTab({
 
                       const isSafetyHold = Boolean(
                         !isQualified &&
-                          ((isTriUltraFamily && (hEl === "EARTH" && aEl === "EARTH")) ||
+                          (isMode17 ||
+                            (isTriUltraFamily && (hEl === "EARTH" && aEl === "EARTH")) ||
                             (isTotalElem12Mode && (sm14.kind === "M14_VETO_TRAP" || sm14.dualWaterTrap)) ||
                             (isTriUltraMode && (m12Code === "ULTRA_DUAL_EARTH_HOLD" || m12Code === "ULTRA_3OF3_CLASH_HOLD" || m12Code === "ULTRA_GF_HOLD")) ||
                             (isAntiNoBetMode && (anb.kind === "HOLD_DUAL_EARTH" || anb.kind === "HOLD_3OF3_CLASH")) ||
@@ -5824,61 +6332,86 @@ export default function NbaDashboardTab({
 
                       const lockTitleFa = manualOverridden
                         ? "فیلتر دستی کاربر (۱۲ ستون همزاد)"
-                        : isTotalElem12Mode
-                          ? sm14.kind === "M14_TRAP_FLIP"
-                            ? "قانون ۱+۲ حالت ۱۴: تشخیص تله روی سمت بازنده و چرخش برد به بازیکن مقابل"
-                            : sm14.kind === "M14_OPPOSITE_FLIP"
-                              ? "قانون ۲ حالت ۱۴: چرخش هوشمند به بازیکن مقابل"
-                              : sm14.kind === "M14_DIRECT_RELEASE"
-                                ? "قانون ۳ حالت ۱۴: آزادسازی مستقیم با Surface Elo≥75%"
-                                : sm14.kind === "M14_VETO_TRAP"
-                                  ? "قانون ۱ حالت ۱۴: مهار تله سمت بازنده (چرخش مسیر جایگزین به بازیکن مقابل • بدون بت)"
-                                  : t12TitleMap[t12Code] || "موتور المنت کل بازیکن + تورنمنت/کورت"
-                          : isAntiNoBetMode
-                            ? anbTitleMap[anb.kind]
-                            : isTriUltraMode
-                              ? m12LockTitleMap[m12Code] || "ابرقفل ۳ عددی تلفیقی حالت ۱۲"
-                              : isTriRoutedMode
-                                ? g1.m11_route?.flipped
-                                  ? `چرخش ضدحذف موتور ۳ عددی مستقل (${m11Code || "ROUTED"})`
-                                  : isQualified
-                                    ? `قفل ۳ عددی مستقل بدون همزاد (${m11Code || "M11"})`
-                                    : "مسیر پایه ۳ عددی مستقل (بدون احراز قفل)"
-                                : isPureGfFinMode
-                                  ? `موتور خالص GF-FIN (کمتر/منفی‌تر برنده • ΔGF=${gfAbsDiff})`
-                                  : fusionMode === "pos_inv_lock" && g1.pos_inv?.triggered
-                                    ? "قفل معکوس دو-مثبت (+,+) در حالت ۹"
-                                    : isGfRescued
-                                      ? `قفل داور ۲ از ۳ شاخص GF-FIN (ΔGF=${gfAbsDiff})`
-                                      : isSafeDl
-                                        ? "قفل ایمن دوگانه ۱xxx + Σ(All) + ضد EARTH + لنگر منفی"
-                                        : !pickEarthOk
-                                          ? "توقف قفل ضد EARTH"
-                                          : !pickNegOk && !isPure2EngineMode
-                                            ? "توقف قفل لنگر منفی"
-                                            : activePresetLabel;
+                        : isMode17 && m17
+                          ? m17.lockTitleFa
+                          : isTotalElem12Mode
+                            ? sm14.kind === "M14_TRAP_FLIP"
+                              ? "قانون ۱+۲ حالت ۱۴: تشخیص تله روی سمت بازنده و چرخش برد به بازیکن مقابل"
+                              : sm14.kind === "M14_OPPOSITE_FLIP"
+                                ? "قانون ۲ حالت ۱۴: چرخش هوشمند به بازیکن مقابل"
+                                : sm14.kind === "M14_DIRECT_RELEASE"
+                                  ? "قانون ۳ حالت ۱۴: آزادسازی مستقیم با Surface Elo≥75%"
+                                  : sm14.kind === "M14_VETO_TRAP"
+                                    ? "قانون ۱ حالت ۱۴: مهار تله سمت بازنده (چرخش مسیر جایگزین به بازیکن مقابل • بدون بت)"
+                                    : t12TitleMap[t12Code] || "موتور المنت کل بازیکن + تورنمنت/کورت"
+                            : isAntiNoBetMode
+                              ? anbTitleMap[anb.kind]
+                              : isTriUltraMode
+                                ? m12LockTitleMap[m12Code] || "ابرقفل ۳ عددی تلفیقی حالت ۱۲"
+                                : isTriRoutedMode
+                                  ? g1.m11_route?.flipped
+                                    ? `چرخش ضدحذف موتور ۳ عددی مستقل (${m11Code || "ROUTED"})`
+                                    : isQualified
+                                      ? `قفل ۳ عددی مستقل بدون همزاد (${m11Code || "M11"})`
+                                      : "مسیر پایه ۳ عددی مستقل (بدون احراز قفل)"
+                                  : isPureGfFinMode
+                                    ? `موتور خالص GF-FIN (کمتر/منفی‌تر برنده • ΔGF=${gfAbsDiff})`
+                                    : fusionMode === "pos_inv_lock" && g1.pos_inv?.triggered
+                                      ? "قفل معکوس دو-مثبت (+,+) در حالت ۹"
+                                      : isGfRescued
+                                        ? `قفل داور ۲ از ۳ شاخص GF-FIN (ΔGF=${gfAbsDiff})`
+                                        : isSafeDl
+                                          ? "قفل ایمن دوگانه ۱xxx + Σ(All) + ضد EARTH + لنگر منفی"
+                                          : !pickEarthOk
+                                            ? "توقف قفل ضد EARTH"
+                                            : !pickNegOk && !isPure2EngineMode
+                                              ? "توقف قفل لنگر منفی"
+                                              : activePresetLabel;
 
                       const lockReasonFa =
-                        isTotalElem12Mode
-                          ? sm14.reasonFa
-                          : isAntiNoBetMode
-                            ? anb.reasonFa
-                            : isTriUltraMode && g1.m12_route?.reason_fa
-                              ? g1.m12_route.reason_fa
-                              : isTriRoutedMode && g1.m11_route?.reason_fa
-                                ? g1.m11_route.reason_fa
-                                : fusionMode === "pos_inv_lock" && g1.pos_inv?.reason_fa
-                                  ? g1.pos_inv.reason_fa
-                                  : "";
+                        isMode17 && m17
+                          ? m17.reasonFa
+                          : isTotalElem12Mode
+                            ? sm14.reasonFa
+                            : isAntiNoBetMode
+                              ? anb.reasonFa
+                              : isTriUltraMode && g1.m12_route?.reason_fa
+                                ? g1.m12_route.reason_fa
+                                : isTriRoutedMode && g1.m11_route?.reason_fa
+                                  ? g1.m11_route.reason_fa
+                                  : fusionMode === "pos_inv_lock" && g1.pos_inv?.reason_fa
+                                    ? g1.pos_inv.reason_fa
+                                    : "";
+
+                      const m17BadgeCls =
+                        m17?.tier === "black_diamond"
+                          ? "bg-slate-950 text-amber-300 border-amber-400 shadow-2xs"
+                          : m17?.tier === "pure_astro"
+                            ? "bg-violet-700 text-white border-violet-400 shadow-2xs"
+                            : m17?.tier === "daily_gold"
+                              ? "bg-amber-400 text-slate-950 border-amber-600 shadow-2xs"
+                              : m17?.tier === "standard"
+                                ? "bg-emerald-600 text-white border-emerald-700"
+                                : "bg-rose-600 text-white border-rose-700";
 
                       const cleanBorderCls =
-                        isQualified && isVip3
-                          ? "border-2 border-amber-400 ring-2 ring-amber-200/70 bg-white shadow-sm"
-                          : isQualified
-                            ? "border-2 border-emerald-500 ring-1 ring-emerald-200/80 bg-white shadow-sm"
-                            : isSafetyHold
-                              ? "border border-amber-300 bg-white"
-                              : "border border-slate-200 bg-slate-50/90";
+                        isMode17 && m17
+                          ? m17.tier === "black_diamond"
+                            ? "border-2 border-slate-900 ring-2 ring-amber-400/90 bg-white shadow-md"
+                            : m17.tier === "pure_astro"
+                              ? "border-2 border-violet-600 ring-2 ring-violet-200 bg-white shadow-sm"
+                              : m17.tier === "daily_gold"
+                                ? "border-2 border-amber-400 ring-2 ring-amber-200/80 bg-white shadow-sm"
+                                : m17.tier === "standard"
+                                  ? "border-2 border-emerald-500 ring-1 ring-emerald-200/80 bg-white shadow-sm"
+                                  : "border border-slate-300 bg-slate-50/90"
+                          : isQualified && isVip3
+                            ? "border-2 border-amber-400 ring-2 ring-amber-200/70 bg-white shadow-sm"
+                            : isQualified
+                              ? "border-2 border-emerald-500 ring-1 ring-emerald-200/80 bg-white shadow-sm"
+                              : isSafetyHold
+                                ? "border border-amber-300 bg-white"
+                                : "border border-slate-200 bg-slate-50/90";
 
                       return (
                         <div
@@ -5889,11 +6422,21 @@ export default function NbaDashboardTab({
                           {/* Clean 1v1 Singles Tennis Matchup Header (P1 vs P2 + Tournament + City + Surface + Round) */}
                           <div
                             className={`px-3 py-2 border-b flex items-start justify-between gap-2 ${
-                              isQualified && isVip3
-                                ? "bg-amber-50/90 border-amber-300"
-                                : isQualified
-                                  ? "bg-emerald-50/90 border-emerald-300"
-                                  : "bg-sky-100/60 border-sky-200"
+                              isMode17 && m17
+                                ? m17.tier === "black_diamond"
+                                  ? "bg-gradient-to-l from-amber-100/95 via-amber-50/85 to-slate-100 border-amber-400"
+                                  : m17.tier === "pure_astro"
+                                    ? "bg-violet-50/90 border-violet-300"
+                                    : m17.tier === "daily_gold"
+                                      ? "bg-amber-50/90 border-amber-300"
+                                      : m17.tier === "standard"
+                                        ? "bg-emerald-50/90 border-emerald-300"
+                                        : "bg-slate-100/80 border-slate-200"
+                                : isQualified && isVip3
+                                  ? "bg-amber-50/90 border-amber-300"
+                                  : isQualified
+                                    ? "bg-emerald-50/90 border-emerald-300"
+                                    : "bg-sky-100/60 border-sky-200"
                             }`}
                             dir="rtl"
                           >
@@ -5908,6 +6451,15 @@ export default function NbaDashboardTab({
                                 <span className="text-[10px] text-slate-500 font-mono">({g.a_ioc || g.ac})</span>
                               </div>
                               <div className="text-[10px] text-slate-700 font-semibold flex flex-wrap items-center gap-1.5">
+                                {isMode17 && m17 && (
+                                  <span
+                                    data-testid={`badge-m17-tier-${g.n}`}
+                                    data-tier={m17.tier}
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${m17BadgeCls}`}
+                                  >
+                                    {m17.badgeFa}
+                                  </span>
+                                )}
                                 <span>
                                   بازیکن ۱ (P1): <b dir="ltr">{getPlayerLastName(g.h)} ({g.hc})</b> • بازیکن ۲ (P2): <b dir="ltr">{getPlayerLastName(g.a)} ({g.ac})</b>
                                 </span>
@@ -6932,13 +7484,23 @@ export default function NbaDashboardTab({
                             <div
                               data-testid={`box2-verdict-${g.n}`}
                               className={`rounded-lg border overflow-hidden shadow-2xs ${
-                                isQualified && isVip3
-                                  ? "border-amber-400 bg-amber-50/40"
-                                  : isQualified
-                                    ? "border-emerald-400 bg-emerald-50/40"
-                                    : isSafetyHold
-                                      ? "border-amber-300 bg-amber-50/30"
-                                      : "border-slate-300 bg-white"
+                                isMode17 && m17
+                                  ? m17.tier === "black_diamond"
+                                    ? "border-amber-500 bg-amber-50/45"
+                                    : m17.tier === "pure_astro"
+                                      ? "border-violet-400 bg-violet-50/40"
+                                      : m17.tier === "daily_gold"
+                                        ? "border-amber-400 bg-amber-50/40"
+                                        : m17.tier === "standard"
+                                          ? "border-emerald-400 bg-emerald-50/40"
+                                          : "border-slate-300 bg-slate-50/50"
+                                  : isQualified && isVip3
+                                    ? "border-amber-400 bg-amber-50/40"
+                                    : isQualified
+                                      ? "border-emerald-400 bg-emerald-50/40"
+                                      : isSafetyHold
+                                        ? "border-amber-300 bg-amber-50/30"
+                                        : "border-slate-300 bg-white"
                               }`}
                             >
                               <button
@@ -6960,22 +7522,26 @@ export default function NbaDashboardTab({
                                   <span
                                     data-testid={`badge-preset-status-${g.n}`}
                                     className={`px-2 py-0.5 rounded text-[9.5px] font-extrabold border ${
-                                      isQualified && isVip3
-                                        ? "bg-amber-400 text-slate-950 border-amber-500"
-                                        : isQualified
-                                          ? "bg-emerald-600 text-white border-emerald-700"
-                                          : isSafetyHold
-                                            ? "bg-rose-600 text-white border-rose-700"
-                                            : "bg-slate-200 text-slate-700 border-slate-300"
+                                      isMode17 && m17
+                                        ? m17BadgeCls
+                                        : isQualified && isVip3
+                                          ? "bg-amber-400 text-slate-950 border-amber-500"
+                                          : isQualified
+                                            ? "bg-emerald-600 text-white border-emerald-700"
+                                            : isSafetyHold
+                                              ? "bg-rose-600 text-white border-rose-700"
+                                              : "bg-slate-200 text-slate-700 border-slate-300"
                                     }`}
                                   >
-                                    {isQualified && isVip3
-                                      ? "★ سیگنال ویژه VIP"
-                                      : isQualified
-                                        ? "✓ سیگنال فعال"
-                                        : isSafetyHold
-                                          ? "⛔ مهار قفل ایمنی"
-                                          : "خارج از سیگنال"}
+                                    {isMode17 && m17
+                                      ? m17.badgeFa
+                                      : isQualified && isVip3
+                                        ? "★ سیگنال ویژه VIP"
+                                        : isQualified
+                                          ? "✓ سیگنال فعال"
+                                          : isSafetyHold
+                                            ? "⛔ مهار قفل ایمنی"
+                                            : "خارج از سیگنال"}
                                   </span>
                                   <span className="px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-800 font-extrabold text-[9px]">
                                     {isBox2Open ? "بستن ▲" : "باز کردن ▼"}
