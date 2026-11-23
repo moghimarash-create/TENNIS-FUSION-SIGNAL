@@ -5099,12 +5099,66 @@ export default function NbaDashboardTab({
 
                       const hasFinalScore = Boolean(g.done && g.st !== "PENDING" && g.aw);
                       const cardWon = !hasFinalScore ? null : predTeam === g.aw;
-                      const scoreDisplay =
-                        g.sc && g.sc !== "PENDING" && g.sc !== "UPCOMING"
-                          ? `${g.hc} ${g.sc} ${g.ac}`
-                          : g.hp !== undefined && g.ap !== undefined
-                            ? `${g.hc} ${g.hp}-${g.ap} ${g.ac}`
-                            : "";
+                      const normalizedSc = (() => {
+                        const rawSc = String(g.sc ?? "").trim();
+                        if (!rawSc || rawSc === "PENDING" || rawSc === "UPCOMING") return "";
+                        const p1Won = g.aw ? g.aw === g.h : Boolean(g.hw);
+                        if (p1Won) return rawSc;
+                        const parMatch = rawSc.match(/\s*\((\d+)-(\d+)\)\s*$/);
+                        const core = parMatch ? rawSc.slice(0, parMatch.index).trim() : rawSc;
+                        const toks = core.split(/\s+/).filter(Boolean);
+                        let sumX = 0;
+                        let sumY = 0;
+                        let setsX = 0;
+                        let setsY = 0;
+                        let parsedSets = 0;
+                        const hasRet = /\b(RET|DEF|ABD|W\/O)\b/i.test(core);
+                        for (const t of toks) {
+                          const mb = t.match(/^\[(\d+)-(\d+)\]$/);
+                          if (mb) {
+                            const x = Number(mb[1]);
+                            const y = Number(mb[2]);
+                            if (x > y) setsX++;
+                            else if (y > x) setsY++;
+                            parsedSets++;
+                            continue;
+                          }
+                          const ms = t.match(/^(\d+)-(\d+)(?:\(\d+\))?$/);
+                          if (ms) {
+                            const x = Number(ms[1]);
+                            const y = Number(ms[2]);
+                            sumX += x;
+                            sumY += y;
+                            if (x > y) setsX++;
+                            else if (y > x) setsY++;
+                            parsedSets++;
+                          }
+                        }
+                        const hpNum = Number(g.hp ?? NaN);
+                        const apNum = Number(g.ap ?? NaN);
+                        const isInverted =
+                          parsedSets > 0 &&
+                          ((Number.isFinite(hpNum) &&
+                            Number.isFinite(apNum) &&
+                            hpNum !== apNum &&
+                            sumX === apNum &&
+                            sumY === hpNum) ||
+                            (hpNum === apNum && !hasRet && setsX > setsY));
+                        if (!isInverted) return rawSc;
+                        const flipped = toks.map((t) => {
+                          const mb = t.match(/^\[(\d+)-(\d+)\]$/);
+                          if (mb) return `[${mb[2]}-${mb[1]}]`;
+                          const ms = t.match(/^(\d+)-(\d+)(\(\d+\))?$/);
+                          if (ms) return `${ms[2]}-${ms[1]}${ms[3] ?? ""}`;
+                          return t;
+                        });
+                        return `${flipped.join(" ")}${parMatch ? ` (${parMatch[1]}-${parMatch[2]})` : ""}`;
+                      })();
+                      const scoreDisplay = normalizedSc
+                        ? `${g.hc} ${normalizedSc} ${g.ac}`
+                        : g.hp !== undefined && g.ap !== undefined
+                          ? `${g.hc} ${g.hp}-${g.ap} ${g.ac}`
+                          : "";
 
                       return {
                         g,

@@ -125,7 +125,7 @@ def dec_label(deg: int) -> str:
     return f"{SIGNS_SHORT[d // 30]} D{(d % 30) // 10 + 1}"
 
 
-def parse_sackmann_score(score_str: str) -> tuple[int, int] | None:
+def parse_sackmann_score(score_str: str, is_next_gen: bool = False) -> tuple[int, int, str] | None:
     s = str(score_str or "").strip()
     if not s:
         return None
@@ -133,16 +133,61 @@ def parse_sackmann_score(score_str: str) -> tuple[int, int] | None:
     if any(tok in up for tok in ("W/O", "DEF", "WALKOVER", "WEA", "UNP", "ABN")):
         return None
     w_g, l_g = 0, 0
-    sets_parsed = 0
+    sets_list: list[tuple[int, int]] = []
+    has_ret = "RET" in up
+    has_super_tb = False
+    clean_toks: list[str] = []
     for tok in s.split():
-        m = re.match(r"^(\d+)-(\d+)", tok)
+        if tok.upper() in ("RET", "ABD"):
+            has_ret = True
+            continue
+        m_br = re.match(r"^\[(\d+)-(\d+)\]$", tok)
+        if m_br:
+            has_super_tb = True
+            clean_toks.append(tok)
+            continue
+        m = re.match(r"^(\d+)-(\d+)(?:\(\d+\))?$", tok)
         if m:
-            w_g += int(m.group(1))
-            l_g += int(m.group(2))
-            sets_parsed += 1
-    if sets_parsed == 0:
+            wg, lg = int(m.group(1)), int(m.group(2))
+            w_g += wg
+            l_g += lg
+            sets_list.append((wg, lg))
+            clean_toks.append(tok)
+    if not sets_list:
         return None
-    return w_g, l_g
+    if not has_ret and not has_super_tb and not is_next_gen:
+        sw = sum(1 for x, y in sets_list if x > y)
+        sl = sum(1 for x, y in sets_list if y > x)
+        lx, ly = sets_list[-1]
+        valid_last = lx >= 6 and (lx - ly >= 2 or (lx == 7 and ly in (5, 6)) or lx >= 10)
+        if sw <= sl or sw < 2 or not valid_last:
+            has_ret = True
+    if has_ret:
+        clean_toks.append("RET")
+    return w_g, l_g, " ".join(clean_toks)
+
+
+def format_score_p1_p2(score_wl: str, p1_won: bool) -> str:
+    tokens = [t for t in str(score_wl or "").strip().split() if t]
+    if p1_won:
+        return " ".join(tokens)
+    flipped: list[str] = []
+    for tok in tokens:
+        m_br = re.match(r"^\[(\d+)-(\d+)\]$", tok)
+        if m_br:
+            flipped.append(f"[{m_br.group(2)}-{m_br.group(1)}]")
+            continue
+        m_set = re.match(r"^(\d+)-(\d+)(\(\d+\))?$", tok)
+        if m_set:
+            tb = m_set.group(3) or ""
+            flipped.append(f"{m_set.group(2)}-{m_set.group(1)}{tb}")
+            continue
+        flipped.append(tok)
+    return " ".join(flipped)
+
+
+def canon_name_tokens(name: str) -> tuple[str, ...]:
+    return tuple(sorted(norm_player_name(name).lower().replace("-", " ").split()))
 
 
 def round_day_offset(draw_size: int, rnd: str, match_num: int) -> int:
@@ -189,24 +234,25 @@ def round_sort_order(rnd: str) -> int:
     return mp.get(r, 3)
 
 
-def normalize_espn_round(rnd_name: str) -> str:
+def normalize_espn_round(rnd_name: str, n_comps: int = 32, ename: str = "") -> str:
     r = str(rnd_name or "").strip().upper()
+    eu = str(ename or "").upper()
+    if "ROBIN" in r or "GROUP" in r or ("FINALS" in eu and "SEMI" not in r and "FINAL" not in r):
+        return "RR"
     if "FINAL" in r and "SEMI" not in r and "QUARTER" not in r:
         return "F"
     if "SEMI" in r:
         return "SF"
     if "QUARTER" in r:
         return "QF"
-    if "16" in r or "4TH" in r or "FOURTH" in r:
+    if "ROUND OF 16" in r or "4TH" in r or "FOURTH" in r or r == "ROUND 4":
         return "R16"
-    if "32" in r or "3RD" in r or "THIRD" in r:
-        return "R32"
-    if "64" in r or "2ND" in r or "SECOND" in r:
-        return "R64"
-    if "128" in r or "1ST" in r or "FIRST" in r:
-        return "R128"
-    if "ROBIN" in r:
-        return "RR"
+    if "ROUND OF 32" in r or "3RD" in r or "THIRD" in r or r == "ROUND 3":
+        return "R32" if n_comps >= 56 else "R16"
+    if "ROUND OF 64" in r or "2ND" in r or "SECOND" in r or r == "ROUND 2":
+        return "R64" if n_comps >= 80 else ("R32" if n_comps >= 40 else "R16")
+    if "ROUND OF 128" in r or "1ST" in r or "FIRST" in r or r == "ROUND 1":
+        return "R128" if n_comps >= 80 else ("R64" if n_comps >= 40 else "R32")
     return "R32"
 
 
@@ -227,7 +273,9 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
 
     for tour_lc in ("atp", "wta"):
         tour = tour_lc.upper()
-        seen_keys: set[tuple[str, str, frozenset[str]]] = set()
+        seen_keys: set[tuple[str, str, frozenset[tuple[str, ...]]]] = set()
+        canon_name_map: dict[tuple[str, ...], str] = {}
+        csv_city_matches: dict[tuple[str, frozenset[tuple[str, ...]]], list[tuple[datetime.date, str, int, int, tuple[str, ...]]]] = defaultdict(list)
 
         for csv_path in sorted(glob.glob(f"{raw_dir}/{tour_lc}/{tour_lc}_*.csv")):
             with open(csv_path, encoding="utf-8", errors="replace") as f:
@@ -241,13 +289,19 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                     tdate = str(row.get("tourney_date") or "").strip()
                     if len(tdate) != 8 or not tdate.isdigit():
                         continue
-                    parsed_sc = parse_sackmann_score(row.get("score", ""))
+                    is_ng = "NEXT GEN" in tname_raw.upper()
+                    parsed_sc = parse_sackmann_score(row.get("score", ""), is_next_gen=is_ng)
                     if parsed_sc is None:
                         continue
                     w_name = norm_player_name(row.get("winner_name", ""))
                     l_name = norm_player_name(row.get("loser_name", ""))
                     if not w_name or not l_name or w_name == l_name:
                         continue
+
+                    w_tok = canon_name_tokens(w_name)
+                    l_tok = canon_name_tokens(l_name)
+                    canon_name_map[w_tok] = w_name
+                    canon_name_map[l_tok] = l_name
 
                     w_ioc = (row.get("winner_ioc") or "UNK").strip().upper() or "UNK"
                     l_ioc = (row.get("loser_ioc") or "UNK").strip().upper() or "UNK"
@@ -282,11 +336,13 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                     d_iso = m_dt.isoformat()
 
                     geo = resolve_tournament_geo(tour, season_yr, tname_raw, row.get("surface", ""), "")
+                    pair_toks = frozenset((w_tok, l_tok))
                     dedup_week = f"{season_yr}-{m_dt.isocalendar()[1]:02d}-{rnd}"
-                    pair_key = (tour, dedup_week, frozenset((w_name.lower(), l_name.lower())))
+                    pair_key = (tour, dedup_week, pair_toks)
                     if pair_key in seen_keys:
                         continue
                     seen_keys.add(pair_key)
+                    csv_city_matches[(geo["city"], pair_toks)].append((m_dt, rnd, parsed_sc[0], parsed_sc[1], w_tok))
 
                     out[tour].append({
                         "tour": tour,
@@ -309,14 +365,15 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                         "l_rk": l_rk,
                         "w_g": parsed_sc[0],
                         "l_g": parsed_sc[1],
-                        "score_raw": str(row.get("score") or "").strip(),
+                        "score_raw": parsed_sc[2],
                     })
 
-        # Supplement late-2025 & May-Nov 2026 from ESPN Main-Tour scoreboard JSON
+        # Supplement late-2025 & 2026 from ESPN Main-Tour scoreboard JSON (100% deduplicated against CSV & canonicalized)
         espn_file = f"{raw_dir}/espn_{tour_lc}_25_26.json"
         if os.path.exists(espn_file):
             want_slug = "mens-singles" if tour == "ATP" else "womens-singles"
             evs = json.load(open(espn_file, encoding="utf-8"))
+            espn_seen_comp_ids: set[str] = set()
             for ev in evs:
                 eid_str = str(ev.get("id") or "")
                 num_id = int(eid_str.split("-")[0]) if eid_str.split("-")[0].isdigit() else 9999
@@ -326,19 +383,27 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                 if tour == "WTA" and num_id not in WTA_MAIN_TOUR_ESPN_IDS:
                     continue
                 v_disp = ((ev.get("venue") or {}).get("displayName") or (ev.get("venue") or {}).get("fullName") or "").strip()
+                is_ng_ev = "NEXT GEN" in ename.upper()
                 for grp in ev.get("groupings", []):
                     if ((grp.get("grouping") or {}).get("slug") or "") != want_slug:
                         continue
-                    for idx_c, comp in enumerate(grp.get("competitions", [])):
+                    comps_list = grp.get("competitions") or []
+                    n_main_comps = sum(1 for c0 in comps_list if "qualif" not in str(((c0.get("round") or {}).get("displayName")) or "").lower())
+                    for idx_c, comp in enumerate(comps_list):
+                        cid_str = str(comp.get("id") or "")
+                        if cid_str and cid_str in espn_seen_comp_ids:
+                            continue
                         r_disp = ((comp.get("round") or {}).get("displayName") or "").strip()
                         if "qualif" in r_disp.lower():
                             continue
                         st_type = ((comp.get("status") or {}).get("type") or {})
                         if not st_type.get("completed"):
                             continue
+                        st_name = str(st_type.get("name") or "").upper()
                         st_desc = str(st_type.get("description") or "").upper()
-                        if "WALKOVER" in st_desc:
+                        if any(x in st_desc or x in st_name for x in ("WALKOVER", "W/O", "CANCELED", "CANCELLED", "ABANDONED", "POSTPONED")):
                             continue
+                        is_ret = any(x in st_desc or x in st_name for x in ("RETIRED", "RET", "DEFAULT", "DEF"))
                         comps_arr = comp.get("competitors") or []
                         if len(comps_arr) != 2:
                             continue
@@ -346,31 +411,90 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                         l_c = next((x for x in comps_arr if x is not w_c), None)
                         if not w_c or not l_c:
                             continue
-                        w_name = norm_player_name(((w_c.get("athlete") or {}).get("displayName")) or "")
-                        l_name = norm_player_name(((l_c.get("athlete") or {}).get("displayName")) or "")
-                        if not w_name or not l_name or w_name == l_name or "TBD" in (w_name, l_name):
+                        raw_w_name = norm_player_name(((w_c.get("athlete") or {}).get("displayName")) or "")
+                        raw_l_name = norm_player_name(((l_c.get("athlete") or {}).get("displayName")) or "")
+                        if not raw_w_name or not raw_l_name or raw_w_name == raw_l_name or "TBD" in (raw_w_name, raw_l_name):
                             continue
 
-                        w_ls = [int(round(float(s.get("value", 0)))) for s in (w_c.get("linescores") or []) if s.get("value") is not None]
-                        l_ls = [int(round(float(s.get("value", 0)))) for s in (l_c.get("linescores") or []) if s.get("value") is not None]
-                        if not w_ls or not l_ls or sum(w_ls) + sum(l_ls) == 0:
+                        w_tok = canon_name_tokens(raw_w_name)
+                        l_tok = canon_name_tokens(raw_l_name)
+                        if w_tok == l_tok:
                             continue
-                        sc_str = " ".join(f"{wg}-{lg}" for wg, lg in zip(w_ls, l_ls))
+                        w_name = canon_name_map.get(w_tok, raw_w_name)
+                        l_name = canon_name_map.get(l_tok, raw_l_name)
+
+                        w_raw = [s for s in (w_c.get("linescores") or []) if s.get("value") is not None]
+                        l_raw = [s for s in (l_c.get("linescores") or []) if s.get("value") is not None]
+                        if not w_raw or not l_raw or len(w_raw) != len(l_raw):
+                            continue
+                        w_ls = [int(round(float(s.get("value", 0)))) for s in w_raw]
+                        l_ls = [int(round(float(s.get("value", 0)))) for s in l_raw]
+                        if sum(w_ls) + sum(l_ls) == 0:
+                            continue
+
+                        sw = sum(1 for wg, lg in zip(w_ls, l_ls) if wg > lg)
+                        sl = sum(1 for wg, lg in zip(w_ls, l_ls) if lg > wg)
+                        lx, ly = w_ls[-1], l_ls[-1]
+                        min_set_win = 4 if is_ng_ev else 6
+                        valid_last = lx >= min_set_win and (
+                            (is_ng_ev and (lx - ly >= 2 or (lx == 4 and ly == 3)))
+                            or (not is_ng_ev and (lx - ly >= 2 or (lx == 7 and ly in (5, 6)) or lx >= 10))
+                        )
+                        if not is_ret:
+                            if sw <= sl:
+                                if max(lx, ly) < min_set_win or not valid_last:
+                                    is_ret = True
+                                else:
+                                    continue
+                            elif sw < 2 or not valid_last:
+                                is_ret = True
+
+                        set_toks: list[str] = []
+                        for ws_obj, ls_obj, wg, lg in zip(w_raw, l_raw, w_ls, l_ls):
+                            wtb = ws_obj.get("tiebreak")
+                            ltb = ls_obj.get("tiebreak")
+                            if wg > lg and ltb is not None:
+                                set_toks.append(f"{wg}-{lg}({int(round(float(ltb)))})")
+                            elif lg > wg and wtb is not None:
+                                set_toks.append(f"{wg}-{lg}({int(round(float(wtb)))})")
+                            else:
+                                set_toks.append(f"{wg}-{lg}")
+                        if is_ret:
+                            set_toks.append("RET")
+                        sc_str = " ".join(set_toks)
 
                         d_iso = str(comp.get("date") or ev.get("date") or "")[:10]
                         if len(d_iso) != 10 or d_iso < "2025-10-25":
                             continue
                         m_dt = datetime.date.fromisoformat(d_iso)
                         season_yr = m_dt.year
-                        rnd = normalize_espn_round(r_disp)
-                        # Check nearby weeks too so Sackmann Monday-offset vs ESPN exact date never duplicates!
-                        iso_wk = m_dt.isocalendar()[1]
-                        pair_set = frozenset((w_name.lower(), l_name.lower()))
-                        if any((tour, f"{season_yr}-{wk:02d}-{rnd}", pair_set) in seen_keys for wk in (iso_wk - 1, iso_wk, iso_wk + 1)):
-                            continue
-                        seen_keys.add((tour, f"{season_yr}-{iso_wk:02d}-{rnd}", pair_set))
-
+                        rnd = normalize_espn_round(r_disp, n_main_comps, ename)
                         geo = resolve_tournament_geo(tour, season_yr, ename, "", v_disp)
+
+                        pair_toks = frozenset((w_tok, l_tok))
+                        w_g_sum, l_g_sum = sum(w_ls), sum(l_ls)
+
+                        # Deduplicate against Sackmann CSV in same tournament city within +-12 days
+                        # (only allow genuine RR -> SF/F rematches at Finals/United Cup/Laver Cup when score or winner differs!)
+                        is_csv_dup = False
+                        is_rr_event = any(k in geo["tourney"].upper() for k in ("FINALS", "UNITED CUP", "LAVER"))
+                        for prev_dt, prev_rnd, prev_wg, prev_lg, prev_wtok in csv_city_matches.get((geo["city"], pair_toks), ()):
+                            if abs((m_dt - prev_dt).days) <= 12:
+                                same_result = (prev_wtok == w_tok and prev_wg == w_g_sum and prev_lg == l_g_sum)
+                                diff_stage = ({prev_rnd, rnd} <= {"RR", "SF", "F"}) and (prev_rnd != rnd)
+                                if same_result or not (is_rr_event and diff_stage):
+                                    is_csv_dup = True
+                                    break
+                        if is_csv_dup:
+                            continue
+
+                        iso_wk = m_dt.isocalendar()[1]
+                        if (tour, f"{season_yr}-{iso_wk:02d}-{rnd}-{d_iso}", pair_toks) in seen_keys:
+                            continue
+                        seen_keys.add((tour, f"{season_yr}-{iso_wk:02d}-{rnd}-{d_iso}", pair_toks))
+                        if cid_str:
+                            espn_seen_comp_ids.add(cid_str)
+
                         w_ioc = extract_flag_ioc(w_c, ioc_lookup, w_name)
                         l_ioc = extract_flag_ioc(l_c, ioc_lookup, l_name)
                         ioc_lookup[w_name] = w_ioc
@@ -397,8 +521,8 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                             "l_ioc": l_ioc,
                             "w_rk": w_rk if w_rk > 0 else 999,
                             "l_rk": l_rk if l_rk > 0 else 999,
-                            "w_g": sum(w_ls),
-                            "l_g": sum(l_ls),
+                            "w_g": w_g_sum,
+                            "l_g": l_g_sum,
                             "score_raw": sc_str,
                         })
 
@@ -1307,8 +1431,8 @@ def run_pipeline() -> None:
     all_by_tour = load_all_matches("/tmp/tennis_raw")
     print(f"[1/4] Loaded raw main-tour matches in {time.time()-t0:.1f}s -> ATP={len(all_by_tour['ATP'])}, WTA={len(all_by_tour['WTA'])}")
 
-    dash_base = "/home/antigravity/moghimarash-create/TENNIS-SIGNAL-DASHBORD/artifacts/calc-dashboard/public"
-    fus_base = "/home/antigravity/moghimarash-create/TENNIS-FUSION-SIGNAL/artifacts/calc-dashboard/public"
+    fus_base = os.path.abspath(os.path.join(HERE, "..", "..", "calc-dashboard", "public"))
+    dash_base = os.environ.get("TENNIS_DASH_PUBLIC", "/tmp/tennis_dash_scratch")
     os.makedirs(dash_base, exist_ok=True)
     os.makedirs(fus_base, exist_ok=True)
 
@@ -1401,7 +1525,7 @@ def run_pipeline() -> None:
                     hp, ap = m["w_g"], m["l_g"]
                     mg = max(1, hp - ap)
                     aw = h
-                    sc_disp = m["score_raw"]
+                    sc_disp = format_score_p1_p2(m["score_raw"], True)
                 else:
                     h, a = l_nm, w_nm
                     h_ioc, a_ioc = m["l_ioc"], m["w_ioc"]
@@ -1409,7 +1533,7 @@ def run_pipeline() -> None:
                     hp, ap = m["l_g"], m["w_g"]
                     mg = min(-1, hp - ap)
                     aw = a
-                    sc_disp = m["score_raw"]
+                    sc_disp = format_score_p1_p2(m["score_raw"], False)
 
                 # Pre-match probabilities & WTP object
                 p_win_h = 1.0 / (1.0 + (10.0 ** (-(eb_h - eb_a) / 400.0)))

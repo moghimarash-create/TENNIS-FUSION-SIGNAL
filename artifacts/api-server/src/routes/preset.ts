@@ -1108,7 +1108,7 @@ let nbaSyncing = false;
 
 router.post("/nba/sync", async (req, res): Promise<void> => {
   if (nbaSyncing) {
-    res.status(409).json({ ok: false, error: "بروزرسانی نتایج واقعی NBA در حال انجام است." });
+    res.status(409).json({ ok: false, error: "بروزرسانی زنده نتایج واقعی تنیس در حال انجام است." });
     return;
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
