@@ -1,0 +1,10407 @@
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Loader2, RefreshCw } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// NHL 2010-2027 ELEMENTAL TWINS (DEG1 = 88 FIXED), DUAL-GEO + DECAN & KALSHI
+// Exact 1-to-1 Visual & Interactive Layout Match of NbaWinnerPredictorPanel
+// ---------------------------------------------------------------------------
+
+const NBA_TEAM_KALSHI_MAP: Record<string, string> = {
+  "atlanta hawks": "ATL",
+  "boston celtics": "BOS",
+  "brooklyn nets": "BKN",
+  "charlotte hornets": "CHA",
+  "chicago bulls": "CHI",
+  "cleveland cavaliers": "CLE",
+  "dallas mavericks": "DAL",
+  "denver nuggets": "DEN",
+  "detroit pistons": "DET",
+  "golden state warriors": "GSW",
+  "houston rockets": "HOU",
+  "indiana pacers": "IND",
+  "los angeles clippers": "LAC",
+  "la clippers": "LAC",
+  "los angeles lakers": "LAL",
+  "memphis grizzlies": "MEM",
+  "miami heat": "MIA",
+  "milwaukee bucks": "MIL",
+  "minnesota timberwolves": "MIN",
+  "new orleans pelicans": "NOP",
+  "new york knicks": "NYK",
+  "oklahoma city thunder": "OKC",
+  "orlando magic": "ORL",
+  "philadelphia 76ers": "PHI",
+  "phoenix suns": "PHX",
+  "portland trail blazers": "POR",
+  "sacramento kings": "SAC",
+  "san antonio spurs": "SAS",
+  "toronto raptors": "TOR",
+  "utah jazz": "UTA",
+  "washington wizards": "WAS",
+};
+
+function elemCodeFromFinal4(el12: string[]): string {
+  if (!el12 || el12.length < 8) return "";
+  return el12
+    .slice(4, 8)
+    .map((s) => {
+      const n = parseInt(String(s ?? "").trim().split(/\s+/)[0] ?? "0", 10);
+      return Number.isFinite(n) && Math.abs(n) % 2 === 1 ? "1" : "0";
+    })
+    .join("");
+}
+
+async function apiRpcFetch(apiPath: string, init?: RequestInit): Promise<Response> {
+  const rpcPath = apiPath.startsWith("/api/")
+    ? "/fusion-rpc/" + apiPath.slice(5)
+    : apiPath;
+  const r = await fetch(rpcPath, init);
+  const ct = r.headers.get("content-type") ?? "";
+  if (r.status === 404 && !ct.includes("application/json") && rpcPath !== apiPath) {
+    return fetch(apiPath, init);
+  }
+  return r;
+}
+
+async function apiRpcJson(apiPath: string, init?: RequestInit): Promise<any> {
+  try {
+    const r = await apiRpcFetch(apiPath, init);
+    const txt = await r.text();
+    try {
+      const parsed = JSON.parse(txt);
+      if (!r.ok && parsed && typeof parsed === "object" && parsed.ok === undefined) {
+        return { ok: false, error: parsed.error ?? parsed.message ?? `HTTP ${r.status}`, ...parsed };
+      }
+      return parsed;
+    } catch {
+      return {
+        ok: false,
+        error: `خطای ارتباط با سرور Kalshi (HTTP ${r.status}): پاسخ معتبر JSON دریافت نشد.`,
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: `خطای شبکه در ارتباط با سرور Kalshi: ${(err as Error)?.message ?? String(err)}`,
+    };
+  }
+}
+
+type NbaGamePred = {
+  n: number;
+  day: string;
+  d: string;
+  ym: string;
+  s: string;
+  h: string;
+  a: string;
+  sc: string;
+  pw: string;
+  aw: string;
+  st: "WIN" | "LOSS" | "PENDING";
+  ph: boolean;
+  vm6: number;
+  v: number[];
+  nd: number;
+  b137: boolean;
+  n80: boolean;
+  e80: boolean;
+  q80: boolean;
+  g83: boolean;
+  tier: string;
+  qdeg: [string, string];
+  qfin: [string, string];
+  qdec: [string, string];
+  qdecf: [string, string];
+  qtot: [string, string];
+  qp2: [string, string];
+  gd: [string, string];
+  rul: [string, string];
+  qnam: [string, string];
+  cf: number[];
+  // 5-Method Fusion fields:
+  mv?: [number, number, number, number, number];
+  f30?: number;
+  a25?: number;
+  ag5?: number;
+  fpw?: string;
+  fst?: "WIN" | "LOSS" | "PENDING";
+  ftier?: string;
+  f16?: boolean;
+  f14?: boolean;
+  f12?: boolean;
+  fa14?: boolean;
+  astro9?: boolean;
+  fa8?: boolean;
+  // 2010-2026 Elemental Twins fields (GOLD-FORMULA-PRIORITY engine):
+  twMode?: string;
+  twVotes?: string;
+  twPct?: string;
+  twWin?: string;
+  f5Full?: string;
+  f5Loo?: string;
+  tp?: [number, number, number];
+  twAgree?: boolean;
+  twPath?: string;
+  twPeers?: string[];
+  twDiamond?: boolean;
+  twGolden?: boolean;
+  twVip?: boolean;
+  twActive?: boolean;
+  twF5_5?: boolean;
+  twF5_4?: boolean;
+  h_12?: string[];
+  h_geo?: string;
+  h_geo_dyn?: string;
+  h_geo_tab?: string;
+  a_12?: string[];
+  a_geo?: string;
+  a_geo_dyn?: string;
+  a_geo_tab?: string;
+  hc?: string;
+  ac?: string;
+  hp?: number;
+  ap?: number;
+  done?: boolean;
+  hw?: boolean | null;
+  venue?: string;
+  sh_d?: string;
+  sh_m?: string;
+  deg?: number[];
+  f1?: boolean;
+  s_new?: boolean;
+  vip?: boolean;
+  s_a1?: boolean;
+  a1_veto?: boolean;
+  new_veto?: boolean;
+  chan?: string;
+  twins?: [string, string, string, number, number, number][];
+  idx3?: {
+    st: number[];
+    gf: number[];
+    gd: number[];
+    gt?: number[];
+    tw: number[];
+    vh: number;
+    va: number;
+    nat: number;
+    minD: number;
+  };
+  f1_idx?: boolean;
+  f1_guard?: boolean;
+  f1_wtp?: boolean;
+  vip_idx3?: boolean;
+  idx_rescue?: boolean;
+  f1_union?: boolean;
+  f1_wtp_day?: boolean;
+  vip_idx3_day?: boolean;
+  f1_union_day?: boolean;
+  sys_win?: string;
+  b2b_tag?: string;
+  is_nat?: boolean;
+  trap_tag?: string;
+  tier_pct?: number;
+  max_buy_c?: number;
+  h_players?: {
+    pid: string;
+    fn: string;
+    jn: string;
+    no: string;
+    pos: string;
+    st: boolean;
+    mpg: number;
+    d2: number;
+    d3: number;
+    ep: string;
+    ef: string;
+    gf?: string;
+    gf_fin?: number;
+    qf: string;
+    dec: string;
+    pwr: number;
+  }[];
+  a_players?: {
+    pid: string;
+    fn: string;
+    jn: string;
+    no: string;
+    pos: string;
+    st: boolean;
+    mpg: number;
+    d2: number;
+    d3: number;
+    ep: string;
+    ef: string;
+    gf?: string;
+    gf_fin?: number;
+    qf: string;
+    dec: string;
+    pwr: number;
+  }[];
+  h_out?: string[];
+  a_out?: string[];
+  fusion_meta?: {
+    mode: string;
+    tier: "DIAMOND" | "GOLD_VIP" | "SILVER_CORE" | "VETOED" | "NONE";
+    tier_fa: string;
+    driver: "BOTH" | "TEAM" | "PLAYER";
+    in_auth_overlap: boolean;
+    vetoed: boolean;
+    modes: Record<string, { sig: boolean; vip: boolean; pick: string }>;
+    team: { pick: string; votes: string; pct: string; f30: number; ch: string; sig: boolean; vip: boolean; deg2: number; deg3: number };
+    player: { pick: string; votes: string; pct: string; f30: number; ch: string; sig: boolean; vip: boolean };
+    geo1xxx?: {
+      h_sum: number;
+      a_sum: number;
+      h_cnt: number;
+      a_cnt: number;
+      h_0xxx?: number;
+      a_0xxx?: number;
+      h_0cnt?: number;
+      a_0cnt?: number;
+      cold0_diff?: number;
+      cold0_win?: string;
+      h_0011?: number;
+      a_0011?: number;
+      h_0011_cnt?: number;
+      a_0011_cnt?: number;
+      c0011_win?: string;
+      bipolar_win?: string;
+      triple_pole_win?: string;
+      pole_clash?: boolean;
+      cold_tame_pi?: boolean;
+      cold_tame_win?: string;
+      h_all: number;
+      a_all: number;
+      h_gf?: number;
+      a_gf?: number;
+      gf_diff?: number;
+      gf_win?: string;
+      h_s3?: number;
+      a_s3?: number;
+      s3_diff?: number;
+      s3_win?: string;
+      s3_sign_split?: boolean;
+      s3_split_win?: string;
+      maj23_win?: string;
+      triple3_win?: string;
+      gf_rescued?: boolean;
+      gap3_h?: number;
+      m11_route?: {
+        code: string;
+        reason_fa: string;
+        flipped: boolean;
+      };
+      m12_route?: {
+        code: string;
+        reason_fa: string;
+        flipped: boolean;
+      };
+      diff: number;
+      win: string;
+      all_win?: string;
+      dl_win?: string;
+      safe_dl_win?: string;
+      pos_inv?: {
+        both_pos: boolean;
+        triggered: boolean;
+        win: string;
+        case_code: string;
+        dc: number;
+        d1: number;
+        l5_big: number;
+        reason_fa: string;
+      };
+      guards?: {
+        eval_team: string;
+        el_wk: string;
+        el_dy: string;
+        opp_el_wk: string;
+        opp_el_dy: string;
+        l5_wk: number;
+        l5_dy: number;
+        earth_ok: boolean;
+        has_neg: boolean;
+        margin_ok: boolean;
+        neg_anchor_ok: boolean;
+        pos_inv_trap?: boolean;
+        d1: number;
+        d8: number;
+        safe_ok: boolean;
+        reason_fa: string;
+      };
+    };
+    total_elem_12?: {
+      h_cnt12: number;
+      a_cnt12: number;
+      h_cnt1?: number;
+      a_cnt1?: number;
+      h_cnt0?: number;
+      a_cnt0?: number;
+      h_cnt0011?: number;
+      a_cnt0011?: number;
+      h_w_gff?: number;
+      a_w_gff?: number;
+      h_c_gff?: number;
+      a_c_gff?: number;
+      h_c0011_gff?: number;
+      a_c0011_gff?: number;
+      h_s_gff?: number;
+      a_s_gff?: number;
+      h_d_gff?: number;
+      a_d_gff?: number;
+      h_w_pwr?: number;
+      a_w_pwr?: number;
+      h_c_pwr?: number;
+      a_c_pwr?: number;
+      h_s_pwr?: number;
+      a_s_pwr?: number;
+      h_d_pwr?: number;
+      a_d_pwr?: number;
+      h_ep_p12: number[];
+      a_ep_p12: number[];
+      h_ep_tm: number[];
+      a_ep_tm: number[];
+      h_ep_tot: number[];
+      a_ep_tot: number[];
+      h_ef_tot: number[];
+      a_ef_tot: number[];
+      h_gf_p12: string;
+      a_gf_p12: string;
+      h_gff_p12: number;
+      a_gff_p12: number;
+      h_gf_tot: string;
+      a_gf_tot: string;
+      h_gff_tot: number;
+      a_gff_tot: number;
+      h_qtot: number;
+      a_qtot: number;
+      code?: string;
+      reason_fa?: string;
+      flipped?: boolean;
+      h_tm_ent?: { ep: string; ef: string; gf: string; gff: number; pwr: number };
+      a_tm_ent?: { ep: string; ef: string; gf: string; gff: number; pwr: number };
+      h_p12?: { fn: string; no: string; pos: string; st: boolean; mpg: number; ep: string; ef?: string; gf: string; gff?: number; pwr?: number }[];
+      a_p12?: { fn: string; no: string; pos: string; st: boolean; mpg: number; ep: string; ef?: string; gf: string; gff?: number; pwr?: number }[];
+    };
+  };
+  wtp_day?: any;
+  wtp?: {
+    mon: string;
+    htp: number;
+    atp: number;
+    dtp: number;
+    hrk: number;
+    ark: number;
+    hwl: string;
+    awl: string;
+    hpct?: number;
+    apct?: number;
+    hel?: string;
+    ael?: string;
+    l5h?: number;
+    hodds?: number;
+    aodds?: number;
+    mel?: string;
+  };
+  wtp_day?: {
+    mon: string;
+    htp: number;
+    atp: number;
+    dtp: number;
+    hrk: number;
+    ark: number;
+    hwl: string;
+    awl: string;
+    hpct?: number;
+    apct?: number;
+    hel?: string;
+    ael?: string;
+    l5h?: number;
+    hodds?: number;
+    aodds?: number;
+    mel?: string;
+  };
+};
+
+type HistGameRow = {
+  d: string;
+  day: string;
+  s: string;
+  h: string;
+  a: string;
+  hp: number;
+  ap: number;
+  mg: number;
+  h12: string[];
+  hGeo: string;
+  a12: string[];
+  aGeo: string;
+  f30: number;
+  hGeoDyn?: string;
+  aGeoDyn?: string;
+  hGeoTab?: string;
+  aGeoTab?: string;
+};
+
+type ManualFilterState = {
+  cols: Record<number, string>; // 0..11 -> selected value or "ALL"
+  geo: string;                  // "ALL" or 4-bit code (GEO-FIN / GEO-DYN)
+  geoTab?: string;              // "ALL" or 4-bit Daily Standings Geomantic Figure (GEO-TAB)
+  geoKind?: "fin" | "dyn";      // per-game GEO-FIN vs GEO-DYN channel
+  modeLabel?: string;
+  pathLog?: string[];
+  stepSummary?: string;
+  geoSummary?: string;
+};
+
+type PoolNumIndex = {
+  hw: number;
+  aw: number;
+  idxH: number;
+  idxA: number;
+  delta: number;
+  effDelta: number;
+  scoreH: number;
+  scoreA: number;
+  scoreDelta: number;
+  formulaH: string;
+  formulaA: string;
+  cappedH: boolean;
+  cappedA: boolean;
+  winner: "HOME" | "AWAY" | "TIE";
+};
+
+function computePoolNumIndex(rows: HistGameRow[]): PoolNumIndex {
+  const rawH = rows.filter((r) => r.mg > 0).map((r) => Math.abs(r.mg));
+  const rawA = rows.filter((r) => r.mg < 0).map((r) => Math.abs(r.mg));
+  const capH = rawH.map((m) => Math.min(5, Math.max(1, Math.ceil(m / 4))));
+  const capA = rawA.map((m) => Math.min(5, Math.max(1, Math.ceil(m / 4))));
+  const hw = capH.length;
+  const aw = capA.length;
+  const cappedH = rawH.some((m) => m > 20);
+  const cappedA = rawA.some((m) => m > 20);
+
+  let idxH = 0;
+  let formulaH = "0";
+  if (hw === 1) {
+    idxH = capH[0];
+    formulaH = `1×(+${capH[0]})${cappedH ? "[≤5]" : ""}`;
+  } else if (hw >= 2) {
+    const mn = Math.min(...capH);
+    const mx = Math.max(...capH);
+    idxH = mx + mn;
+    formulaH = `${mn}+${mx}${cappedH ? "[≤5]" : ""}`;
+  }
+
+  let idxA = 0;
+  let formulaA = "0";
+  if (aw === 1) {
+    idxA = capA[0];
+    formulaA = `1×(-${capA[0]})${cappedA ? "[≤5]" : ""}`;
+  } else if (aw >= 2) {
+    const mn = Math.min(...capA);
+    const mx = Math.max(...capA);
+    idxA = mx + mn;
+    formulaA = `(-${mx})+(-${mn})${cappedA ? "[≤5]" : ""}`;
+  }
+
+  const delta = idxH - idxA;
+  const scoreH = 2 * hw + idxH;
+  const scoreA = 2 * aw + idxA;
+  const scoreDelta = scoreH - scoreA;
+  const effDelta =
+    delta > 0 && scoreDelta > 0
+      ? delta
+      : delta < 0 && scoreDelta < 0
+        ? delta
+        : delta === 0 && Math.abs(scoreDelta) >= 2
+          ? scoreDelta > 0
+            ? 1
+            : -1
+          : 0;
+  const winner: "HOME" | "AWAY" | "TIE" = effDelta > 0 ? "HOME" : effDelta < 0 ? "AWAY" : "TIE";
+
+  return {
+    hw,
+    aw,
+    idxH,
+    idxA,
+    delta,
+    effDelta,
+    scoreH,
+    scoreA,
+    scoreDelta,
+    formulaH,
+    formulaA,
+    cappedH,
+    cappedA,
+    winner,
+  };
+}
+
+const MANUAL_COL_META: { idx: number; key: string; group: string; sub: string }[] = [
+  { idx: 0,  key: "PRIM-1",  group: "ELE-DYN (P+FIN)", sub: "FIRE" },
+  { idx: 1,  key: "PRIM-2",  group: "ELE-DYN (P+FIN)", sub: "AIR" },
+  { idx: 2,  key: "PRIM-3",  group: "ELE-DYN (P+FIN)", sub: "WATER" },
+  { idx: 3,  key: "PRIM-4",  group: "ELE-DYN (P+FIN)", sub: "EARTH" },
+  { idx: 4,  key: "FINAL-1", group: "ELE-FINAL",       sub: "FIRE" },
+  { idx: 5,  key: "FINAL-2", group: "ELE-FINAL",       sub: "AIR" },
+  { idx: 6,  key: "FINAL-3", group: "ELE-FINAL",       sub: "WATER" },
+  { idx: 7,  key: "FINAL-4", group: "ELE-FINAL",       sub: "EARTH" },
+  { idx: 8,  key: "ELE-P-1", group: "ELE-P",           sub: "FIRE" },
+  { idx: 9,  key: "ELE-P-2", group: "ELE-P",           sub: "AIR" },
+  { idx: 10, key: "ELE-P-3", group: "ELE-P",           sub: "WATER" },
+  { idx: 11, key: "ELE-P-4", group: "ELE-P",           sub: "EARTH" },
+];
+
+function decodeGeoTabFa(code: string): string {
+  if (!code || code.length < 4) return "شکل رمل جدول روزانه";
+  const tierFa = (b1: string, b2: string) =>
+    b1 === "1" ? "۱۰ تیم اول (#1-10)" : b2 === "1" ? "میانه جدول (#11-20)" : "۱۰ تیم آخر (#21-30)";
+  return `میزبان: ${tierFa(code[0], code[1])} | میهمان: ${tierFa(code[2], code[3])}`;
+}
+
+function computeAutoFilterState(
+  targetEl12: string[],
+  targetGeo: string,
+  dayPool: HistGameRow[],
+  persp: "home" | "away",
+  geoFirst: boolean,
+  geoKind: "fin" | "dyn" | "tab" = "fin"
+): {
+  state: ManualFilterState;
+  pool: HistGameRow[];
+  unslicedPool: HistGameRow[];
+  isNatural57: boolean;
+  hw: number;
+  aw: number;
+  pct: number;
+  mv: number;
+  sumStr: string;
+} {
+  let pool = [...dayPool];
+  const cols: Record<number, string> = {};
+  let geo = "ALL";
+  let geoTab = "ALL";
+  const pathLog: string[] = [];
+
+  const getEl12 = (r: HistGameRow) => (persp === "home" ? r.h12 : r.a12);
+  const getGeo = (r: HistGameRow) =>
+    geoKind === "tab"
+      ? persp === "home"
+        ? r.hGeoTab ?? ""
+        : r.aGeoTab ?? ""
+      : persp === "home"
+        ? geoKind === "dyn"
+          ? r.hGeoDyn ?? r.hGeo
+          : r.hGeo
+        : geoKind === "dyn"
+          ? r.aGeoDyn ?? r.aGeo
+          : r.aGeo;
+
+  const geoLabel = geoKind === "tab" ? "GEO-TAB" : geoKind === "dyn" ? "GEO-DYN" : "GEO-FIN";
+
+  if (geoFirst && targetGeo) {
+    const nxtGeo = pool.filter((r) => getGeo(r) === targetGeo);
+    if (nxtGeo.length >= 5) {
+      pool = nxtGeo;
+      if (geoKind === "tab") geoTab = targetGeo;
+      else geo = targetGeo;
+      pathLog.push(`${geoLabel}=${targetGeo} (${pool.length})`);
+    }
+  }
+
+  // STRICT 5-TO-7 ROWS RULE:
+  // Stop immediately when pool has 5 to 7 rows (5 <= pool.length <= 7), and never narrow below 5 rows (cnt >= 5).
+  while (pool.length > 7) {
+    let bestC: number | null = null;
+    let bestCnt = -1;
+    let bestNxt: HistGameRow[] = [];
+
+    for (let c = 0; c < 12; c++) {
+      if (cols[c] && cols[c] !== "ALL") continue;
+      const tVal = targetEl12[c];
+      if (!tVal) continue;
+      const nxt = pool.filter((r) => getEl12(r)[c] === tVal);
+      const cnt = nxt.length;
+      if (cnt >= 5 && cnt < pool.length && cnt > bestCnt) {
+        bestCnt = cnt;
+        bestC = c;
+        bestNxt = nxt;
+      }
+    }
+
+    if (bestC === null) break;
+    cols[bestC] = targetEl12[bestC];
+    pool = bestNxt;
+    pathLog.push(`${MANUAL_COL_META[bestC].key}=${targetEl12[bestC]} (${pool.length})`);
+    if (pool.length >= 5 && pool.length <= 7) break;
+  }
+
+  if (!geoFirst && geo === "ALL" && geoTab === "ALL" && targetGeo && pool.length > 7) {
+    const nxtGeo = pool.filter((r) => getGeo(r) === targetGeo);
+    if (nxtGeo.length >= 5 && nxtGeo.length <= 7) {
+      pool = nxtGeo;
+      if (geoKind === "tab") geoTab = targetGeo;
+      else geo = targetGeo;
+      pathLog.push(`${geoLabel}=${targetGeo} (${pool.length})`);
+    }
+  }
+
+  const unslicedPool = [...pool];
+  const isNatural57 = unslicedPool.length >= 5 && unslicedPool.length <= 7;
+
+  if (pool.length > 7) {
+    pool = pool.slice(-7);
+    pathLog.push(`RANK_CAP(7/${unslicedPool.length})`);
+  }
+
+  const hw = pool.filter((r) => r.mg > 0).length;
+  const aw = pool.filter((r) => r.mg < 0).length;
+  const tot = Math.max(1, hw + aw);
+  const pct = Math.round((Math.max(hw, aw) / tot) * 1000) / 10;
+  const mv = Math.abs(hw - aw);
+  const sumStr = `${hw}H-${aw}A (${pct}%)`;
+
+  return {
+    state: {
+      cols,
+      geo,
+      geoTab,
+      geoKind: geoKind === "tab" ? "fin" : geoKind,
+      modeLabel: geoFirst
+        ? geoKind === "tab"
+          ? "اول شکل رمل جدول روزانه (GEO-TAB)"
+          : geoKind === "dyn"
+            ? "اول شکل رمل پویا (GEO-DYN)"
+            : "اول شکل رمل اصلاحی (GEO-FIN)"
+        : "گام‌به‌گام بیشترین تکرار (STEP)",
+      pathLog,
+    },
+    pool,
+    unslicedPool,
+    isNatural57,
+    hw,
+    aw,
+    pct,
+    mv,
+    sumStr,
+  };
+}
+
+function computeThreeChannelIndex(
+  t12: string[],
+  tGeoFin: string,
+  tGeoDyn: string,
+  dayPool: HistGameRow[],
+  persp: "home" | "away",
+  tGeoTab: string = ""
+) {
+  const step = computeAutoFilterState(t12, tGeoFin, dayPool, persp, false, "fin");
+  const geoFin = computeAutoFilterState(t12, tGeoFin, dayPool, persp, true, "fin");
+  const geoDyn = computeAutoFilterState(t12, tGeoDyn, dayPool, persp, true, "dyn");
+  const geoTab = computeAutoFilterState(t12, tGeoTab, dayPool, persp, true, "tab");
+
+  const idxSt = computePoolNumIndex(step.pool);
+  const idxGf = computePoolNumIndex(geoFin.pool);
+  const idxGd = computePoolNumIndex(geoDyn.pool);
+  const idxGt = computePoolNumIndex(geoTab.pool);
+
+  const chList = [idxSt, idxGf, idxGd, idxGt];
+  const votesHome = chList.filter((c) => c.effDelta > 0).length;
+  const votesAway = chList.filter((c) => c.effDelta < 0).length;
+  const natCount = [step, geoFin, geoDyn, geoTab].filter((c) => c.isNatural57).length;
+  const minDelta = Math.min(idxSt.effDelta, idxGf.effDelta, idxGd.effDelta, idxGt.effDelta);
+  const maxDelta = Math.max(idxSt.effDelta, idxGf.effDelta, idxGd.effDelta, idxGt.effDelta);
+  const totalScoreDelta = idxSt.scoreDelta + idxGf.scoreDelta + idxGd.scoreDelta + idxGt.scoreDelta;
+  const consensusWinner: "HOME" | "AWAY" | "TIE" =
+    votesHome > votesAway ? "HOME" : votesAway > votesHome ? "AWAY" : "TIE";
+
+  const avgDelta = Math.round(((idxSt.effDelta + idxGf.effDelta + idxGd.effDelta + idxGt.effDelta) / 4) * 10) / 10;
+  const unanimous = votesHome === 4 || votesAway === 4;
+
+  return {
+    step,
+    geoFin,
+    geoDyn,
+    geoTab,
+    idxSt,
+    idxGf,
+    idxGd,
+    idxGt,
+    votesHome,
+    votesAway,
+    homeVotes: votesHome,
+    awayVotes: votesAway,
+    natCount,
+    minDelta,
+    maxDelta,
+    avgDelta,
+    unanimous,
+    totalScoreDelta,
+    consensusWinner,
+    favSide: consensusWinner,
+  };
+}
+
+type EngineMode = "manual" | "twins" | "fusion" | "single";
+type TwinPatternKey =
+  | "twVipIdx3"
+  | "twF1Wtp"
+  | "twF1Guard"
+  | "twF1Idx"
+  | "twF1Union"
+  | "twVipDual"
+  | "twF1"
+  | "twSNew"
+  | "twF1Agree"
+  | "twSA1"
+  | "tall";
+type FusionPatternKey = "f12" | "f8" | "f6" | "fa10" | "fall";
+type SinglePatternKey = "s1_vip" | "s1_f1" | "s1_guard" | "all";
+
+const TWIN_PATTERN_DEFS: {
+  key: TwinPatternKey;
+  titleFa: string;
+  titleEn: string;
+  formulaFa: string;
+}[] = [
+  {
+    key: "twVipIdx3",
+    titleFa: "سطح ویژه VIP موتور تلفیقی فعال (ابرقفل FIRE / تایید دوگانه)",
+    titleEn: "Active Fusion Engine — VIP Tier Signals",
+    formulaFa: "سیگنال‌های سطح ویژه VIP در معماری موتور تلفیقی انتخاب‌شده در نوار بالا (واکنش آنی به هر ۱۲ حالت تلفیق)",
+  },
+  {
+    key: "twF1Wtp",
+    titleFa: "سیگنال‌های نهایی موتور جدید فعال (حالت پیش‌فرض ۱۲: ۹۱٫۸٪ برون‌نمونه • ۹۳٫۸٪ فصل جاری)",
+    titleEn: "Active Fusion Engine — Qualified Final Signals",
+    formulaFa: "تمام سیگنال‌های نهایی تاییدشده توسط موتور تلفیقی انتخاب‌شده در نوار بالا (شامل ۱xxx، Σ8، GF-FIN، Σ3 و قوانین ضدحذف)",
+  },
+  {
+    key: "twF1Guard",
+    titleFa: "نگهبان ۴ تله درونی و خستگی B2B بدون فیلتر جدول هفتگی (۷۷٫۴٪ فصل جاری)",
+    titleEn: "NBA Internal Trap Guard & B2B Fatigue Only",
+    formulaFa: "حذف ۴ تله ثابت درونی و برنامه‌ای NBA (میهمان ضعیف، مخالفت شاخص ۳ کاناله، خستگی Back-to-Back تیم منتخب، و برش CAP7 بدون پشتوانه ۳/۳ شاخص) بدون اعمال فیلتر جدول هفتگی",
+  },
+  {
+    key: "twF1Idx",
+    titleFa: "تلفیق پایه همزاد + شاخص عددی پایه بدون نگهبان تله (Idx هم‌جهت)",
+    titleEn: "NBA Base Combo + Numerical Index Filter",
+    formulaFa: "واجد شرایط همزاد ۵ تا ۷ ردیف (DEG1=53 • ≥۷۱٪) هم‌جهت با Fusion 30 به شرط هم‌جهت بودن شاخص عددی استخر (واحد ۴ امتیازی بسکتبال با سقف ۵ واحد برای حذف بردهای پرت)",
+  },
+  {
+    key: "twF1Union",
+    titleFa: "اتحاد سیستم نهایی NBA + نجات شاخص ۳ کاناله (اجماع ۳/۳ + جدول هفتگی)",
+    titleEn: "NBA Final System UNION 3-Channel Index Rescue",
+    formulaFa: "اتحاد سیستم نهایی NBA با بازی‌های دارای اجماع ۳ از ۳ شاخص عددی مستقل (STEP + GEO-FIN + GEO-DYN با Δmin≥1) بدون تله درونی و با تایید جدول هفتگی (ΔTP > -8)",
+  },
+  {
+    key: "tall",
+    titleFa: "۶. کل بازی‌های مسیر‌یابی‌شده با موتور جدید (بدون حذف بازی)",
+    titleEn: "All Routed NBA Games Under Active Engine (Zero-Drop)",
+    formulaFa: "نمایش برد و باخت تمام بازی‌های NBA بر اساس منتخب مستقیم یا مسیر برنده ضدحذف موتور تلفیقی فعال (۱xxx • Σ8 • GF-FIN • Σ3)",
+  },
+];
+
+const FUSION_PATTERN_DEFS = TWIN_PATTERN_DEFS as any;
+const SINGLE_PATTERN_DEFS = TWIN_PATTERN_DEFS as any;
+
+const DAILY_QUICK_DATES = [
+  { label: "All Dates (همه روزها)", date: "ALL" },
+  { label: "2026-11-04 (Wed • 14 Games)", date: "2026-11-04" },
+  { label: "2026-11-06 (Fri • 9 Games)", date: "2026-11-06" },
+  { label: "2026-11-12 (Thu • 4 Games)", date: "2026-11-12" },
+  { label: "2026-11-13 (Fri • 9 Games)", date: "2026-11-13" },
+  { label: "2026-11-14 (Sat • 5 Games)", date: "2026-11-14" },
+  { label: "2026-11-15 (Sun • 9 Games)", date: "2026-11-15" },
+  { label: "2026-11-16 (Mon • 8 Games)", date: "2026-11-16" },
+];
+
+const KALSHI_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+function getTeam3Code(teamName: string): string {
+  const clean = teamName.replace(/\s*\(EL:.*$/, "").trim();
+  const mapped = NBA_TEAM_KALSHI_MAP[clean.toLowerCase()];
+  if (mapped) return mapped;
+  return clean.slice(0, 3).toUpperCase();
+}
+
+function buildKalshiNbaTicker(
+  dateStr: string,
+  awayTeam: string,
+  homeTeam: string,
+  winnerTeam: string,
+  tour: "ATP" | "WTA" = "ATP",
+): string {
+  const parts = dateStr.split("-");
+  if (parts.length !== 3) return "";
+  const yy = parts[0].slice(-2);
+  const mmIdx = Math.max(0, Math.min(11, parseInt(parts[1], 10) - 1));
+  const mmm = KALSHI_MONTHS[mmIdx];
+  const dd = parts[2];
+  const aCode = getTeam3Code(awayTeam);
+  const hCode = getTeam3Code(homeTeam);
+  const wCode = getTeam3Code(winnerTeam);
+  const series = tour === "WTA" ? "KXWTAMATCH" : "KXATPMATCH";
+  return `${series}-${yy}${mmm}${dd}${aCode}${hCode}-${wCode}`;
+}
+
+export type FusionModeKey =
+  | "tri_gf_ultralock"
+  | "anti_nobet_smart"
+  | "total_elem_12"
+  | "tri_gf_routed"
+  | "pos_inv_lock"
+  | "dual_pillar"
+  | "vip_cross"
+  | "astro_lock"
+  | "diamond"
+  | "geo_1xxx_lock"
+  | "double_pwr_lock"
+  | "earth_neg_lock"
+  | "safe_dl_core"
+  | "gf_fin_pure";
+export type TwinDbKind = "team" | "player";
+
+export type SmartMode14Kind =
+  | "M14_CORE_CLEAN"
+  | "M14_DIRECT_RELEASE"
+  | "M14_OPPOSITE_FLIP"
+  | "M14_TRAP_FLIP"
+  | "M14_VETO_TRAP"
+  | "M14_HOLD_NEUTRAL";
+
+function calcDominantElemVec(vec?: number[]) {
+  const names = ["FIRE", "AIR", "WATER", "EARTH"] as const;
+  const v = Array.isArray(vec) && vec.length === 4 ? vec.map((x) => Number(x || 0)) : [0, 0, 0, 0];
+  const mx = Math.max(...v);
+  if (mx <= 0) return { dom: "—", maxCnt: 0, vec: v, isTie: true, vecStr: "0-0-0-0" };
+  const winners = names.filter((_, i) => v[i] === mx);
+  const dom = winners.length === 1 ? winners[0] : `TIE(${winners.map((w) => w[0]).join("+")})`;
+  return {
+    dom,
+    maxCnt: mx,
+    vec: v,
+    isTie: winners.length > 1,
+    vecStr: `${v[0]}-${v[1]}-${v[2]}-${v[3]}`,
+  };
+}
+
+export type ElemFollowUpTier = "STRONG" | "MEDIUM" | "NEUTRAL";
+
+function calcElemFollowUpVerdict(
+  hDomInfo: ReturnType<typeof calcDominantElemVec>,
+  aDomInfo: ReturnType<typeof calcDominantElemVec>,
+  hLeadCnt: number,
+  aLeadCnt: number,
+  hName: string,
+  aName: string,
+  hL5: number,
+  aL5: number
+) {
+  const hv = hDomInfo.vec;
+  const av = aDomInfo.vec;
+  const hSum = hv[0] + hv[1] + hv[2] + hv[3];
+  const aSum = av[0] + av[1] + av[2] + av[3];
+  const hCat = hDomInfo.isTie ? "TIE" : hDomInfo.dom;
+  const aCat = aDomInfo.isTie ? "TIE" : aDomInfo.dom;
+  const domDelta = Math.abs(hDomInfo.maxCnt - aDomInfo.maxCnt);
+  const airDelta = Math.abs(hv[1] - av[1]);
+
+  let pick = "";
+  let oppTrapSide = "";
+  let tier: ElemFollowUpTier = "NEUTRAL";
+  let ruleCode = "NEUTRAL";
+  let ruleTitleFa = "توازن کامل المنت‌ها (بدون برتری عددی)";
+  let hLabel = `${hDomInfo.dom} (${hDomInfo.maxCnt})`;
+  let aLabel = `${aDomInfo.dom} (${aDomInfo.maxCnt})`;
+
+  // 1) EARTH vs EARTH extreme saturation Δ>=10 -> Smaller EARTH wins
+  if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 10) {
+    const hWin = hDomInfo.maxCnt < aDomInfo.maxCnt;
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "EARTH_SAT10_SMALL";
+    ruleTitleFa = `اشباع EARTH (Δ=${domDelta}≥10 → برد کوچک‌تر)`;
+    hLabel = hWin ? `EARTH کوچک (${hDomInfo.maxCnt})` : `اشباع EARTH (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `EARTH کوچک (${aDomInfo.maxCnt})` : `اشباع EARTH (${aDomInfo.maxCnt})`;
+  }
+  // 2) AIR extreme saturation Δ>=8 -> Smaller AIR wins
+  else if (airDelta >= 8) {
+    const hWin = hv[1] < av[1];
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "AIR_SAT8_SMALL";
+    ruleTitleFa = `اشباع AIR (Δ=${airDelta}≥8 → برد کوچک‌تر)`;
+    hLabel = hWin ? `AIR سالم (${hv[1]})` : `اشباع AIR (${hv[1]})`;
+    aLabel = !hWin ? `AIR سالم (${av[1]})` : `اشباع AIR (${av[1]})`;
+  }
+  // 3) WATER vs WATER small gap Δ=1..3 -> Smaller WATER wins
+  else if (hCat === "WATER" && aCat === "WATER" && domDelta >= 1 && domDelta <= 3) {
+    const hWin = hDomInfo.maxCnt < aDomInfo.maxCnt;
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "WATER_1_3_SMALL";
+    ruleTitleFa = `۲×WATER (Δ=${domDelta} → برد کوچک‌تر)`;
+    hLabel = hWin ? `WATER کوچک (${hDomInfo.maxCnt})` : `تله WATER (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `WATER کوچک (${aDomInfo.maxCnt})` : `تله WATER (${aDomInfo.maxCnt})`;
+  }
+  // 4) WATER vs WATER gap Δ>=4 -> Larger WATER wins
+  else if (hCat === "WATER" && aCat === "WATER" && domDelta >= 4) {
+    const hWin = hDomInfo.maxCnt > aDomInfo.maxCnt;
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "WATER_4_PLUS_LARGE";
+    ruleTitleFa = `۲×WATER (Δ=${domDelta}≥4 → برد بزرگ‌تر)`;
+    hLabel = hWin ? `WATER بزرگ (${hDomInfo.maxCnt})` : `WATER ضعیف (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `WATER بزرگ (${aDomInfo.maxCnt})` : `WATER ضعیف (${aDomInfo.maxCnt})`;
+  }
+  // 5) Dual-Element Balance (TIE) vs Single Dominant Element -> TIE wins
+  else if ((hDomInfo.isTie && !aDomInfo.isTie) || (aDomInfo.isTie && !hDomInfo.isTie)) {
+    const hWin = hDomInfo.isTie;
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "TIE_VS_UNIQ";
+    ruleTitleFa = `تعادل ${hWin ? hDomInfo.dom : aDomInfo.dom} برابر تک‌المنت`;
+    hLabel = hWin ? `تعادل ${hDomInfo.dom}` : `تک‌المنت (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `تعادل ${aDomInfo.dom}` : `تک‌المنت (${aDomInfo.maxCnt})`;
+  }
+  // 6) EARTH vs EARTH medium-large gap Δ=4..9 -> Larger EARTH wins (STRONG)
+  else if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 4 && domDelta <= 9) {
+    const hWin = hDomInfo.maxCnt > aDomInfo.maxCnt;
+    pick = hWin ? hName : aName;
+    oppTrapSide = hWin ? aName : hName;
+    tier = "STRONG";
+    ruleCode = "EARTH_4_9_LARGE";
+    ruleTitleFa = `۲×EARTH (Δ=${domDelta} → برد بزرگ‌تر)`;
+    hLabel = hWin ? `EARTH بزرگ (${hDomInfo.maxCnt})` : `ضعف EARTH (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `EARTH بزرگ (${aDomInfo.maxCnt})` : `ضعف EARTH (${aDomInfo.maxCnt})`;
+  }
+  // 7) 3 of 4 Elements Lead -> Leading team wins (MEDIUM)
+  else if (hLeadCnt === 3 || aLeadCnt === 3) {
+    const hWin = hLeadCnt === 3;
+    pick = hWin ? hName : aName;
+    tier = "MEDIUM";
+    ruleCode = "LEAD_3OF4";
+    ruleTitleFa = "برتری ۳ از ۴ عنصر بردار کل [F-A-W-E]";
+    hLabel = hWin ? "برتری ۳/۴ ★" : `عقب (${hLeadCnt}/4)`;
+    aLabel = !hWin ? "برتری ۳/۴ ★" : `عقب (${aLeadCnt}/4)`;
+  }
+  // 8) EARTH vs EARTH close gap Δ=1..3 -> Larger EARTH wins (85.2% aligned inside Mode 14)
+  else if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 1 && domDelta <= 3) {
+    const hWin = hDomInfo.maxCnt > aDomInfo.maxCnt;
+    pick = hWin ? hName : aName;
+    tier = "MEDIUM";
+    ruleCode = "EARTH_1_3_LARGE";
+    ruleTitleFa = `۲×EARTH نزدیک (Δ=${domDelta} → برتری بزرگ‌تر)`;
+    hLabel = hWin ? `EARTH برتر (${hDomInfo.maxCnt})` : `EARTH کمتر (${hDomInfo.maxCnt})`;
+    aLabel = !hWin ? `EARTH برتر (${aDomInfo.maxCnt})` : `EARTH کمتر (${aDomInfo.maxCnt})`;
+  }
+  // 9) Split Dominant or Equal-Max Tie -> Larger Total Sum Σ[F-A-W-E] (98.7% total coverage!)
+  else if (hSum !== aSum) {
+    const hWin = hSum > aSum;
+    pick = hWin ? hName : aName;
+    tier = "MEDIUM";
+    ruleCode = "SPLIT_SUM_LARGE";
+    ruleTitleFa = hCat !== aCat
+      ? `شکاف المنت + مجموع کل بیشتر (Σ=${Math.max(hSum, aSum)})`
+      : `تساوی سقف ${hDomInfo.dom}(${hDomInfo.maxCnt}) → مجموع کل بیشتر (Σ=${Math.max(hSum, aSum)})`;
+    hLabel = hWin ? `Σ برتر (${hSum})` : `Σ کمتر (${hSum})`;
+    aLabel = !hWin ? `Σ برتر (${aSum})` : `Σ کمتر (${aSum})`;
+  }
+
+  const hasPick = Boolean(pick);
+  const pickL5 = !hasPick ? 50 : pick === hName ? hL5 : aL5;
+
+  return {
+    hasPick,
+    pick,
+    oppTrapSide,
+    tier,
+    ruleCode,
+    ruleTitleFa,
+    hLabel,
+    aLabel,
+    hSum,
+    aSum,
+    domDelta,
+    airDelta,
+    pickL5,
+  };
+}
+
+function evalSmartMode14(g: NbaGamePred) {
+  const fm = g.fusion_meta;
+  const m14 = fm?.modes?.total_elem_12;
+  const m11 = fm?.modes?.tri_gf_routed;
+  const t12 = fm?.total_elem_12;
+  const wtp: any = g.wtp ?? {};
+  const p = m14?.pick || g.sys_win || g.h;
+  const o = p === g.h ? g.a : g.h;
+  const l5h = Number(wtp.l5h ?? 50);
+  const hL5 = Math.round(l5h * 10) / 10;
+  const aL5 = Math.round((100 - l5h) * 10) / 10;
+  const pl5 = p === g.h ? hL5 : aL5;
+  const ol5 = o === g.h ? hL5 : aL5;
+  const code = String(t12?.code ?? "");
+  const hWarm = Number(t12?.h_w_gff ?? 0);
+  const aWarm = Number(t12?.a_w_gff ?? 0);
+  const pWarm = p === g.h ? hWarm : aWarm;
+  const hP12 = Number(t12?.h_gff_p12 ?? 0);
+  const aP12 = Number(t12?.a_gff_p12 ?? 0);
+  const p12FavOpp = o === g.h ? hP12 < aP12 : aP12 < hP12;
+  const p12FavBase = p === g.h ? hP12 < aP12 : aP12 < hP12;
+  const hSPwr = Number(t12?.h_s_pwr ?? 0);
+  const aSPwr = Number(t12?.a_s_pwr ?? 0);
+  const spwrFavOpp = o === g.h ? hSPwr < aSPwr : aSPwr < hSPwr;
+  const m11Sig = Boolean(m11?.sig);
+  const m11Pick = m11?.pick || "";
+  const m11DirOpp = Boolean(m11Pick === o);
+  const m11FavOpp = Boolean(m11Sig && m11Pick === o);
+  const m14Sig = Boolean(m14?.sig);
+
+  // Dominant Element from EF_Tot = [Fire, Air, Water, Earth]
+  const hDomInfo = calcDominantElemVec(t12?.h_ef_tot);
+  const aDomInfo = calcDominantElemVec(t12?.a_ef_tot);
+  const pDomInfo = p === g.h ? hDomInfo : aDomInfo;
+  const oDomInfo = o === g.h ? hDomInfo : aDomInfo;
+  const hLeadCnt = [0, 1, 2, 3].filter((i) => hDomInfo.vec[i] > aDomInfo.vec[i]).length;
+  const aLeadCnt = [0, 1, 2, 3].filter((i) => aDomInfo.vec[i] > hDomInfo.vec[i]).length;
+  const pLeadCnt = p === g.h ? hLeadCnt : aLeadCnt;
+  const oLeadCnt = o === g.h ? hLeadCnt : aLeadCnt;
+  const dualWaterTrap = hDomInfo.dom === "WATER" && aDomInfo.dom === "WATER";
+  const domSplit = !hDomInfo.isTie && !aDomInfo.isTie && hDomInfo.dom !== aDomInfo.dom;
+  const elemFollow = calcElemFollowUpVerdict(hDomInfo, aDomInfo, hLeadCnt, aLeadCnt, g.h, g.a, hL5, aL5);
+
+  // 3 Pure Numeric & Element-Sum Traps (Zero wtp EARTH dependency!)
+  const trapBipolarWeak = Boolean(m14Sig && code === "TOT12_BIPOLAR_HARMONY" && pl5 < 75.0);
+  const trapAwayNegWarm = Boolean(m14Sig && p === g.a && pWarm < 0);
+  const trapDualWater = Boolean(m14Sig && dualWaterTrap);
+  const hasActiveTrap = trapBipolarWeak || trapAwayNegWarm || trapDualWater;
+
+  let kind: SmartMode14Kind = "M14_HOLD_NEUTRAL";
+  let sig = false;
+  let vip = false;
+  let pick = p;
+  let reasonFa = dualWaterTrap
+    ? `توقف ایمنی المنت غالب: تله دوقلوی آب (هر دو تیم WATER: ${hDomInfo.maxCnt} و ${aDomInfo.maxCnt})`
+    : "توقف خنثی: خارج از آستانه مستقیم (Log5≥75%) یا شرایط تیم عکس";
+
+  if (m14Sig) {
+    if (hasActiveTrap) {
+      // Whenever a trap catches baseM14Pick, NEVER keep baseM14Pick as the winner! Switch pick -> o (Opposite Team)!
+      pick = o;
+      if (m11DirOpp && !dualWaterTrap) {
+        kind = "M14_TRAP_FLIP";
+        sig = true;
+        vip = false;
+        reasonFa = trapBipolarWeak
+          ? `تشخیص تله دوقطبی روی بازنده (Log5=${pl5.toFixed(1)}%<75%) + تایید موتور ۳ عددی → چرخش برد به تیم عکس (${o})`
+          : `تشخیص تله میهمان Warm<0 روی بازنده + تایید موتور ۳ عددی → چرخش برد به تیم عکس (${o})`;
+      } else if (trapDualWater) {
+        kind = "M14_VETO_TRAP";
+        sig = false;
+        reasonFa = `مهار تله المنت غالب (۲×WATER: ${pDomInfo.maxCnt} برابر ${oDomInfo.maxCnt}) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+      } else if (trapBipolarWeak) {
+        kind = "M14_VETO_TRAP";
+        sig = false;
+        reasonFa = `مهار تله دوقطبی زیر ۷۵٪ (Log5=${pl5.toFixed(1)}%) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+      } else {
+        kind = "M14_VETO_TRAP";
+        sig = false;
+        reasonFa = `مهار تله میهمان Warm<0 (${pWarm.toFixed(1)}) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+      }
+    } else {
+      kind = "M14_CORE_CLEAN";
+      sig = true;
+      vip = Boolean(m14?.vip || pLeadCnt === 3 || domSplit);
+      pick = p;
+      reasonFa =
+        pLeadCnt === 3
+          ? `سیگنال ویژه VIP حالت ۱۴: قفل سالم + برتری ۳/۴ عناصر بردار کل (${pDomInfo.dom}:${pDomInfo.maxCnt})`
+          : domSplit
+            ? `سیگنال سالم حالت ۱۴ + شکاف مثبت المنت غالب (${pDomInfo.dom}:${pDomInfo.maxCnt} برابر ${oDomInfo.dom}:${oDomInfo.maxCnt})`
+            : `سیگنال اصلی حالت ۱۴ سالم و عاری از هر ۳ تله خطا (المنت غالب: ${pDomInfo.dom}:${pDomInfo.maxCnt})`;
+    }
+  } else if (!dualWaterTrap && pl5 >= 75.0) {
+    kind = "M14_DIRECT_RELEASE";
+    sig = true;
+    vip = Boolean(pl5 >= 80.0 || pLeadCnt === 3);
+    pick = p;
+    reasonFa = `آزادسازی مستقیم (قانون ۳): احتمال جدول Log5=${pl5.toFixed(1)}% ≥ 75% • المنت غالب ${pDomInfo.dom}(${pDomInfo.maxCnt})`;
+  } else if (
+    !dualWaterTrap &&
+    ((m11FavOpp && spwrFavOpp && ol5 >= 55.0) || (ol5 >= 62.0 && (m11FavOpp || p12FavOpp)))
+  ) {
+    kind = "M14_OPPOSITE_FLIP";
+    sig = true;
+    vip = Boolean((m11FavOpp && spwrFavOpp) || oLeadCnt === 3);
+    pick = o;
+    if (m11FavOpp && spwrFavOpp) {
+      reasonFa = `چرخش طلایی به تیم عکس (قانون ۲A): قفل ۱۱ + توان ۱۳ موجودیت + Log5=${ol5.toFixed(1)}% (${oDomInfo.dom}:${oDomInfo.maxCnt})`;
+    } else if (m11FavOpp) {
+      reasonFa = `چرخش به تیم عکس (قانون ۲B): قفل حالت ۱۱ سمت تیم عکس + Log5=${ol5.toFixed(1)}%`;
+    } else {
+      reasonFa = `چرخش به تیم عکس (قانون ۲B): برتری ۱۲ بازیکن خالص (12P GF-FIN) + Log5=${ol5.toFixed(1)}%`;
+    }
+  }
+
+  // 4-Pattern NO-BET × Dominant-Element Fusion Box (v77): 170/208 = 81.73% (+17.1pp Edge)
+  const teamMeta = fm?.team;
+  const isNoBetM14 = !sig;
+  const sugPick = pick;
+  const ep = elemFollow.pick;
+  const epIsH = Boolean(ep && ep === g.h);
+  const epL5 = !ep ? 0 : epIsH ? hL5 : aL5;
+  const epP12Ok = !ep ? false : epIsH ? hP12 < aP12 : aP12 < hP12;
+  const epSumOk = !ep ? false : epIsH ? elemFollow.hSum > elemFollow.aSum : elemFollow.aSum > elemFollow.hSum;
+  const epM11Dir = Boolean(ep && m11Pick === ep);
+  const epM11Sig = Boolean(ep && m11Sig && m11Pick === ep);
+  const sugTeamSig = Boolean(teamMeta?.sig && teamMeta?.pick === sugPick);
+  const agreeBoxes = Boolean(elemFollow.hasPick && sugPick === ep);
+  const clashBoxes = Boolean(elemFollow.hasPick && sugPick !== ep);
+
+  // Evaluate all 4 high-coverage patterns (760/943 = 80.59% across 2024-2027, 95.3% of >=5-game slates active!)
+  const sugL5 = sugPick === g.h ? hL5 : aL5;
+  const satTrap = elemFollow.ruleCode === "AIR_SAT8_SMALL" || elemFollow.ruleCode === "EARTH_SAT10_SMALL";
+  const p1Hit = Boolean(
+    !dualWaterTrap &&
+      agreeBoxes &&
+      epIsH &&
+      epM11Dir &&
+      (epL5 >= 58.0 || (elemFollow.tier === "STRONG" && epL5 >= 52.0))
+  );
+  const p2Hit = Boolean(
+    !dualWaterTrap &&
+      agreeBoxes &&
+      (sig || (elemFollow.tier === "STRONG" && (epM11Sig || sugTeamSig || (epP12Ok && epSumOk && epL5 >= 60.0))))
+  );
+  const p3Hit = Boolean(
+    !dualWaterTrap &&
+      elemFollow.hasPick &&
+      elemFollow.tier === "STRONG" &&
+      epP12Ok &&
+      epL5 >= 62.0 &&
+      (agreeBoxes || !sig)
+  );
+  const p4AirTrap = Boolean(clashBoxes && (sugTeamSig || (sig && sugL5 >= 75.0)) && satTrap);
+  const p4Hit = Boolean(
+    !dualWaterTrap &&
+      clashBoxes &&
+      !satTrap &&
+      (sugTeamSig || (sig && sugL5 >= 75.0))
+  );
+  const f4Active = p1Hit || p2Hit || p3Hit || p4Hit;
+  const f4Pick = p1Hit || p2Hit || p3Hit ? ep : p4Hit ? sugPick : "";
+  const f4Tags: string[] = [];
+  if (p1Hit) f4Tags.push("پترن ۱");
+  if (p2Hit) f4Tags.push("پترن ۲");
+  if (p3Hit) f4Tags.push("پترن ۳");
+  if (p4Hit) f4Tags.push("پترن ۴");
+  const fusion4 = {
+    isNoBetM14,
+    sugPick,
+    agreeBoxes,
+    clashBoxes,
+    sugTeamSig,
+    epP12Ok,
+    epSumOk,
+    epM11Dir,
+    epM11Sig,
+    epL5,
+    p1Hit,
+    p2Hit,
+    p3Hit,
+    p4Hit,
+    p4AirTrap,
+    active: f4Active,
+    pick: f4Pick,
+    tags: f4Tags,
+  };
+
+  // 6-Box Final Referee (داوری نهایی ۶ باکس سیگنال • v80):
+  // Exact 1-to-1 card tick tally Σ✓ = Box1(5) + Smart14(5) + ElemFollow(1) + Fusion4(4)
+  const hCold = Number(t12?.h_c_gff ?? 0);
+  const aCold = Number(t12?.a_c_gff ?? 0);
+  const hDelta = Number(t12?.h_d_gff ?? 0);
+  const aDelta = Number(t12?.a_d_gff ?? 0);
+  const hTotGff = Number(t12?.h_gff_tot ?? 0);
+  const aTotGff = Number(t12?.a_gff_tot ?? 0);
+
+  const b1HomeTicks =
+    Number(hWarm < aWarm) +
+    Number(hCold < aCold) +
+    Number(hDelta < aDelta) +
+    Number(hTotGff < aTotGff) +
+    Number(!dualWaterTrap && (hLeadCnt === 3 || (domSplit && (hDomInfo.dom === "WATER" || hDomInfo.dom === "AIR"))));
+  const b1AwayTicks =
+    Number(aWarm < hWarm) +
+    Number(aCold < hCold) +
+    Number(aDelta < hDelta) +
+    Number(aTotGff < hTotGff) +
+    Number(!dualWaterTrap && (aLeadCnt === 3 || (domSplit && (aDomInfo.dom === "WATER" || aDomInfo.dom === "AIR"))));
+
+  const hIsBase = p === g.h;
+  const aIsBase = p === g.a;
+  const hPureL5Ok =
+    (hIsBase && m14Sig && !hasActiveTrap) ||
+    (hIsBase && hL5 >= 75) ||
+    (!hIsBase && (hL5 >= 62 || (m11FavOpp && spwrFavOpp && hL5 >= 55)));
+  const aPureL5Ok =
+    (aIsBase && m14Sig && !hasActiveTrap) ||
+    (aIsBase && aL5 >= 75) ||
+    (!aIsBase && (aL5 >= 62 || (m11FavOpp && spwrFavOpp && aL5 >= 55)));
+  const hM11SigTeam = Boolean(m11Sig && m11Pick === g.h);
+  const aM11SigTeam = Boolean(m11Sig && m11Pick === g.a);
+  const hM11DirTeam = Boolean(m11Pick === g.h);
+  const aM11DirTeam = Boolean(m11Pick === g.a);
+
+  const smHomeTicks =
+    Number(m14Sig && hIsBase && !hasActiveTrap) +
+    Number(!dualWaterTrap && (hLeadCnt === 3 || (domSplit && (sig ? pick === g.h : hDomInfo.dom !== "EARTH")))) +
+    Number(hPureL5Ok) +
+    Number(!hIsBase ? hM11SigTeam || p12FavOpp || (hasActiveTrap && hM11DirTeam) : (kind === "M14_CORE_CLEAN" || kind === "M14_DIRECT_RELEASE") && p12FavBase) +
+    Number(sig && pick === g.h);
+  const smAwayTicks =
+    Number(m14Sig && aIsBase && !hasActiveTrap) +
+    Number(!dualWaterTrap && (aLeadCnt === 3 || (domSplit && (sig ? pick === g.a : aDomInfo.dom !== "EARTH")))) +
+    Number(aPureL5Ok) +
+    Number(!aIsBase ? aM11SigTeam || p12FavOpp || (hasActiveTrap && aM11DirTeam) : (kind === "M14_CORE_CLEAN" || kind === "M14_DIRECT_RELEASE") && p12FavBase) +
+    Number(sig && pick === g.a);
+
+  const efHomeTicks = Number(elemFollow.hasPick && elemFollow.pick === g.h);
+  const efAwayTicks = Number(elemFollow.hasPick && elemFollow.pick === g.a);
+
+  const f4HomeTicks =
+    Number(p1Hit && ep === g.h) +
+    Number(p2Hit && ep === g.h) +
+    Number(p3Hit && ep === g.h) +
+    Number(p4Hit && sugPick === g.h);
+  const f4AwayTicks =
+    Number(p1Hit && ep === g.a) +
+    Number(p2Hit && ep === g.a) +
+    Number(p3Hit && ep === g.a) +
+    Number(p4Hit && sugPick === g.a);
+
+  const totHomeTicks = b1HomeTicks + smHomeTicks + efHomeTicks + f4HomeTicks;
+  const totAwayTicks = b1AwayTicks + smAwayTicks + efAwayTicks + f4AwayTicks;
+  const deltaTicks = Math.abs(totHomeTicks - totAwayTicks);
+
+  type RefTier = "DIAMOND" | "STRONG_SIGNAL" | "RANKED_CONSENSUS" | "RANKED_LEAN";
+  type RankedBoxItem = {
+    id: string;
+    rank: number;
+    boxTitleFa: string;
+    maxPts: number;
+    team: string;
+    pts: number;
+    tagFa: string;
+  };
+
+  // Empirical Ranking of the 6 Signal Boxes (2,865 games, 2024–2027):
+  // Rank 1: Box 6 (۶. تلفیق ۴ پترن — up to 10 pts)
+  // Rank 2: Box 3 (۳. حکم و مسیر نهایی باکس ۲ — up to 9 pts)
+  // Rank 3: Box 2 (۲. باکس هوشمند ۱۴ — up to 6 pts)
+  // Rank 4: Box 5 (۵. برنده المنت فالوآپ — up to 3.5 pts)
+  // Rank 5: Box 4 (۴. المنت غالب [F-A-W-E] — up to 1.5 pts)
+  // Rank 6: Box 1 (۱. چک‌لیست شاخص‌ها — up to 1.5 pts)
+  const r82SatTrap =
+    clashBoxes &&
+    (elemFollow.ruleCode === "AIR_SAT8_SMALL" || elemFollow.ruleCode === "EARTH_SAT10_SMALL") &&
+    !p4Hit;
+  const r82WeakClashTrap = Boolean(sig && clashBoxes && !p4Hit && !vip);
+  const r82F4Cnt = Number(p1Hit) + Number(p2Hit) + Number(p3Hit) + Number(p4Hit);
+  const r82F4TickLead = f4Active ? (f4Pick === g.h ? totHomeTicks > totAwayTicks : totAwayTicks > totHomeTicks) : false;
+  const r82NoBetF4Trap = Boolean(!sig && f4Active && !r82F4TickLead);
+
+  const r82M12 = fm?.modes?.tri_gf_ultralock;
+  const r82M12Sig = Boolean(r82M12?.sig);
+  const r82M12Pick = r82M12?.pick || "";
+  const r82OppSug = sugPick === g.h ? g.a : g.h;
+  const r82SugL5 = sugPick === g.h ? hL5 : aL5;
+  const r82OppL5 = r82OppSug === g.h ? hL5 : aL5;
+  const r82B1Pick = b1HomeTicks > b1AwayTicks ? g.h : b1AwayTicks > b1HomeTicks ? g.a : "";
+  const r82B1Diff = Math.abs(b1HomeTicks - b1AwayTicks);
+  const r82B4Pick = !dualWaterTrap && hLeadCnt === 3 ? g.h : !dualWaterTrap && aLeadCnt === 3 ? g.a : "";
+
+  const r82RevM12 = Boolean(!dualWaterTrap && r82M12Sig && r82M12Pick === r82OppSug && (r82OppL5 < 50.0 || r82OppL5 >= 55.0));
+  const r82RevHomeM11 = Boolean(
+    !dualWaterTrap &&
+      r82OppSug === g.h &&
+      m11Sig &&
+      m11Pick === r82OppSug &&
+      elemFollow.hasPick &&
+      elemFollow.pick === r82OppSug
+  );
+  const r82DirM12 = Boolean(!dualWaterTrap && !sig && !p4AirTrap && r82M12Sig && r82M12Pick === sugPick && r82SugL5 >= 60.0);
+  const r82DirM11B1 = Boolean(
+    !dualWaterTrap && !sig && !p4AirTrap && m11Sig && m11Pick === sugPick && r82B1Pick === sugPick && r82SugL5 >= 65.0
+  );
+
+  let ptsHome = 0;
+  let ptsAway = 0;
+  let topBoxHit = false;
+  const rankedBoxes: RankedBoxItem[] = [];
+
+  const pushBox = (id: string, rank: number, boxTitleFa: string, maxPts: number, team: string, pts: number, tagFa: string) => {
+    if (pts > 0 && (team === g.h || team === g.a)) {
+      if (team === g.h) ptsHome += pts;
+      else ptsAway += pts;
+      rankedBoxes.push({ id, rank, boxTitleFa, maxPts, team, pts, tagFa });
+    } else {
+      rankedBoxes.push({ id, rank, boxTitleFa, maxPts, team: "", pts: 0, tagFa });
+    }
+  };
+
+  // Rank 1: ۶. تلفیق ۴ پترن (max 10 pts)
+  if (f4Active) {
+    const soloP3 = p3Hit && !(p1Hit || p2Hit || p4Hit);
+    if (r82F4Cnt >= 2 && (sig || r82F4TickLead)) {
+      pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, f4Pick, 10.0, `چندپترنه (${f4Tags.join("+").replace(/پترن /g, "P")})`);
+      topBoxHit = true;
+    } else if ((sig && p4Hit) || (!sig && (p1Hit || p2Hit) && r82F4TickLead)) {
+      pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, f4Pick, 8.0, `هم‌تیک (${f4Tags.join("+").replace(/پترن /g, "P")})`);
+      topBoxHit = true;
+    } else if (!sig && p4Hit && r82F4TickLead) {
+      pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, f4Pick, 7.0, "پترن ۴ برتر");
+      topBoxHit = true;
+    } else if (soloP3) {
+      pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, f4Pick, 1.0, "تک‌پترن ۳ (احتیاط)");
+    } else {
+      pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, f4Pick, 1.5, "کسری تیک کل");
+    }
+  } else if (p4AirTrap && elemFollow.hasPick) {
+    pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, elemFollow.pick, 3.5, "ضد اشباع المنت");
+  } else {
+    pushBox("b6", 1, "۶. تلفیق ۴ پترن", 10, "", 0, "بدون پترن");
+  }
+
+  // Rank 2: ۳. حکم و مسیر باکس ۲ (max 9 pts)
+  if (sig && vip && !r82SatTrap) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, pick, 9.0, "★VIP ویژه");
+    topBoxHit = true;
+  } else if (sig && !r82WeakClashTrap && !r82SatTrap) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, pick, 7.0, "سیگنال تایید ✓");
+    topBoxHit = true;
+  } else if (r82RevM12 || r82RevHomeM11) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, r82OppSug, 7.0, "چرخش معکوس ⇄");
+    topBoxHit = true;
+  } else if (r82WeakClashTrap || r82SatTrap) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, "", 0, "مهار تله تضاد ✕");
+  } else if (r82DirM12 || r82DirM11B1) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, sugPick, 7.0, "مستقیم تکمیلی ✓");
+    topBoxHit = true;
+  } else if (r82NoBetF4Trap && f4Pick === sugPick) {
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, sugPick, 1.5, "مسیر کسری‌تیک");
+  } else {
+    const pts3 = r82SugL5 >= 58.0 ? 5.0 : r82SugL5 >= 50.0 ? 4.0 : 2.5;
+    pushBox("b3", 2, "۳. حکم باکس ۲", 9, sugPick, pts3, `مسیر پیشنهادی (${r82SugL5.toFixed(0)}%)`);
+  }
+
+  // Rank 3: ۲. باکس هوشمند ۱۴ (max 6 pts)
+  if (sig && !r82WeakClashTrap && !r82SatTrap) {
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, pick, 6.0, `سیگنال ۱۴ (${smHomeTicks}-${smAwayTicks})`);
+    topBoxHit = true;
+  } else if (r82RevM12 || r82RevHomeM11) {
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, r82OppSug, 5.0, "قفل معکوس ۱۲/۱۱ ⇄");
+  } else if (r82WeakClashTrap || r82SatTrap) {
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, "", 0, "رد تله تضاد ✕");
+  } else if (r82DirM12 || r82DirM11B1) {
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, sugPick, 4.5, "تایید موتور ۱۲/۱۱");
+  } else if (smHomeTicks !== smAwayTicks) {
+    const smWin = smHomeTicks > smAwayTicks ? g.h : g.a;
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, smWin, 2.0, `برتری تیک (${smHomeTicks}-${smAwayTicks})`);
+  } else {
+    pushBox("b2", 3, "۲. هوشمند ۱۴", 6, "", 0, `مساوی (${smHomeTicks}-${smAwayTicks})`);
+  }
+
+  // Rank 4: ۵. برنده المنت فالوآپ (max 3.5 pts)
+  if (elemFollow.hasPick) {
+    const pts5 = elemFollow.tier === "STRONG" ? 3.5 : 2.0;
+    pushBox(
+      "b5",
+      4,
+      "۵. فالوآپ المنت",
+      3.5,
+      elemFollow.pick,
+      pts5,
+      elemFollow.tier === "STRONG" ? "فالوآپ قوی ★" : "فالوآپ متوسط ✓"
+    );
+  } else {
+    pushBox("b5", 4, "۵. فالوآپ المنت", 3.5, "", 0, "خنثی");
+  }
+
+  // Rank 5: ۴. المنت غالب [F-A-W-E] (max 1.5 pts)
+  if (r82B4Pick) {
+    pushBox("b4", 5, "۴. المنت غالب", 1.5, r82B4Pick, 1.5, "برتری ★3/4");
+  } else if (domSplit && hDomInfo.maxCnt !== aDomInfo.maxCnt) {
+    const domWin = hDomInfo.maxCnt > aDomInfo.maxCnt ? g.h : g.a;
+    pushBox("b4", 5, "۴. المنت غالب", 1.5, domWin, 1.0, "شکاف المنت");
+  } else {
+    pushBox("b4", 5, "۴. المنت غالب", 1.5, "", 0, dualWaterTrap ? "۲×WATER" : "هم‌المنت");
+  }
+
+  // Rank 6: ۱. چک‌لیست باکس ۱ (max 1.5 pts)
+  if (r82B1Pick) {
+    const pts1 = r82B1Diff >= 2 ? 1.5 : 1.0;
+    pushBox("b1", 6, "۱. چک‌لیست", 1.5, r82B1Pick, pts1, `برتری (${b1HomeTicks}-${b1AwayTicks})`);
+  } else {
+    pushBox("b1", 6, "۱. چک‌لیست", 1.5, "", 0, `مساوی (${b1HomeTicks}-${b1AwayTicks})`);
+  }
+
+  ptsHome = Math.round(ptsHome * 10) / 10;
+  ptsAway = Math.round(ptsAway * 10) / 10;
+  const deltaPts = Math.round(Math.abs(ptsHome - ptsAway) * 10) / 10;
+  const refPick = ptsHome > ptsAway ? g.h : ptsAway > ptsHome ? g.a : sugPick;
+  const efStrongMatch = Boolean(elemFollow.hasPick && elemFollow.tier === "STRONG" && elemFollow.pick === refPick);
+
+  let refTier: RefTier = "RANKED_LEAN";
+  if (topBoxHit && deltaPts >= 18.0) {
+    refTier = "DIAMOND";
+  } else if (topBoxHit && deltaPts >= 8.0) {
+    refTier = "STRONG_SIGNAL";
+  } else if (deltaPts >= 5.5 || (deltaPts >= 4.0 && efStrongMatch)) {
+    refTier = "RANKED_CONSENSUS";
+  } else {
+    refTier = "RANKED_LEAN";
+  }
+
+  const refActive = refTier === "DIAMOND" || refTier === "STRONG_SIGNAL" || refTier === "RANKED_CONSENSUS";
+  const isTopSignal = refTier === "DIAMOND" || refTier === "STRONG_SIGNAL";
+  const isOppositeWin = Boolean(refPick === r82OppSug);
+  const boxesForPick = rankedBoxes.filter((b) => b.team === refPick && b.pts > 0).length;
+  const boxesAgainstPick = rankedBoxes.filter((b) => b.team !== "" && b.team !== refPick && b.pts > 0).length;
+  const winPts = refPick === g.h ? ptsHome : ptsAway;
+  const losePts = refPick === g.h ? ptsAway : ptsHome;
+
+  const refReasonFa =
+    refTier === "DIAMOND"
+      ? `رتبه ۱ الماسی ۶ باکس (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): اجماع سنگین باکس‌های رتبه بالا به سود ${getTeam3Code(refPick)}`
+      : refTier === "STRONG_SIGNAL"
+        ? isOppositeWin
+          ? `رتبه ۲ سیگنال قوی معکوس ⇄ (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): چرخش وزنی ۶ باکس به تیم معکوس ${getTeam3Code(refPick)}`
+          : `رتبه ۲ سیگنال قوی ۶ باکس (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): برتری قاطع باکس‌های رتبه ۱ تا ۳ به سود ${getTeam3Code(refPick)}`
+        : refTier === "RANKED_CONSENSUS"
+          ? isOppositeWin
+            ? `رتبه ۳ تایید رتبه‌بندی ۶ باکس ⇄ (${winPts} برابر ${losePts} امتیاز • ${boxesForPick} باکس موافق): غلبه فالوآپ و چک‌لیست به سود ${getTeam3Code(refPick)}`
+            : `رتبه ۳ تایید رتبه‌بندی ۶ باکس (${winPts} برابر ${losePts} امتیاز • ${boxesForPick} باکس موافق): هم‌جهتی فالوآپ المنت و مسیر باکس‌ها به سود ${getTeam3Code(refPick)}`
+          : `رتبه ۴ برتری خفیف امتیازی (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): کفه سبک امتیاز ۶ باکس به سود ${getTeam3Code(refPick)} (کم‌فاصله)`;
+
+  const referee6 = {
+    active: refActive,
+    isTopSignal,
+    isDiamond: refTier === "DIAMOND",
+    isOppositeWin,
+    isCore: isTopSignal,
+    tier: refTier,
+    code: refTier,
+    pick: refPick,
+    sugPick,
+    oppSug: r82OppSug,
+    vetoSide: r82WeakClashTrap || r82SatTrap ? sugPick : r82NoBetF4Trap ? f4Pick : "",
+    reasonFa: refReasonFa,
+    ptsHome,
+    ptsAway,
+    deltaPts,
+    boxesForPick,
+    boxesAgainstPick,
+    rankedBoxes,
+    b1HomeTicks,
+    b1AwayTicks,
+    smHomeTicks,
+    smAwayTicks,
+    efHomeTicks,
+    efAwayTicks,
+    f4HomeTicks,
+    f4AwayTicks,
+    totHomeTicks,
+    totAwayTicks,
+    deltaTicks,
+  };
+
+  return {
+    kind,
+    sig,
+    vip,
+    pick,
+    baseM14Pick: p,
+    oppTeam: o,
+    reasonFa,
+    code,
+    m14Sig,
+    trapBipolarWeak,
+    trapAwayNegWarm,
+    trapDualWater,
+    hasActiveTrap,
+    dualWaterTrap,
+    domSplit,
+    elemFollow,
+    fusion4,
+    referee6,
+    hDomInfo,
+    aDomInfo,
+    hLeadCnt,
+    aLeadCnt,
+    pLeadCnt,
+    oLeadCnt,
+    m11Sig,
+    m11Pick,
+    m11DirOpp,
+    m11FavOpp,
+    p12FavOpp,
+    p12FavBase,
+    spwrFavOpp,
+    hP12,
+    aP12,
+    hSPwr,
+    aSPwr,
+    hWarm,
+    aWarm,
+    hL5,
+    aL5,
+    pl5,
+    ol5,
+  };
+}
+
+export type AntiNoBetKind =
+  | "M12_CORE"
+  | "DIRECT_RELEASE"
+  | "OPPOSITE_FLIP"
+  | "HOLD_DUAL_EARTH"
+  | "HOLD_3OF3_CLASH"
+  | "HOLD_NEUTRAL";
+
+function evalSmartAntiNoBet(g: NbaGamePred) {
+  const fm = g.fusion_meta;
+  const m12 = fm?.modes?.tri_gf_ultralock;
+  const m11 = fm?.modes?.tri_gf_routed;
+  const dp = fm?.modes?.dual_pillar;
+  const g1 = fm?.geo1xxx;
+  const wtp: any = g.wtp ?? {};
+  const p = m12?.pick || g.sys_win || g.h;
+  const o = p === g.h ? g.a : g.h;
+  const l5h = Number(wtp.l5h ?? 50);
+  const hEl = String(wtp.hel || "AIR");
+  const aEl = String(wtp.ael || "AIR");
+  const hL5 = Math.round(l5h * 10) / 10;
+  const aL5 = Math.round((100 - l5h) * 10) / 10;
+  const pel = p === g.h ? hEl : aEl;
+  const oel = o === g.h ? hEl : aEl;
+  const pl5 = p === g.h ? hL5 : aL5;
+  const ol5 = o === g.h ? hL5 : aL5;
+  const code = g1?.m12_route?.code ?? "";
+  const rfa = g1?.m12_route?.reason_fa ?? "";
+  const is3of3P = Boolean(g1 && g1.win === p && g1.all_win === p && g1.gf_win === p);
+  const o0 = o === g.h ? Number(g1?.h_0xxx ?? 0) : Number(g1?.a_0xxx ?? 0);
+  const coldO = Boolean(g1?.cold0_win === o && o0 < 0);
+  const dpSig = Boolean(dp?.sig);
+  const dpPick = dp?.pick || "";
+  const dpO = Boolean(dpSig && dpPick === o);
+  const m11Sig = Boolean(m11?.sig);
+  const m11Pick = m11?.pick || "";
+  const rawFb = rfa.startsWith("موتور ۳ عددی");
+
+  let kind: AntiNoBetKind = "HOLD_NEUTRAL";
+  let sig = false;
+  let vip = false;
+  let pick = p;
+  let reasonFa = "توقف خنثی: بدون برتری مستقیم یا معکوس";
+
+  if (m12?.sig) {
+    kind = "M12_CORE";
+    sig = true;
+    vip = Boolean(m12.vip);
+    pick = p;
+    reasonFa = "سیگنال اصلی حالت ۱۲ تایید شده است";
+  } else if (pel === "EARTH" && oel === "EARTH") {
+    kind = "HOLD_DUAL_EARTH";
+    sig = false;
+    pick = p;
+    reasonFa = "توقف ایمنی: تقابل پرنوسان دو تیم EARTH (ورود ممنوع)";
+  } else if (code === "ULTRA_3OF3_CLASH_HOLD") {
+    kind = "HOLD_3OF3_CLASH";
+    sig = false;
+    pick = p;
+    reasonFa = "توقف ایمنی: تضاد همزاد با اجماع ۳/۳ اعداد";
+  } else if (m11Sig && m11Pick === p && pel !== "EARTH" && pl5 >= 75.0) {
+    kind = "DIRECT_RELEASE";
+    sig = true;
+    vip = pl5 >= 80.0;
+    pick = p;
+    reasonFa = `آزادسازی مستقیم (گروه ۱): قفل حالت ۱۱ فعال + ${pel} (${pl5.toFixed(1)}%)`;
+  } else if (!m11Sig && oel !== "EARTH" && is3of3P && ((dpO && ol5 >= 52.0) || (rawFb && ol5 >= 60.0))) {
+    kind = "HOLD_3OF3_CLASH";
+    sig = false;
+    pick = p;
+    reasonFa = "سپر ایمنی ۳/۳: اجماع هر ۳ عدد با تیم پایه است (منع چرخش عکس)";
+  } else if (!m11Sig && oel !== "EARTH" && !is3of3P && ((dpO && ol5 >= 52.0) || (rawFb && ol5 >= 60.0))) {
+    kind = "OPPOSITE_FLIP";
+    sig = true;
+    vip = false;
+    pick = o;
+    if (dpO && ol5 >= 52.0) {
+      reasonFa = `چرخش به تیم عکس (گروه ۲): تایید همزاد دو-ستونی خلاف مسیر خام (${ol5.toFixed(1)}%)`;
+    } else if (coldO) {
+      reasonFa = `چرخش به تیم عکس (گروه ۲): قطب سرد ۰xxx منفی + برتری جدول (${ol5.toFixed(1)}%)`;
+    } else {
+      reasonFa = `چرخش به تیم عکس (گروه ۲): رد مسیر خام ضعیف به سود تیم قوی جدول (${ol5.toFixed(1)}%)`;
+    }
+  }
+
+  return {
+    kind,
+    sig,
+    vip,
+    pick,
+    baseM12Pick: p,
+    oppTeam: o,
+    reasonFa,
+    m11Sig,
+    m11Pick,
+    dpSig,
+    dpPick,
+    coldO,
+    is3of3P,
+    hEl,
+    aEl,
+    hL5,
+    aL5,
+  };
+}
+
+export default function NbaDashboardTab({
+  fusionMode = "tri_gf_ultralock",
+  twinDbKind = "team",
+  tour = "ATP",
+}: {
+  fusionMode?: FusionModeKey;
+  twinDbKind?: TwinDbKind;
+  tour?: "ATP" | "WTA";
+}) {
+  const [rawGames, setRawGames] = useState<NbaGamePred[]>([]);
+  type CardBoxKey = "referee6" | "sixboxes" | "box1" | "smart" | "box2" | "dom" | "elem" | "fusion4" | "lineup";
+  const [defaultCardBoxes, setDefaultCardBoxes] = useState<Record<CardBoxKey, boolean>>({
+    referee6: false,
+    sixboxes: false,
+    box1: false,
+    smart: false,
+    box2: true,
+    dom: false,
+    elem: false,
+    fusion4: false,
+    lineup: false,
+  });
+  const [cardBoxOverrides, setCardBoxOverrides] = useState<Record<string, boolean>>({});
+  const isCardBoxOpen = (gameNo: number, key: CardBoxKey) => {
+    const k = `${gameNo}:${key}`;
+    return k in cardBoxOverrides ? cardBoxOverrides[k] : defaultCardBoxes[key];
+  };
+  const toggleCardBox = (gameNo: number, key: CardBoxKey) => {
+    setCardBoxOverrides((prev) => {
+      const k = `${gameNo}:${key}`;
+      const cur = k in prev ? prev[k] : defaultCardBoxes[key];
+      return { ...prev, [k]: !cur };
+    });
+  };
+  const toggleGlobalCardBox = (key: CardBoxKey) => {
+    const nextOpen = !defaultCardBoxes[key];
+    const innerSixKeys: CardBoxKey[] = ["box1", "smart", "box2", "dom", "elem", "fusion4"];
+    const autoOpenSix = nextOpen && innerSixKeys.includes(key);
+    setDefaultCardBoxes((prev) => ({
+      ...prev,
+      [key]: nextOpen,
+      ...(autoOpenSix ? { sixboxes: true } : {}),
+    }));
+    setCardBoxOverrides((prev) => {
+      const next = { ...prev };
+      const suffix = `:${key}`;
+      for (const ok of Object.keys(next)) {
+        if (ok.endsWith(suffix) || (autoOpenSix && ok.endsWith(":sixboxes"))) delete next[ok];
+      }
+      return next;
+    });
+  };
+  const setAllCardBoxes = (open: boolean) => {
+    setDefaultCardBoxes({
+      referee6: open,
+      sixboxes: open,
+      box1: open,
+      smart: open,
+      box2: open,
+      dom: open,
+      elem: open,
+      fusion4: open,
+      lineup: open,
+    });
+    setCardBoxOverrides({});
+  };
+  const didAutoPickDateRef = useRef(false);
+  const isPure2EngineMode =
+    fusionMode === "dual_pillar" ||
+    fusionMode === "vip_cross" ||
+    fusionMode === "astro_lock" ||
+    fusionMode === "diamond";
+  const games = useMemo(() => {
+    return rawGames.map((g) => {
+      const m =
+        fusionMode === "anti_nobet_smart"
+          ? evalSmartAntiNoBet(g)
+          : fusionMode === "total_elem_12"
+            ? evalSmartMode14(g)
+            : g.fusion_meta?.modes?.[fusionMode];
+      if (!m) return g;
+      const inOverlap = g.fusion_meta?.in_auth_overlap !== false;
+      const pick = m.pick || g.sys_win || g.h;
+      const sig = Boolean(m.sig && inOverlap);
+      const vip = Boolean(m.vip && inOverlap);
+      const melDy = String((g.wtp_day ?? g.wtp)?.mel ?? "AIR");
+      const done = Boolean(g.done && g.aw && g.aw !== "PENDING");
+      const hit = done ? (pick === g.aw ? "WIN" : "LOSS") : "";
+      const allowMode1VetoHint = isPure2EngineMode && Boolean(g.fusion_meta?.vetoed);
+      const bypassDailyEarth =
+        fusionMode === "pos_inv_lock" ||
+        fusionMode === "gf_fin_pure" ||
+        fusionMode === "tri_gf_routed" ||
+        fusionMode === "tri_gf_ultralock" ||
+        fusionMode === "anti_nobet_smart" ||
+        fusionMode === "total_elem_12";
+      return {
+        ...g,
+        sys_win: pick,
+        pw: pick,
+        fpw: sig ? pick : "",
+        twWin: pick,
+        f1: Boolean(sig || allowMode1VetoHint),
+        f1_idx: sig,
+        f1_guard: sig,
+        f1_wtp: sig,
+        vip_idx3: vip,
+        idx_rescue: false,
+        f1_wtp_day: bypassDailyEarth ? sig : Boolean(sig && melDy !== "EARTH"),
+        vip_idx3_day: bypassDailyEarth ? vip : Boolean(vip && melDy !== "EARTH"),
+        st: done ? hit : g.st,
+        fst: done && sig ? hit : "",
+      };
+    });
+  }, [rawGames, fusionMode, isPure2EngineMode]);
+  const [histGames, setHistGames] = useState<HistGameRow[]>([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [engineMode, setEngineMode] = useState<EngineMode>("manual");
+  const [manualPersp, setManualPersp] = useState<"home" | "away">("home");
+  const [manualDayFilter, setManualDayFilter] = useState<string>("ALL");
+  const [openDailyCardsSection, setOpenDailyCardsSection] = useState<boolean>(true);
+  const [dailyCardDate, setDailyCardDate] = useState<string>("2026-11-18");
+  const [manualGeoKind, setManualGeoKind] = useState<"fin" | "dyn">("fin");
+  const [monthlyCalendarKind, setMonthlyCalendarKind] = useState<"shamsi" | "greg">("shamsi");
+  const [syncBusy, setSyncBusy] = useState<boolean>(false);
+  const [rosterSyncBusy, setRosterSyncBusy] = useState<boolean>(false);
+  const [syncMsg, setSyncMsg] = useState<string>(() => {
+    try {
+      const pending = sessionStorage.getItem("nba_sync_toast_v1");
+      if (pending) {
+        sessionStorage.removeItem("nba_sync_toast_v1");
+        return pending;
+      }
+    } catch {}
+    return "";
+  });
+  const [kalshiMarkets, setKalshiMarkets] = useState<Record<string, any>>({});
+  const [kalshiConfigOpen, setKalshiConfigOpen] = useState<boolean>(false);
+  const [kalshiHasKey, setKalshiHasKey] = useState<boolean>(false);
+  const [kalshiKeyMasked, setKalshiKeyMasked] = useState<string>("");
+  const [kalshiKeyIdInput, setKalshiKeyIdInput] = useState<string>("");
+  const [kalshiPemInput, setKalshiPemInput] = useState<string>("");
+  const [kalshiEnv, setKalshiEnv] = useState<"live" | "demo">("live");
+  const [kalshiDefaultStake, setKalshiDefaultStake] = useState<number>(3);
+  const [kalshiVipStake, setKalshiVipStake] = useState<number>(6);
+  const [kalshiAutoEnabled, setKalshiAutoEnabled] = useState<boolean>(false);
+  const [kalshiAutoTimeEt, setKalshiAutoTimeEt] = useState<string>("11:00");
+  const [kalshiBalance, setKalshiBalance] = useState<string | null>(null);
+  const [kalshiLedger, setKalshiLedger] = useState<Record<string, any>>({});
+  const [kalshiCardEnabled, setKalshiCardEnabled] = useState<Record<number, boolean>>({});
+  const [kalshiCardStake, setKalshiCardStake] = useState<Record<number, number>>({});
+  const [kalshiCardLimit, setKalshiCardLimit] = useState<Record<number, number>>({});
+  const [kalshiCardFeedback, setKalshiCardFeedback] = useState<Record<number, { ok: boolean; msg: string }>>({});
+  const [kalshiBusy, setKalshiBusy] = useState<boolean>(false);
+  const [kalshiExecReport, setKalshiExecReport] = useState<{ mode: string; results: any[]; summary?: any; error?: string } | null>(null);
+  const [comboOpen, setComboOpen] = useState<boolean>(false);
+  const [comboSelectedByDate, setComboSelectedByDate] = useState<Record<string, number[]>>({});
+  const [comboStakeUsd, setComboStakeUsd] = useState<number>(4);
+  const [comboCustomLimitCents, setComboCustomLimitCents] = useState<Record<string, number>>({});
+  const [comboReport, setComboReport] = useState<any | null>(null);
+  const [dailyCardMode, setDailyCardMode] = useState<"nhl_best" | "nhl_vip3" | "nhl_f1_guard" | "nhl_f1_idx_raw" | "nhl_f1" | "nhl_f1_union" | "step" | "geo" | "geo_dyn" | "geo_tab">("nhl_best");
+  const [oddsFreqMode, setOddsFreqMode] = useState<"weekly" | "daily">(() => {
+    try {
+      const s = localStorage.getItem("nba_odds_freq_mode_v1");
+      if (s === "daily" || s === "weekly") return s;
+    } catch {}
+    return "weekly";
+  });
+  const changeOddsFreqMode = (m: "weekly" | "daily") => {
+    setOddsFreqMode(m);
+    try {
+      localStorage.setItem("nba_odds_freq_mode_v1", m);
+    } catch {}
+  };
+  const activeWtpOf = (g: NbaGamePred) => (oddsFreqMode === "daily" ? (g.wtp_day ?? g.wtp) : g.wtp);
+  const activeF1WtpOf = (g: NbaGamePred) =>
+    Boolean(oddsFreqMode === "daily" ? (g.f1_wtp_day ?? g.f1_wtp ?? g.f1_guard ?? g.f1_idx) : (g.f1_wtp ?? g.f1_guard ?? g.f1_idx));
+  const activeVip3Of = (g: NbaGamePred) =>
+    Boolean(oddsFreqMode === "daily" ? (g.vip_idx3_day ?? g.vip_idx3) : g.vip_idx3);
+  const activeUnionOf = (g: NbaGamePred) =>
+    Boolean(oddsFreqMode === "daily" ? (g.f1_union_day ?? g.f1_union) : g.f1_union);
+  const [dailyCardFilter, setDailyCardFilter] = useState<"all" | "qualified" | "anti_nobet" | "referee6" | "ref_top" | "vip3" | "posev" | "win" | "loss" | "pending">("all");
+  const [filterAutoNote, setFilterAutoNote] = useState<string>("");
+  const [cardFlipDir, setCardFlipDir] = useState<Record<number, boolean>>({});
+  const [openManualKalshiCards, setOpenManualKalshiCards] = useState<Record<number, boolean>>({});
+  const [openKalshiAutoPanel, setOpenKalshiAutoPanel] = useState<boolean>(false);
+  const [openAdvancedCardOpts, setOpenAdvancedCardOpts] = useState<boolean>(false);
+  const [openStatsSection, setOpenStatsSection] = useState<boolean>(false);
+  const [openManualSection, setOpenManualSection] = useState<boolean>(false);
+  const [openSummaryTable, setOpenSummaryTable] = useState<boolean>(false);
+  const [manualOpenGames, setManualOpenGames] = useState<Record<number, boolean>>({});
+  const [manualShowAllRows, setManualShowAllRows] = useState<Record<number, boolean>>({});
+  const [copiedGame, setCopiedGame] = useState<number | null>(null);
+  const MANUAL_STORAGE_KEY = "nba-manual-filters-ele12-v2";
+  const [manualFilters, setManualFilters] = useState<Record<number, ManualFilterState>>(() => {
+    try {
+      const raw = localStorage.getItem("nba-manual-filters-ele12-v2");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(manualFilters));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [manualFilters]);
+  const [twinPattern, setTwinPattern] = useState<TwinPatternKey>("twF1Wtp");
+  const [fusionPattern, setFusionPattern] = useState<FusionPatternKey>("f12");
+  const [singlePattern, setSinglePattern] = useState<SinglePatternKey>("s1_f1");
+  const [seasonFilter, setSeasonFilter] = useState<string>("ALL");
+  const [monthFilter, setMonthFilter] = useState<string>("ALL");
+  const [dateFilter, setDateFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [teamQuery, setTeamQuery] = useState<string>("");
+  const [expandedGame, setExpandedGame] = useState<number | null>(null);
+  const [showMonthlyTable, setShowMonthlyTable] = useState<boolean>(true);
+  const [page, setPage] = useState<number>(1);
+  const PAGE_SIZE = 30;
+  const MASTER_DATA_VERSION = "v68";
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/fusion_nba_master.json?v=${MASTER_DATA_VERSION}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: { games?: NbaGamePred[] }) => {
+        if (!cancelled && d?.games) {
+          setRawGames(d.games);
+          if (!didAutoPickDateRef.current) {
+            didAutoPickDateRef.current = true;
+            const nextPending =
+              d.games.find((x) => x.s === "2026-27" && x.d >= "2026-11-16" && !x.done)?.d ||
+              "2026-11-18";
+            setDailyCardDate(nextPending);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [twinDbKind, MASTER_DATA_VERSION]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHistLoading(true);
+    const histUrl = twinDbKind === "player" ? "/player_nba_hist_mode_c.json" : "/nba_history_pack_2010_2026.json";
+    fetch(histUrl)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((rawRows: any[]) => {
+        if (!cancelled && Array.isArray(rawRows)) {
+          const parsed: HistGameRow[] = rawRows.map((arr) => {
+            const h12 = Array.isArray(arr[8]) ? arr[8].map(String) : [];
+            const a12 = Array.isArray(arr[10]) ? arr[10].map(String) : [];
+            return {
+              d: String(arr[0]),
+              day: String(arr[1]),
+              s: String(arr[2]),
+              h: String(arr[3]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[3]),
+              a: String(arr[4]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[4]),
+              hp: Number(arr[5]),
+              ap: Number(arr[6]),
+              mg: Number(arr[7]),
+              h12,
+              hGeo: elemCodeFromFinal4(h12),
+              a12,
+              aGeo: elemCodeFromFinal4(a12),
+              f30: Number(arr[12] ?? 0),
+              hGeoDyn: String(arr[9] ?? ""),
+              aGeoDyn: String(arr[11] ?? ""),
+              hGeoTab: String(arr[14] ?? ""),
+              aGeoTab: String(arr[15] ?? ""),
+            };
+          });
+          setHistGames(parsed);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setHistLoading(false);
+      });
+
+    apiRpcFetch("/api/kalshi/markets")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fallback"))))
+      .then((d) => {
+        if (!cancelled && d?.markets && Object.keys(d.markets).length > 0) {
+          setKalshiMarkets(d.markets);
+        } else {
+          fetch("/tennis_atp_predictions.json")
+            .then((r2) => (r2.ok ? r2.json() : null))
+            .then((d2) => {
+              if (!cancelled && d2?.markets) setKalshiMarkets(d2.markets);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+
+    apiRpcFetch("/api/kalshi/state")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.ok) {
+          setKalshiHasKey(Boolean(d.hasKey));
+          setKalshiKeyMasked(d.keyIdMasked ?? "");
+          if (d.env) setKalshiEnv(d.env);
+          if (d.defaultStakeUsd) setKalshiDefaultStake(Number(d.defaultStakeUsd));
+          if (d.vipStakeUsd) setKalshiVipStake(Number(d.vipStakeUsd));
+          setKalshiAutoEnabled(Boolean(d.autoScheduleEnabled));
+          if (d.autoScheduleTimeEt) setKalshiAutoTimeEt(d.autoScheduleTimeEt);
+          if (d.ledger) setKalshiLedger(d.ledger);
+          if (d.hasKey) {
+            apiRpcFetch("/api/kalshi/balance", { method: "POST" })
+              .then((rb) => (rb.ok ? rb.json() : null))
+              .then((db) => {
+                if (!cancelled && db?.ok && db.balanceUsd) setKalshiBalance(db.balanceUsd);
+              })
+              .catch(() => {});
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const matchTwin = useCallback((g: NbaGamePred, p: TwinPatternKey) => {
+    if (p === "twVipIdx3") return Boolean(oddsFreqMode === "daily" ? (g.vip_idx3_day ?? g.vip_idx3) : g.vip_idx3);
+    if (p === "twF1Wtp") return Boolean(oddsFreqMode === "daily" ? (g.f1_wtp_day ?? g.f1_wtp ?? g.f1_guard ?? g.f1_idx) : (g.f1_wtp ?? g.f1_guard ?? g.f1_idx));
+    if (p === "twF1Guard") return Boolean(g.f1_guard ?? g.f1_idx);
+    if (p === "twF1Idx") return Boolean(g.f1_idx);
+    if (p === "twF1Union") return Boolean(oddsFreqMode === "daily" ? (g.f1_union_day ?? g.f1_union) : g.f1_union);
+    if (p === "twVipDual") return Boolean(g.vip);
+    if (p === "twF1") return Boolean(g.f1);
+    if (p === "twSNew") return Boolean(g.s_new);
+    if (p === "twF1Agree") return Boolean(g.f1 && (g.f30 ?? 0) > 0);
+    if (p === "twSA1") return Boolean(g.s_a1);
+    return true;
+  }, [oddsFreqMode]);
+
+  const matchFusion = useCallback((g: NbaGamePred, p: FusionPatternKey) => {
+    const f = g.f30 ?? 0;
+    if (p === "f12") return f >= 12;
+    if (p === "f8") return f >= 8;
+    if (p === "f6") return f >= 6;
+    if (p === "fa10") return Math.abs(f) >= 10;
+    return true;
+  }, []);
+
+  const matchSingle = useCallback((g: NbaGamePred, p: SinglePatternKey) => {
+    if (p === "s1_vip") return Boolean(g.vip);
+    if (p === "s1_f1") return Boolean(g.f1);
+    if (p === "s1_guard") return Boolean(g.s_new && g.a1_veto);
+    return true;
+  }, []);
+
+  const getGamePredWinner = (g: NbaGamePred) => {
+    const base =
+      twinPattern === "tall" && engineMode !== "manual"
+        ? (g.fpw ?? g.sys_win ?? g.pw ?? g.h)
+        : (g.sys_win ?? g.fpw ?? g.pw ?? g.h);
+    if (cardFlipDir[g.n]) {
+      return base === g.h ? g.a : g.h;
+    }
+    return base;
+  };
+
+  const getGameStatus = (g: NbaGamePred): "WIN" | "LOSS" | "PENDING" => {
+    if (!g.done || !g.aw || g.aw === "PENDING") return "PENDING";
+    const pw = getGamePredWinner(g);
+    return pw === g.aw ? "WIN" : "LOSS";
+  };
+
+  const runLiveNhlSync = async () => {
+    setSyncBusy(true);
+    setSyncMsg("");
+    try {
+      try {
+        sessionStorage.setItem(
+          "nba_sync_toast_v1",
+          "بروزرسانی زنده نتایج واقعی بازی‌های NBA از ESPN انجام شد و کارت‌ها با آخرین نتایج واقعی آپدیت شدند ✓"
+        );
+      } catch {}
+      const d = await apiRpcJson("/api/nba/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetDate: dailyCardDate }),
+      });
+      if (d?.ok) {
+        const ts = Date.now();
+        const rp = await fetch(`/fusion_nba_master.json?t=${ts}`);
+        if (rp.ok) {
+          const dp = await rp.json();
+          if (dp?.games) setRawGames(dp.games);
+        }
+        if ((d.updatedScores ?? 0) > 0) {
+          const histUrl = twinDbKind === "player" ? "/player_nba_hist_mode_c.json" : "/nba_history_pack_2010_2026.json";
+          const rh = await fetch(`${histUrl}?t=${ts}`);
+          if (rh.ok) {
+            const rawRows = await rh.json();
+            if (Array.isArray(rawRows)) {
+              const parsed: HistGameRow[] = rawRows.map((arr: any) => {
+                const h12 = Array.isArray(arr[8]) ? arr[8].map(String) : [];
+                const a12 = Array.isArray(arr[10]) ? arr[10].map(String) : [];
+                return {
+                  d: String(arr[0]),
+                  day: String(arr[1]),
+                  s: String(arr[2]),
+                  h: String(arr[3]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[3]),
+                  a: String(arr[4]) === "LA Clippers" ? "Los Angeles Clippers" : String(arr[4]),
+                  hp: Number(arr[5]),
+                  ap: Number(arr[6]),
+                  mg: Number(arr[7]),
+                  h12,
+                  hGeo: elemCodeFromFinal4(h12),
+                  a12,
+                  aGeo: elemCodeFromFinal4(a12),
+                  f30: Number(arr[12] ?? 0),
+                  hGeoDyn: String(arr[9] ?? ""),
+                  aGeoDyn: String(arr[11] ?? ""),
+                };
+              });
+              setHistGames(parsed);
+            }
+          }
+        }
+        const rm = await apiRpcFetch("/api/kalshi/markets");
+        if (rm.ok) {
+          const dm = await rm.json();
+          if (dm?.markets) setKalshiMarkets((prev) => ({ ...prev, ...dm.markets }));
+        }
+        try { sessionStorage.removeItem('nba_sync_toast_v1'); } catch {}
+        setSyncMsg(
+          `بروزرسانی زنده نتایج واقعی ESPN انجام شد (${d.updatedScores ?? 0} نتیجه جدید ثبت شد • کل بازی‌های انجام‌شده: ${d.totalDone ?? 0} • دقت فصل جاری: ${d.s2627?.pct ?? 84.6}% [${d.s2627?.w ?? 22}/${d.s2627?.n ?? 26}])`
+        );
+      } else {
+        setSyncMsg(d?.error ?? "خطا در بروزرسانی نتایج واقعی NBA");
+      }
+    } catch (e) {
+      try { sessionStorage.removeItem('nba_sync_toast_v1'); } catch {}
+      setSyncMsg((e as Error).message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const runLiveRosterSync = async () => {
+    setRosterSyncBusy(true);
+    setSyncMsg("");
+    try {
+      const d = await apiRpcJson("/api/nba/sync-rosters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetDate: dailyCardDate }),
+      });
+      if (d?.ok) {
+        const ts = Date.now();
+        const rp = await fetch(`/fusion_nba_master.json?t=${ts}`, { cache: "no-store" });
+        if (rp.ok) {
+          const dp = await rp.json();
+          if (dp?.games) setRawGames(dp.games);
+        }
+        try {
+          const rm = await apiRpcFetch("/api/kalshi/markets");
+          if (rm.ok) {
+            const dm = await rm.json();
+            if (dm?.markets) setKalshiMarkets((prev) => ({ ...prev, ...dm.markets }));
+          }
+        } catch {}
+        const diffNotes = Array.isArray(d.lineupDiffs) && d.lineupDiffs.length > 0
+          ? " • تغییرات لیست ۸ نفره: " +
+            d.lineupDiffs
+              .map(
+                (x: any) =>
+                  `${x.matchup} (${(x.removed ?? []).join("، ") || "—"} ← ${(x.added ?? []).join("، ") || "—"})`
+              )
+              .join(" | ")
+          : " • لیست ۸ نفره تمام بازی‌ها با آخرین گزارش مصدومان ESPN تطابق کامل دارد";
+        setSyncMsg(
+          `بروزرسانی زنده مصدومان ESPN و بازمحاسبه لیست ۸ نفره انجام شد (${d.totalBlockedPlayers ?? 0} غایب/مصدوم بررسی شد • ${d.checkedGames ?? 0} بازی پیش‌رو بازمحاسبه شد • تغییر ترکیب: ${d.changedLineups ?? 0} بازی • دقت فصل جاری حالت ۱۲: ${d.s2627?.pct ?? 96.9}% [${d.s2627?.w ?? 31}/${d.s2627?.n ?? 32}])${diffNotes}`
+        );
+      } else {
+        setSyncMsg(d?.error ?? "خطا در بروزرسانی زنده مصدومان و لیست ۸ نفره");
+      }
+    } catch (e) {
+      setSyncMsg((e as Error).message);
+    } finally {
+      setRosterSyncBusy(false);
+    }
+  };
+
+  const patternGames = games.filter((g) =>
+    engineMode === "manual"
+      ? (manualDayFilter === "ALL" || g.day === manualDayFilter) && matchTwin(g, twinPattern)
+      : engineMode === "twins"
+        ? matchTwin(g, twinPattern)
+        : engineMode === "fusion"
+          ? matchFusion(g, fusionPattern)
+          : matchSingle(g, singlePattern)
+  );
+  const patternCompleted = patternGames.filter((g) => {
+    const st = getGameStatus(g);
+    return st === "WIN" || st === "LOSS";
+  });
+  const patternWins = patternCompleted.filter((g) => getGameStatus(g) === "WIN").length;
+  const patternAcc = patternCompleted.length > 0 ? ((100 * patternWins) / patternCompleted.length).toFixed(2) : "0.00";
+
+  const seasons = ["2024-25", "2025-26", "2026-27"];
+  const seasonStats = seasons.map((s) => {
+    const sub = patternCompleted.filter((g) => g.s === s);
+    const w = sub.filter((g) => getGameStatus(g) === "WIN").length;
+    const pend = patternGames.filter((g) => g.s === s && getGameStatus(g) === "PENDING").length;
+    return {
+      season: s,
+      wins: w,
+      losses: sub.length - w,
+      total: sub.length,
+      pending: pend,
+      pct: sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "—",
+    };
+  });
+
+  const getMonthBucket = (g: NbaGamePred) => (monthlyCalendarKind === "shamsi" ? (g.sh_m ?? g.ym) : g.ym);
+  const months = Array.from(new Set(patternCompleted.map((g) => getMonthBucket(g)))).sort();
+  let cumW = 0;
+  let cumN = 0;
+  const monthlyRows = months.map((ym) => {
+    const sub = patternCompleted.filter((g) => getMonthBucket(g) === ym);
+    const mw = sub.filter((g) => getGameStatus(g) === "WIN").length;
+    const mn = sub.length;
+    cumW += mw;
+    cumN += mn;
+    return {
+      ym,
+      mw,
+      mn,
+      mPct: mn > 0 ? ((100 * mw) / mn).toFixed(1) : "0.0",
+      cumW,
+      cumN,
+      cumPct: cumN > 0 ? ((100 * cumW) / cumN).toFixed(2) : "0.00",
+    };
+  });
+
+  const allMonths = Array.from(new Set(games.map((g) => g.ym))).sort();
+  const allGameDates = Array.from(new Set(games.map((g) => g.d))).sort();
+  const activeDailyDate = allGameDates.includes(dailyCardDate)
+    ? dailyCardDate
+    : allGameDates.includes("2026-11-14")
+      ? "2026-11-14"
+      : allGameDates[allGameDates.length - 1] ?? "2026-11-14";
+  const dailyDateIdx = allGameDates.indexOf(activeDailyDate);
+  const gamesOnDailyDateRaw = games.filter((g) => g.d === activeDailyDate);
+  const gamesOnDailyDate = [...gamesOnDailyDateRaw].sort(
+    (a, b) => Math.abs(b.f30 ?? 0) - Math.abs(a.f30 ?? 0)
+  );
+
+  const histByDay = useMemo(() => {
+    const map: Record<string, HistGameRow[]> = {};
+    for (const r of histGames) {
+      if (!map[r.day]) map[r.day] = [];
+      map[r.day].push(r);
+    }
+    return map;
+  }, [histGames]);
+
+  const getDayPoolBefore = useCallback(
+    (day: string, dateIso: string): HistGameRow[] => {
+      const arr = histByDay[day];
+      if (!arr || arr.length === 0) return [];
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid].d < dateIso) lo = mid + 1;
+        else hi = mid;
+      }
+      return arr.slice(0, lo);
+    },
+    [histByDay]
+  );
+
+  const resolveNhlF1Pool = (g: NbaGamePred, dPool: HistGameRow[]): HistGameRow[] | null => {
+    if (!g.twins || g.twins.length === 0) return null;
+    const matched: HistGameRow[] = [];
+    for (const tw of g.twins) {
+      const td = String(tw[0]);
+      const thc = String(tw[1]);
+      const tac = String(tw[2]);
+      const found = dPool.find(
+        (r) => r.d === td && (getTeam3Code(r.h) === getTeam3Code(thc) || r.h === thc) && (getTeam3Code(r.a) === getTeam3Code(tac) || r.a === tac)
+      );
+      if (found) matched.push(found);
+    }
+    return matched.length >= 5 ? matched : null;
+  };
+
+  const scopeBeforeStatus = patternGames.filter((g) => {
+    if (seasonFilter !== "ALL" && g.s !== seasonFilter) return false;
+    if (monthFilter !== "ALL" && g.ym !== monthFilter) return false;
+    if (dateFilter !== "ALL" && g.d !== dateFilter) return false;
+    if (teamQuery.trim() !== "") {
+      const q = teamQuery.trim().toLowerCase();
+      if (!g.h.toLowerCase().includes(q) && !g.a.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const scopeStatusCounts = scopeBeforeStatus.reduce(
+    (acc, g) => {
+      const st = getGameStatus(g);
+      acc[st] = (acc[st] ?? 0) + 1;
+      return acc;
+    },
+    { WIN: 0, LOSS: 0, PENDING: 0 } as Record<"WIN" | "LOSS" | "PENDING", number>
+  );
+
+  const filteredGamesRaw = scopeBeforeStatus.filter((g) => {
+    if (statusFilter !== "ALL" && getGameStatus(g) !== statusFilter) return false;
+    return true;
+  });
+
+  const filteredGames =
+    dateFilter !== "ALL"
+      ? [...filteredGamesRaw].sort((a, b) =>
+          engineMode !== "single"
+            ? Math.abs(b.f30 ?? 0) - Math.abs(a.f30 ?? 0)
+            : Math.abs((b.vm6 ?? b.f30) ?? 0) - Math.abs((a.vm6 ?? a.f30) ?? 0)
+        )
+      : filteredGamesRaw;
+
+  const totalPages = Math.max(1, Math.ceil(filteredGames.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageGames = filteredGames.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const activeDef =
+    engineMode === "manual" || engineMode === "twins"
+      ? TWIN_PATTERN_DEFS.find((d) => d.key === twinPattern) ?? TWIN_PATTERN_DEFS[0]
+      : engineMode === "fusion"
+        ? FUSION_PATTERN_DEFS.find((d) => d.key === fusionPattern) ?? FUSION_PATTERN_DEFS[0]
+        : SINGLE_PATTERN_DEFS.find((d) => d.key === singlePattern) ?? SINGLE_PATTERN_DEFS[0];
+
+  return (
+    <Card className="border-sky-200 bg-sky-50/40 shadow-sm mb-6" data-testid="card-nba-new-system">
+      <CardContent className="p-4 sm:p-5 flex flex-col gap-4">
+        {/* Prominent Top Live Update Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-sky-200/80 pb-3.5" dir="rtl">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2.5 py-1 rounded-md bg-sky-800 text-white text-xs font-extrabold shadow-2xs">
+              نوار بروزرسانی زنده داده‌ها
+            </span>
+            <button
+              type="button"
+              disabled={syncBusy}
+              onClick={runLiveNhlSync}
+              data-testid="button-nba-live-sync"
+              className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-xs"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncBusy ? "animate-spin" : ""}`} />
+              {syncBusy ? "در حال دریافت نتایج واقعی..." : "بروزرسانی زنده نتایج بازی‌های NBA"}
+            </button>
+            <button
+              type="button"
+              disabled={rosterSyncBusy}
+              onClick={runLiveRosterSync}
+              data-testid="button-nba-roster-sync-top"
+              className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-xs"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${rosterSyncBusy ? "animate-spin" : ""}`} />
+              {rosterSyncBusy
+                ? "در حال بررسی مصدومان ESPN..."
+                : fusionMode === "total_elem_12"
+                  ? "بروزرسانی مصدومان و لیست ۱۲ نفره (ESPN)"
+                  : "بروزرسانی مصدومان و لیست ۸ نفره (ESPN)"}
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const d = await apiRpcJson("/api/kalshi/markets?force=1");
+                  if (d?.markets) setKalshiMarkets((prev) => ({ ...prev, ...d.markets }));
+                } catch {}
+              }}
+              data-testid="button-nba-kalshi-refresh"
+              className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-white border border-sky-300 text-sky-950 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors shadow-2xs"
+            >
+              بروزرسانی قیمت‌های Kalshi NBA
+            </button>
+          </div>
+
+          <div className="inline-flex items-center rounded-lg border border-sky-300 bg-white p-0.5 shadow-2xs" dir="rtl">
+            <span className="px-2 text-[11px] font-bold text-slate-600">ضریب جدول:</span>
+            <button
+              type="button"
+              onClick={() => changeOddsFreqMode("weekly")}
+              data-testid="button-nba-odds-freq-weekly-top"
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${
+                oddsFreqMode === "weekly"
+                  ? "bg-sky-700 text-white shadow-2xs"
+                  : "text-slate-700 hover:bg-sky-50"
+              }`}
+            >
+              هفتگی (دوشنبه)
+            </button>
+            <button
+              type="button"
+              onClick={() => changeOddsFreqMode("daily")}
+              data-testid="button-nba-odds-freq-daily-top"
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${
+                oddsFreqMode === "daily"
+                  ? "bg-indigo-600 text-white shadow-2xs"
+                  : "text-slate-700 hover:bg-indigo-50"
+              }`}
+            >
+              روزانه (تا شب قبل)
+            </button>
+          </div>
+        </div>
+
+        {/* TOP BAR & DAILY GAME CARDS */}
+        <div className="rounded-xl border-2 border-sky-300 bg-sky-50/80 shadow-sm overflow-hidden" dir="rtl">
+          {/* Collapsible Top Bar Header */}
+          <div
+            onClick={() => setOpenDailyCardsSection((v) => !v)}
+            className="bg-sky-200/80 hover:bg-sky-200 px-4 py-2.5 border-b border-sky-300 cursor-pointer flex flex-wrap items-center justify-between gap-2.5 transition-colors"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-1 rounded-md bg-sky-700 text-white font-extrabold text-xs shadow-2xs">
+                کارت‌های تصمیم‌گیری ۲ باکسی بازی‌های روز NBA
+              </span>
+              <span className="px-2.5 py-0.5 rounded bg-white text-sky-950 border border-sky-300 text-xs font-extrabold font-mono">
+                {activeDailyDate} • {gamesOnDailyDate.length} کارت بازی
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenDailyCardsSection((v) => !v);
+              }}
+              className="px-3 py-1 rounded border border-sky-400 bg-white hover:bg-sky-50 text-sky-950 text-xs font-extrabold shadow-2xs"
+            >
+              {openDailyCardsSection ? "بستن کارت‌های روز ▲" : "باز کردن کارت‌های روز ▼"}
+            </button>
+          </div>
+
+          {openDailyCardsSection && (
+            <div className="p-3.5 space-y-3 bg-sky-50/50">
+              {/* Clean Daily Control Bar (Date Selector + Filter + Direct Update Buttons + Collapsible Advanced Options) */}
+              <div className="bg-white p-2.5 rounded-lg border border-sky-200 shadow-2xs space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Date Navigation */}
+                    <div className="inline-flex items-center gap-1 bg-sky-50 border border-sky-300 rounded-md p-1">
+                      <button
+                        type="button"
+                        disabled={dailyDateIdx <= 0}
+                        onClick={() => {
+                          if (dailyDateIdx > 0) {
+                            const prevD = allGameDates[dailyDateIdx - 1];
+                            setDailyCardDate(prevD);
+                            setDateFilter(prevD);
+                            setMonthFilter("ALL");
+                            setSeasonFilter("ALL");
+                            if (!games.some((x) => x.d === prevD && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                              setStatusFilter("ALL");
+                            }
+                            setTwinPattern("tall");
+                            setPage(1);
+                          }
+                        }}
+                        className="px-2 py-1 rounded bg-white hover:bg-sky-100 disabled:opacity-40 text-sky-950 border border-sky-200 text-xs font-bold"
+                        title="روز قبل"
+                      >
+                        ◀ روز قبل
+                      </button>
+
+                      <select
+                        value={activeDailyDate}
+                        onChange={(e) => {
+                          const dVal = e.target.value;
+                          setDailyCardDate(dVal);
+                          setDateFilter(dVal);
+                          setMonthFilter("ALL");
+                          setSeasonFilter("ALL");
+                          if (!games.some((x) => x.d === dVal && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                            setStatusFilter("ALL");
+                          }
+                          setTwinPattern("tall");
+                          setPage(1);
+                        }}
+                        data-testid="select-nba-daily-date"
+                        className="h-7 rounded bg-white px-2 text-xs font-mono font-extrabold text-sky-950 border border-sky-200"
+                      >
+                        {allGameDates.map((dStr) => {
+                          const cnt = games.filter((x) => x.d === dStr).length;
+                          const dayName = games.find((x) => x.d === dStr)?.day ?? "";
+                          return (
+                            <option key={dStr} value={dStr}>
+                              {dStr} ({dayName} • {cnt} بازی)
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      <button
+                        type="button"
+                        disabled={dailyDateIdx < 0 || dailyDateIdx >= allGameDates.length - 1}
+                        onClick={() => {
+                          if (dailyDateIdx >= 0 && dailyDateIdx < allGameDates.length - 1) {
+                            const nextD = allGameDates[dailyDateIdx + 1];
+                            setDailyCardDate(nextD);
+                            setDateFilter(nextD);
+                            setMonthFilter("ALL");
+                            setSeasonFilter("ALL");
+                            if (!games.some((x) => x.d === nextD && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                              setStatusFilter("ALL");
+                            }
+                            setTwinPattern("tall");
+                            setPage(1);
+                          }
+                        }}
+                        className="px-2 py-1 rounded bg-white hover:bg-sky-100 disabled:opacity-40 text-sky-950 border border-sky-200 text-xs font-bold"
+                        title="روز بعد"
+                      >
+                        روز بعد ▶
+                      </button>
+                    </div>
+
+                    {/* Quick Jump Buttons for Recent Slates */}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {[
+                        { d: "2026-11-14", lbl: "11/14" },
+                        { d: "2026-11-15", lbl: "11/15" },
+                        { d: "2026-11-16", lbl: "11/16" },
+                        { d: "2026-11-17", lbl: "11/17" },
+                        { d: "2026-11-18", lbl: "11/18" },
+                      ].map((q) => (
+                        <button
+                          key={q.d}
+                          type="button"
+                          onClick={() => {
+                            setDailyCardDate(q.d);
+                            setDateFilter(q.d);
+                            setMonthFilter("ALL");
+                            setSeasonFilter("ALL");
+                            if (!games.some((x) => x.d === q.d && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                              setStatusFilter("ALL");
+                            }
+                            setTwinPattern("tall");
+                            setPage(1);
+                          }}
+                          className={`px-2 py-1 rounded text-[11px] font-mono border transition-colors ${
+                            activeDailyDate === q.d
+                              ? "bg-sky-700 text-white border-sky-800 font-bold"
+                              : "bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-200"
+                          }`}
+                        >
+                          {q.lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDailyCardFilter((prev) => (prev === "qualified" ? "all" : "qualified"))
+                      }
+                      className={`h-8 px-2.5 rounded-md border text-xs font-extrabold transition-colors ${
+                        dailyCardFilter === "qualified"
+                          ? "bg-emerald-700 text-white border-emerald-800 shadow-2xs"
+                          : "bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300"
+                      }`}
+                    >
+                      {dailyCardFilter === "qualified"
+                        ? `نمایش همه کارت‌های روز (${gamesOnDailyDate.length})`
+                        : `فقط سیگنال‌های تاییدشده (${gamesOnDailyDate.filter((x) => activeF1WtpOf(x)).length})`}
+                    </button>
+
+                    <select
+                      value={dailyCardFilter}
+                      onChange={(e) =>
+                        setDailyCardFilter(
+                          e.target.value as
+                            | "all"
+                            | "qualified"
+                            | "anti_nobet"
+                            | "referee6"
+                            | "ref_top"
+                            | "vip3"
+                            | "posev"
+                            | "win"
+                            | "loss"
+                            | "pending"
+                        )
+                      }
+                      data-testid="select-nba-daily-filter"
+                      className="h-8 rounded-md border border-sky-300 bg-white px-2 text-xs text-slate-800 font-bold"
+                    >
+                      <option value="all">همه کارت‌های روز ({gamesOnDailyDate.length} بازی)</option>
+                      <option value="qualified">فقط سیگنال‌های تاییدشده موتور فعال ({gamesOnDailyDate.filter((x) => activeF1WtpOf(x)).length} بازی)</option>
+                      <option value="anti_nobet">
+                        {fusionMode === "total_elem_12"
+                          ? `فقط سیگنال‌های باکس هوشمند حالت ۱۴ (${gamesOnDailyDate.filter((x) => evalSmartMode14(x).sig).length} بازی)`
+                          : `فقط سیگنال‌های باکس ضد NO-BET هوشمند (${gamesOnDailyDate.filter((x) => evalSmartAntiNoBet(x).sig).length} بازی)`}
+                      </option>
+                      {fusionMode === "total_elem_12" && (
+                        <>
+                          <option value="referee6">تایید رتبه‌بندی ۶ باکس رتبه ۱ تا ۳ ({gamesOnDailyDate.filter((x) => evalSmartMode14(x).referee6.active).length} بازی)</option>
+                          <option value="ref_top">فقط سطح قوی ★/★★ داور ۶ باکس ({gamesOnDailyDate.filter((x) => evalSmartMode14(x).referee6.isTopSignal).length} بازی)</option>
+                        </>
+                      )}
+                      <option value="vip3">فقط سطح ویژه VIP ({gamesOnDailyDate.filter((x) => activeVip3Of(x)).length} بازی)</option>
+                      <option value="posev">فقط دارای ارزش خرید Kalshi (+EV)</option>
+                      <option value="win">فقط بردهای روز (WIN ✓)</option>
+                      <option value="loss">فقط باخت‌های روز (LOSS ✕)</option>
+                      <option value="pending">فقط در انتظار برگزاری (PENDING)</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      disabled={rosterSyncBusy}
+                      onClick={runLiveRosterSync}
+                      data-testid="button-nba-roster-sync"
+                      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-2xs transition-colors"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${rosterSyncBusy ? "animate-spin" : ""}`} />
+                      {rosterSyncBusy
+                        ? "بررسی مصدومان..."
+                        : fusionMode === "total_elem_12"
+                          ? "آپدیت لیست ۱۲ نفره"
+                          : "آپدیت لیست ۸ نفره"}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={syncBusy}
+                      onClick={runLiveNhlSync}
+                      data-testid="button-nba-daily-sync"
+                      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-2xs transition-colors"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${syncBusy ? "animate-spin" : ""}`} />
+                      {syncBusy ? "دریافت نتایج..." : "آپدیت نتایج بازی‌ها"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setOpenAdvancedCardOpts((v) => !v)}
+                      className="h-8 px-2.5 rounded-md border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-950 text-[11px] font-bold"
+                    >
+                      {openAdvancedCardOpts ? "بستن تنظیمات دستی ▲" : "تنظیمات کانال دستی ▼"}
+                    </button>
+                  </div>
+                </div>
+
+                {openAdvancedCardOpts && (
+                  <div className="pt-2 border-t border-sky-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={dailyCardMode}
+                        onChange={(e) =>
+                          setDailyCardMode(
+                            e.target.value as "nhl_best" | "nhl_vip3" | "nhl_f1_guard" | "nhl_f1_idx_raw" | "nhl_f1" | "nhl_f1_union" | "step" | "geo" | "geo_dyn" | "geo_tab"
+                          )
+                        }
+                        data-testid="select-nba-daily-card-mode"
+                        className="h-8 rounded border border-sky-300 bg-sky-50 px-2 text-xs font-bold text-sky-950"
+                      >
+                        <option value="nhl_best">سیستم نهایی NBA (پیش‌فرض موتور تلفیقی)</option>
+                        <option value="nhl_vip3">فقط سطح ویژه VIP</option>
+                        <option value="step">کانال ۱ دستی: گام‌به‌گام (STEP)</option>
+                        <option value="geo">کانال ۲ دستی: شکل رمل اصلاحی (GEO-FIN)</option>
+                        <option value="geo_dyn">کانال ۳ دستی: شکل رمل پویا (GEO-DYN)</option>
+                        <option value="geo_tab">کانال ۴ دستی: شکل رمل جدول روزانه (GEO-TAB)</option>
+                      </select>
+
+                      <div className="inline-flex items-center rounded-md border border-sky-300 bg-sky-50 p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => changeOddsFreqMode("weekly")}
+                          data-testid="button-nba-odds-freq-weekly"
+                          className={`h-7 px-2.5 rounded text-[11px] font-extrabold transition-colors ${
+                            oddsFreqMode === "weekly" ? "bg-sky-700 text-white shadow-2xs" : "text-slate-700 hover:bg-white"
+                          }`}
+                        >
+                          ضریب هفتگی (دوشنبه)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => changeOddsFreqMode("daily")}
+                          data-testid="button-nba-odds-freq-daily"
+                          className={`h-7 px-2.5 rounded text-[11px] font-extrabold transition-colors ${
+                            oddsFreqMode === "daily" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-700 hover:bg-white"
+                          }`}
+                        >
+                          ضریب روزانه (تا شب قبل)
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextMap = { ...manualFilters };
+                        gamesOnDailyDate.forEach((g) => {
+                          const t12 = (manualPersp === "home" ? g.h_12 : g.a_12) ?? [];
+                          const tGeoFin = (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "";
+                          const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
+                          const tGeoTab = (manualPersp === "home" ? g.h_geo_tab : g.a_geo_tab) ?? "";
+                          const activeGeoKind: "fin" | "dyn" | "tab" =
+                            dailyCardMode === "geo_tab"
+                              ? "tab"
+                              : dailyCardMode === "geo_dyn" || g.chan === "GEO-DYN"
+                                ? "dyn"
+                                : manualGeoKind;
+                          const tGeo = activeGeoKind === "tab" ? tGeoTab : activeGeoKind === "dyn" ? tGeoDyn : tGeoFin;
+                          const dPool = getDayPoolBefore(g.day, g.d);
+                          const stepRes = computeAutoFilterState(t12, tGeoFin, dPool, manualPersp, false, "fin");
+                          const geoRes = computeAutoFilterState(t12, tGeo, dPool, manualPersp, true, activeGeoKind);
+                          const pickGeo = dailyCardMode !== "step";
+                          const chosen = pickGeo ? geoRes : stepRes;
+                          nextMap[g.n] = {
+                            ...chosen.state,
+                            modeLabel:
+                              dailyCardMode === "geo_tab"
+                                ? "کانال ۴: اول شکل جدول GEO-TAB"
+                                : dailyCardMode === "geo_dyn"
+                                  ? "کانال ۳: اول GEO-DYN"
+                                  : dailyCardMode === "step"
+                                    ? "کانال ۱: گام‌به‌گام STEP"
+                                    : "کانال ۲: اول GEO-FIN",
+                            stepSummary: stepRes.sumStr,
+                            geoSummary: geoRes.sumStr,
+                          };
+                        });
+                        if (dailyCardMode === "geo_dyn") setManualGeoKind("dyn");
+                        else if (dailyCardMode === "geo") setManualGeoKind("fin");
+                        setManualFilters(nextMap);
+                        setDateFilter(activeDailyDate);
+                        setTwinPattern("tall");
+                        setOpenManualSection(true);
+                      }}
+                      className="px-3 py-1.5 rounded-md bg-sky-700 hover:bg-sky-800 text-white font-extrabold text-xs shadow-2xs transition-colors"
+                    >
+                      قفل و ارسال کارت‌های روز به جدول فیلتر دستی ({gamesOnDailyDate.length} بازی)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Daily Win/Loss Scoreboard Driven by Active Fusion Engine */}
+              {(() => {
+                const modeTitleMap: Record<FusionModeKey, string> = {
+                  tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + Σ3 + ضدحذف)",
+                  anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
+                  total_elem_12: "حالت ۱۴ (قطبیت کامل المنت کل ۱۲ بازیکن + تیم)",
+                  tri_gf_routed: "حالت ۱۱ (موتور مستقل ۳ عددی + Σ3 + ضدحذف)",
+                  gf_fin_pure: "حالت ۱۰ (موتور خالص GF-FIN)",
+                  pos_inv_lock: "حالت ۹ (قفل جامع v5 + داور GF-FIN)",
+                  earth_neg_lock: "حالت ۷ (قفل ایمن منفی + داور GF-FIN)",
+                  safe_dl_core: "حالت ۸ (قفل مستقل ایمن + داور GF-FIN)",
+                  double_pwr_lock: "حالت ۶ (قفل دوگانه ۱xxx + Σ8)",
+                  geo_1xxx_lock: "حالت ۵ (فیلتر رمل ۱xxx)",
+                  dual_pillar: "حالت ۱ (تلفیق دو-ستونی)",
+                  vip_cross: "حالت ۲ (شکارچی VIP)",
+                  astro_lock: "حالت ۳ (قفل نجومی)",
+                  diamond: "حالت ۴ (قفل الماس T∩P)",
+                };
+                const evalPick = (x: NbaGamePred) => {
+                  const base = x.sys_win || x.h;
+                  return cardFlipDir[x.n] ? (base === x.h ? x.a : x.h) : base;
+                };
+                const doneCards = gamesOnDailyDate.filter((x) => Boolean(x.done && x.aw && x.aw !== "PENDING"));
+                const pendCards = gamesOnDailyDate.length - doneCards.length;
+                const sigCards = gamesOnDailyDate.filter((x) => activeF1WtpOf(x));
+                const sigDone = sigCards.filter((x) => Boolean(x.done && x.aw && x.aw !== "PENDING"));
+                const sigWins = sigDone.filter((x) => evalPick(x) === x.aw).length;
+                const sigLosses = sigDone.length - sigWins;
+                const sigPct = sigDone.length > 0 ? Math.round((1000 * sigWins) / sigDone.length) / 10 : null;
+                const allWins = doneCards.filter((x) => evalPick(x) === x.aw).length;
+                const allLosses = doneCards.length - allWins;
+                const allPct = doneCards.length > 0 ? Math.round((1000 * allWins) / doneCards.length) / 10 : null;
+
+                const sm14Evals = gamesOnDailyDate.map((x) => ({ g: x, sm: evalSmartMode14(x) }));
+                const sm14Active = sm14Evals.filter((e) => e.sm.sig);
+                const sm14VetoCnt = sm14Evals.filter((e) => e.sm.kind === "M14_VETO_TRAP").length;
+                const sm14CoreCnt = sm14Active.filter((e) => e.sm.kind === "M14_CORE_CLEAN").length;
+                const sm14DirCnt = sm14Active.filter((e) => e.sm.kind === "M14_DIRECT_RELEASE").length;
+                const sm14OppCnt = sm14Active.filter((e) => e.sm.kind === "M14_OPPOSITE_FLIP" || e.sm.kind === "M14_TRAP_FLIP").length;
+                const sm14Done = sm14Active.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const sm14Wins = sm14Done.filter((e) => e.sm.pick === e.g.aw).length;
+                const sm14Losses = sm14Done.length - sm14Wins;
+                const sm14Pct = sm14Done.length > 0 ? Math.round((1000 * sm14Wins) / sm14Done.length) / 10 : null;
+                const elemActive = sm14Evals.filter((e) => e.sm.elemFollow.hasPick);
+                const elemDone = elemActive.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const elemWins = elemDone.filter((e) => e.sm.elemFollow.pick === e.g.aw).length;
+                const elemLosses = elemDone.length - elemWins;
+                const elemPct = elemDone.length > 0 ? Math.round((1000 * elemWins) / elemDone.length) / 10 : null;
+                const elemAgreeActive = sm14Active.filter((e) => e.sm.elemFollow.hasPick && e.sm.elemFollow.pick === e.sm.pick);
+                const elemAgreeDone = elemAgreeActive.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const elemAgreeWins = elemAgreeDone.filter((e) => e.sm.pick === e.g.aw).length;
+                const f4ActiveList = sm14Evals.filter((e) => e.sm.fusion4.active);
+                const f4Done = f4ActiveList.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const f4Wins = f4Done.filter((e) => e.sm.fusion4.pick === e.g.aw).length;
+                const f4Losses = f4Done.length - f4Wins;
+                const f4Pct = f4Done.length > 0 ? Math.round((1000 * f4Wins) / f4Done.length) / 10 : null;
+                const refActiveList = sm14Evals.filter((e) => e.sm.referee6.active);
+                const refTopList = sm14Evals.filter((e) => e.sm.referee6.isTopSignal);
+                const refDiamondCnt = refActiveList.filter((e) => e.sm.referee6.isDiamond).length;
+                const refDone = refActiveList.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const refWins = refDone.filter((e) => e.sm.referee6.pick === e.g.aw).length;
+                const refLosses = refDone.length - refWins;
+                const refPct = refDone.length > 0 ? Math.round((1000 * refWins) / refDone.length) / 10 : null;
+                const refTopDone = refTopList.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const refTopWins = refTopDone.filter((e) => e.sm.referee6.pick === e.g.aw).length;
+                const refTopLosses = refTopDone.length - refTopWins;
+                const refTopPct = refTopDone.length > 0 ? Math.round((1000 * refTopWins) / refTopDone.length) / 10 : null;
+                const refAllDone = sm14Evals.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const refAllWins = refAllDone.filter((e) => e.sm.referee6.pick === e.g.aw).length;
+                const refAllLosses = refAllDone.length - refAllWins;
+                const refAllPct = refAllDone.length > 0 ? Math.round((1000 * refAllWins) / refAllDone.length) / 10 : null;
+
+                const anbEvals = gamesOnDailyDate.map((x) => ({ g: x, anb: evalSmartAntiNoBet(x) }));
+                const anbActive = anbEvals.filter((e) => e.anb.sig);
+                const anbCoreCnt = anbActive.filter((e) => e.anb.kind === "M12_CORE").length;
+                const anbDirCnt = anbActive.filter((e) => e.anb.kind === "DIRECT_RELEASE").length;
+                const anbOppCnt = anbActive.filter((e) => e.anb.kind === "OPPOSITE_FLIP").length;
+                const anbDone = anbActive.filter((e) => Boolean(e.g.done && e.g.aw && e.g.aw !== "PENDING"));
+                const anbWins = anbDone.filter((e) => e.anb.pick === e.g.aw).length;
+                const anbLosses = anbDone.length - anbWins;
+                const anbPct = anbDone.length > 0 ? Math.round((1000 * anbWins) / anbDone.length) / 10 : null;
+                return (
+                  <div
+                    data-testid="bar-daily-winloss"
+                    dir="rtl"
+                    className="bg-white px-3 py-2 rounded-lg border border-sky-300 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-extrabold text-sky-950">
+                        کارنامه برد و باخت {activeDailyDate} با {modeTitleMap[fusionMode]}:
+                      </span>
+                      {sigDone.length > 0 ? (
+                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 border border-emerald-400 font-mono font-extrabold">
+                          سیگنال نهایی: {sigWins} برد - {sigLosses} باخت ({sigPct}%)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-300 font-mono font-bold">
+                          سیگنال فعال روز: {sigCards.length} بازی
+                        </span>
+                      )}
+                      {fusionMode === "tri_gf_ultralock" && (
+                        anbDone.length > 0 ? (
+                          <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-400 font-mono font-extrabold">
+                            باکس ضد NO-BET هوشمند: {anbWins} برد - {anbLosses} باخت ({anbPct}%)
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-400 font-mono font-extrabold">
+                            ضد NO-BET هوشمند: {anbActive.length} بازی فعال ({anbCoreCnt} اصلی + {anbDirCnt} مستقیم + {anbOppCnt} عکس)
+                          </span>
+                        )
+                      )}
+                      {fusionMode === "total_elem_12" && (
+                        <>
+                          {sm14Done.length > 0 ? (
+                            <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-400 font-mono font-extrabold">
+                              باکس هوشمند حالت ۱۴: {sm14Wins} برد - {sm14Losses} باخت ({sm14Pct}%){sm14VetoCnt > 0 ? ` • ${sm14VetoCnt} تله مهارشده` : ""}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-400 font-mono font-extrabold">
+                              باکس هوشمند ۱۴: {sm14Active.length} فعال ({sm14CoreCnt} سالم + {sm14DirCnt} مستقیم + {sm14OppCnt} تیم عکس){sm14VetoCnt > 0 ? ` • ${sm14VetoCnt} مهار خطا` : ""}
+                            </span>
+                          )}
+                          {elemDone.length > 0 ? (
+                            <span
+                              data-testid="badge-daily-elem-followup"
+                              className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-400 font-mono font-extrabold"
+                            >
+                              برنده المنت (فالوآپ): {elemWins} برد - {elemLosses} باخت ({elemPct}%){elemAgreeDone.length > 0 ? ` • هم‌جهت ۱۴: ${elemAgreeWins}/${elemAgreeDone.length}` : ""}
+                            </span>
+                          ) : (
+                            <span
+                              data-testid="badge-daily-elem-followup"
+                              className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-400 font-mono font-extrabold"
+                            >
+                              برنده المنت (فالوآپ): {elemActive.length} حکم فعال ({elemAgreeActive.length} هم‌جهت با ۱۴)
+                            </span>
+                          )}
+                          {f4Done.length > 0 ? (
+                            <span
+                              data-testid="badge-daily-fusion4-v77"
+                              className="px-2 py-0.5 rounded bg-teal-100 text-teal-950 border border-teal-400 font-mono font-extrabold"
+                            >
+                              تلفیق ۴ پترن (v82): {f4Wins} برد - {f4Losses} باخت ({f4Pct}%)
+                            </span>
+                          ) : (
+                            <span
+                              data-testid="badge-daily-fusion4-v77"
+                              className="px-2 py-0.5 rounded bg-teal-50 text-teal-950 border border-teal-300 font-mono font-extrabold"
+                            >
+                              تلفیق ۴ پترن (v82): {f4ActiveList.length} بازی فعال
+                            </span>
+                          )}
+                          {refDone.length > 0 ? (
+                            <span
+                              data-testid="badge-daily-referee6-v80"
+                              className="px-2.5 py-0.5 rounded-md bg-amber-200/90 text-slate-950 border-2 border-amber-500 font-mono font-extrabold shadow-2xs"
+                            >
+                              داور رتبه‌بندی ۶ باکس (v82 • رتبه ۱-۳): {refWins} برد - {refLosses} باخت ({refPct}%)
+                              {refTopDone.length > 0 ? ` • ویژه ★/★★: ${refTopWins}-${refTopLosses} (${refTopPct}%)` : ""}
+                              {refAllDone.length > 0 ? ` • کل امتیاز روز: ${refAllWins}-${refAllLosses} (${refAllPct}%)` : ""}
+                            </span>
+                          ) : (
+                            <span
+                              data-testid="badge-daily-referee6-v80"
+                              className="px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-950 border-2 border-amber-400 font-mono font-extrabold shadow-2xs"
+                            >
+                              داور رتبه‌بندی ۶ باکس (v82): {refActiveList.length} تایید رتبه ۱-۳ ({refTopList.length} ویژه ★/★★ • {refDiamondCnt} الماسی)
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {doneCards.length > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-950 border border-indigo-300 font-mono font-extrabold">
+                          کل بازی‌های روز (ضدحذف): {allWins} برد - {allLosses} باخت ({allPct}%)
+                        </span>
+                      )}
+                      {pendCards > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-950 border border-amber-300 font-mono font-bold">
+                          در انتظار برگزاری: {pendCards} بازی
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setDailyCardFilter("qualified")}
+                        className={`px-2 py-0.5 rounded border ${dailyCardFilter === "qualified" ? "bg-emerald-700 text-white border-emerald-800" : "bg-white text-slate-700 border-sky-200 hover:bg-sky-50"}`}
+                      >
+                        سیگنال ({sigCards.length})
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="btn-filter-anti-nobet"
+                        onClick={() => setDailyCardFilter("anti_nobet")}
+                        className={`px-2 py-0.5 rounded border ${dailyCardFilter === "anti_nobet" ? "bg-indigo-700 text-white border-indigo-800" : "bg-indigo-50 text-indigo-950 border-indigo-300 hover:bg-indigo-100"}`}
+                      >
+                        {fusionMode === "total_elem_12" ? `هوشمند ۱۴ (${sm14Active.length})` : `ضد NO-BET (${anbActive.length})`}
+                      </button>
+                      {fusionMode === "total_elem_12" && (
+                        <>
+                          <button
+                            type="button"
+                            data-testid="btn-filter-referee6"
+                            onClick={() => setDailyCardFilter("referee6")}
+                            className={`px-2 py-0.5 rounded border font-extrabold ${dailyCardFilter === "referee6" ? "bg-amber-600 text-white border-amber-700" : "bg-amber-100 text-amber-950 border-amber-400 hover:bg-amber-200/80"}`}
+                          >
+                            داور ۶ باکس ({refActiveList.length})
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="btn-filter-ref-top"
+                            onClick={() => setDailyCardFilter("ref_top")}
+                            className={`px-2 py-0.5 rounded border font-extrabold ${dailyCardFilter === "ref_top" ? "bg-emerald-700 text-white border-emerald-800" : "bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100"}`}
+                          >
+                            ویژه ★/★★ ({refTopList.length})
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDailyCardFilter("all")}
+                        className={`px-2 py-0.5 rounded border ${dailyCardFilter === "all" ? "bg-sky-700 text-white border-sky-800" : "bg-white text-slate-700 border-sky-200 hover:bg-sky-50"}`}
+                      >
+                        همه ({gamesOnDailyDate.length})
+                      </button>
+                      {doneCards.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setDailyCardFilter("win")}
+                            className={`px-2 py-0.5 rounded border ${dailyCardFilter === "win" ? "bg-emerald-600 text-white border-emerald-700" : "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100"}`}
+                          >
+                            بردها ({allWins}) ✓
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDailyCardFilter("loss")}
+                            className={`px-2 py-0.5 rounded border ${dailyCardFilter === "loss" ? "bg-rose-600 text-white border-rose-700" : "bg-rose-50 text-rose-900 border-rose-300 hover:bg-rose-100"}`}
+                          >
+                            باخت‌ها ({allLosses}) ✕
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Global Card-Box Dropdown Controls (Open/Close Individual or All Boxes Across Cards) */}
+              <div
+                data-testid="bar-card-box-dropdowns"
+                className="rounded-lg border border-sky-200 bg-sky-50/90 px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px]"
+                dir="rtl"
+              >
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="font-extrabold text-sky-950 ml-1">
+                    دراپ‌داون باکس‌های کارت:
+                  </span>
+                  {(
+                    [
+                      { key: "referee6" as CardBoxKey, label: "جدول داور نهایی", show: fusionMode === "total_elem_12" },
+                      { key: "sixboxes" as CardBoxKey, label: "مجموعه ۶ باکس", show: fusionMode === "total_elem_12" },
+                      { key: "box1" as CardBoxKey, label: "باکس ۱ (چک‌لیست)", show: true },
+                      {
+                        key: "smart" as CardBoxKey,
+                        label: fusionMode === "total_elem_12" ? "باکس هوشمند ۱۴" : "باکس ضد NO-BET",
+                        show: fusionMode === "total_elem_12" || fusionMode === "anti_nobet_smart" || fusionMode === "tri_gf_ultralock",
+                      },
+                      { key: "box2" as CardBoxKey, label: "باکس ۲ (حکم نهایی)", show: true },
+                      { key: "dom" as CardBoxKey, label: "المنت غالب [F-A-W-E]", show: fusionMode === "total_elem_12" },
+                      { key: "elem" as CardBoxKey, label: "برنده المنت (فالوآپ)", show: fusionMode === "total_elem_12" },
+                      { key: "fusion4" as CardBoxKey, label: "تلفیق ۴ پترن", show: fusionMode === "total_elem_12" },
+                      {
+                        key: "lineup" as CardBoxKey,
+                        label: fusionMode === "total_elem_12" ? "جزئیات ۱۲ بازیکن" : "جزئیات ۸ بازیکن",
+                        show: true,
+                      },
+                    ] as const
+                  )
+                    .filter((item) => item.show)
+                    .map((item) => {
+                      const active = defaultCardBoxes[item.key];
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          data-testid={`btn-global-box-${item.key}`}
+                          onClick={() => toggleGlobalCardBox(item.key)}
+                          className={`px-2 py-0.5 rounded font-extrabold border transition-colors ${
+                            active
+                              ? "bg-sky-700 text-white border-sky-800"
+                              : "bg-white text-slate-700 border-sky-300 hover:bg-sky-100/70"
+                          }`}
+                        >
+                          {item.label} {active ? "▲" : "▼"}
+                        </button>
+                      );
+                    })}
+                </div>
+                <div className="inline-flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    data-testid="btn-expand-all-card-boxes"
+                    onClick={() => setAllCardBoxes(true)}
+                    className="px-2 py-0.5 rounded font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 transition-colors"
+                  >
+                    باز کردن همه باکس‌ها ▼
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="btn-collapse-all-card-boxes"
+                    onClick={() => setAllCardBoxes(false)}
+                    className="px-2 py-0.5 rounded font-extrabold bg-white hover:bg-sky-100 text-sky-950 border border-sky-300 transition-colors"
+                  >
+                    بستن همه باکس‌ها ▲
+                  </button>
+                </div>
+              </div>
+
+              {syncMsg && (
+                <div className="px-3 py-2 rounded-lg border border-emerald-400 bg-emerald-50 text-emerald-950 text-xs font-extrabold flex items-center justify-between gap-2">
+                  <span>{syncMsg}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSyncMsg("")}
+                    className="text-emerald-800 hover:text-emerald-950 font-bold px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* KALSHI NBA AUTO-BETTING & DRY-RUN CONTROL BAR (KXATPMATCH / KXWTAMATCH Moneyline) */}
+              {(() => {
+                // Build current day's order list from cards
+                const buildDayOrders = () =>
+                  gamesOnDailyDate.map((g) => {
+                    const t12 = (manualPersp === "home" ? g.h_12 : g.a_12) ?? [];
+                    const tGeoFin = (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "";
+                    const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
+                    const activeGeoKind: "fin" | "dyn" = dailyCardMode === "geo_dyn" ? "dyn" : manualGeoKind;
+                    const tGeo = activeGeoKind === "dyn" ? tGeoDyn : tGeoFin;
+                    const dPool = getDayPoolBefore(g.day, g.d);
+                    const savedState = manualFilters[g.n];
+                    const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
+                    const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
+                    const getRowGeo = (r: HistGameRow) => (manualPersp === "home" ? (rowGeoKind === "dyn" ? (r.hGeoDyn ?? r.hGeo) : r.hGeo) : (rowGeoKind === "dyn" ? (r.aGeoDyn ?? r.aGeo) : r.aGeo));
+                    const stepRes = computeAutoFilterState(t12, tGeoFin, dPool, manualPersp, false, "fin");
+                    const geoRes = computeAutoFilterState(t12, tGeo, dPool, manualPersp, true, activeGeoKind);
+                    const f30Val = g.f30 ?? g.vm6 ?? 0;
+                    const stepAgrees = (stepRes.hw >= stepRes.aw) === (f30Val >= 0);
+                    const geoAgrees = (geoRes.hw >= geoRes.aw) === (f30Val >= 0);
+                    const pickGeo =
+                      dailyCardMode === "geo" || dailyCardMode === "geo_dyn"
+                        ? true
+                        : dailyCardMode === "step"
+                          ? false
+                          : (stepRes.pct < 60 || (stepAgrees && !geoAgrees && stepRes.pct >= 55))
+                            ? false
+                            : !stepAgrees && geoAgrees && geoRes.pct >= 55
+                              ? true
+                              : geoRes.pct > stepRes.pct || (geoRes.pct === stepRes.pct && geoRes.mv > stepRes.mv);
+                    const autoChosen = pickGeo ? geoRes : stepRes;
+                    const hasManualFilter =
+                      savedState &&
+                      (Object.values(savedState.cols).some((v) => v && v !== "ALL") ||
+                        (savedState.geo && savedState.geo !== "ALL"));
+                    const isNhlSysMode =
+                      dailyCardMode === "nhl_best" ||
+                      dailyCardMode === "nhl_vip3" ||
+                      dailyCardMode === "nhl_f1_guard" ||
+                      dailyCardMode === "nhl_f1_idx_raw" ||
+                      dailyCardMode === "nhl_f1" ||
+                      dailyCardMode === "nhl_f1_union";
+                    const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g, dPool) : null;
+                    let cardPool = f1Pool ?? autoChosen.pool;
+                    let manualOverridden = false;
+                    if (hasManualFilter && savedState) {
+                      const manualPool = dPool.filter((r) => {
+                        const el = getRowEl12(r);
+                        for (let c = 0; c < 12; c++) {
+                          const sel = savedState.cols[c];
+                          if (sel && sel !== "ALL" && el[c] !== sel) return false;
+                        }
+                        if (savedState.geo && savedState.geo !== "ALL" && getRowGeo(r) !== savedState.geo) {
+                          return false;
+                        }
+                        return true;
+                      });
+                      if (manualPool.length >= 5 && manualPool.length <= 7) {
+                        cardPool = manualPool;
+                        manualOverridden = true;
+                      }
+                    }
+                    const cardIdx = computePoolNumIndex(cardPool);
+                    const hw = cardPool.filter((r) => r.mg > 0).length;
+                    const aw = cardPool.filter((r) => r.mg < 0).length;
+                    const twinTot = hw + aw;
+                    const twinPct = twinTot > 0 ? Math.round((Math.max(hw, aw) / twinTot) * 100) : 50;
+                    const f30 = g.f30 ?? g.vm6;
+                    const a25 = g.a25 ?? 0;
+                    const sysQual =
+                      dailyCardMode === "nhl_vip3"
+                        ? activeVip3Of(g)
+                        : dailyCardMode === "nhl_best"
+                          ? activeF1WtpOf(g)
+                          : dailyCardMode === "nhl_f1_guard"
+                            ? Boolean(g.f1_guard ?? g.f1_idx)
+                            : dailyCardMode === "nhl_f1_idx_raw"
+                              ? Boolean(g.f1_idx)
+                              : dailyCardMode === "nhl_f1_union"
+                                ? activeUnionOf(g)
+                                : Boolean(g.f1);
+                    const fm = g.fusion_meta;
+                    const g1 = fm?.geo1xxx;
+                    const gd = g1?.guards;
+                    const pi = g1?.pos_inv;
+                    const m12 = fm?.modes?.tri_gf_ultralock;
+                    const m11 = fm?.modes?.tri_gf_routed;
+                    const m9 = fm?.modes?.pos_inv_lock;
+                    const m7 = fm?.modes?.earth_neg_lock;
+                    const m8 = fm?.modes?.safe_dl_core;
+                    const mCur =
+                      fusionMode === "anti_nobet_smart"
+                        ? evalSmartAntiNoBet(g)
+                        : fusionMode === "total_elem_12"
+                          ? evalSmartMode14(g)
+                          : fm?.modes?.[fusionMode];
+                    const m12Sig = Boolean(m12?.sig);
+                    const m11Sig = Boolean(m11?.sig);
+                    const m9Sig = Boolean(m9?.sig);
+                    const m7Sig = Boolean(m7?.sig);
+                    const m8Sig = Boolean(m8?.sig);
+                    const curModeSig = Boolean(mCur?.sig);
+                    const dlWin = String(g1?.dl_win || "");
+                    const safeDlWin = String(g1?.safe_dl_win || "");
+                    const posInvWin = String(pi?.triggered && pi?.win ? pi.win : "");
+                    const isSafeLockPass = Boolean(safeDlWin);
+                    const hasRawDl = Boolean(dlWin);
+                    const isEarthBlocked = Boolean(gd && !gd.earth_ok);
+                    const usePosInvInCombo = fusionMode !== "earth_neg_lock";
+                    const preferredFusionPick =
+                      fusionMode === "total_elem_12"
+                        ? (curModeSig && mCur?.pick) || mCur?.pick || g.sys_win || ""
+                        : (curModeSig && mCur?.pick) ||
+                          (usePosInvInCombo && m12Sig && m12?.pick) ||
+                          (usePosInvInCombo && m9Sig && m9?.pick) ||
+                          (m7Sig && m7?.pick) ||
+                          (m8Sig && m8?.pick) ||
+                          (usePosInvInCombo && m11Sig && m11?.pick) ||
+                          safeDlWin ||
+                          (usePosInvInCombo && posInvWin) ||
+                          dlWin ||
+                          mCur?.pick ||
+                          g.sys_win ||
+                          "";
+                    const baseHomeFav =
+                      !manualOverridden && preferredFusionPick
+                        ? preferredFusionPick === g.h
+                        : isNhlSysMode && !manualOverridden && g.sys_win
+                          ? g.sys_win === g.h
+                          : hw > aw
+                            ? true
+                            : aw > hw
+                              ? false
+                              : (g.f30 ?? 0) >= 0;
+                    const finalHomeFav = cardFlipDir[g.n] ? !baseHomeFav : baseHomeFav;
+                    const winnerTeam = finalHomeFav ? g.h : g.a;
+                    const winnerCode = getTeam3Code(winnerTeam);
+                    const ticker = buildKalshiNbaTicker(g.d, g.a, g.h, winnerTeam, ((g as any).tour === "WTA" || tour === "WTA") ? "WTA" : "ATP");
+                    const mkt = kalshiMarkets[ticker];
+                    const liveAskCents = mkt && mkt.yesAskCents > 0 ? mkt.yesAskCents : 55;
+                    const limitCents = kalshiCardLimit[g.n] ?? liveAskCents;
+                    const agree = finalHomeFav ? cardIdx.delta > 0 : cardIdx.delta < 0;
+
+                    const pick1xxx = Number((finalHomeFav ? Number(g1?.h_sum ?? 0) : Number(g1?.a_sum ?? 0)).toFixed(1));
+                    const pickAll8 = Number((finalHomeFav ? Number(g1?.h_all ?? 0) : Number(g1?.a_all ?? 0)).toFixed(1));
+                    const opp1xxx = Number((finalHomeFav ? Number(g1?.a_sum ?? 0) : Number(g1?.h_sum ?? 0)).toFixed(1));
+                    const oppAll8 = Number((finalHomeFav ? Number(g1?.a_all ?? 0) : Number(g1?.h_all ?? 0)).toFixed(1));
+                    const d1Gap = Number((opp1xxx - pick1xxx).toFixed(1));
+                    const d8Gap = Number((oppAll8 - pickAll8).toFixed(1));
+                    const wWk = g.wtp;
+                    const pickElWk = String((finalHomeFav ? wWk?.hel : wWk?.ael) || gd?.el_wk || "");
+                    const oppElWk = String((finalHomeFav ? wWk?.ael : wWk?.hel) || gd?.opp_el_wk || "");
+                    const pickL5Wk = Number(
+                      (finalHomeFav ? Number(wWk?.l5h ?? 50) : 100 - Number(wWk?.l5h ?? 50)).toFixed(1)
+                    );
+                    const teamF30Signed = Number(fm?.team?.f30 ?? f30 ?? 0) * (finalHomeFav ? 1 : -1);
+                    const pickEarthBlocked =
+                      Boolean(pickElWk === "EARTH" && oppElWk && oppElWk !== "EARTH") ||
+                      (winnerTeam === gd?.eval_team && isEarthBlocked);
+                    const pickPosInvTrap = Boolean(gd?.pos_inv_trap && (!posInvWin || winnerTeam !== posInvWin));
+                    const pickNegAnchorFail = Boolean(
+                      hasRawDl && dlWin === winnerTeam && gd && gd.earth_ok && !gd.neg_anchor_ok
+                    );
+                    const pickPosInvOk = Boolean(
+                      usePosInvInCombo && !manualOverridden && !cardFlipDir[g.n] && posInvWin && posInvWin === winnerTeam
+                    );
+                    const pickM12Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "tri_gf_ultralock" && m12Sig && m12?.pick === winnerTeam);
+                    const pickM14Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "total_elem_12" && curModeSig && mCur?.pick === winnerTeam);
+                    const pickAnbOk = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "anti_nobet_smart" && curModeSig && mCur?.pick === winnerTeam);
+                    const pickM11Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && fusionMode === "tri_gf_routed" && m11Sig && m11?.pick === winnerTeam);
+                    const pickM7Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && m7Sig && m7?.pick === winnerTeam);
+                    const pickM8Ok = Boolean(!manualOverridden && !cardFlipDir[g.n] && m8Sig && m8?.pick === winnerTeam);
+                    const pickSafeOk = Boolean(
+                      !manualOverridden && !cardFlipDir[g.n]
+                        ? isSafeLockPass && safeDlWin === winnerTeam
+                        : safeDlWin === winnerTeam && !pickEarthBlocked && !pickPosInvTrap
+                    );
+                    const isUltraOrAnbMode =
+                      fusionMode === "tri_gf_ultralock" ||
+                      fusionMode === "anti_nobet_smart" ||
+                      fusionMode === "total_elem_12";
+                    const pickDualEarthHold = Boolean(
+                      !manualOverridden &&
+                        !cardFlipDir[g.n] &&
+                        isUltraOrAnbMode &&
+                        pickElWk === "EARTH" &&
+                        oppElWk === "EARTH" &&
+                        !curModeSig
+                    );
+                    const pick3of3ClashHold = Boolean(
+                      !manualOverridden &&
+                        !cardFlipDir[g.n] &&
+                        (fusionMode === "tri_gf_ultralock" || fusionMode === "anti_nobet_smart") &&
+                        g1?.m12_route?.code === "ULTRA_3OF3_CLASH_HOLD"
+                    );
+                    const comboTier: 0 | 1 | 2 | 3 =
+                      fusionMode === "total_elem_12"
+                        ? pickDualEarthHold
+                          ? 0
+                          : pickM14Ok && Boolean(mCur?.vip)
+                            ? 3
+                            : pickM14Ok
+                              ? 2
+                              : 0
+                        : pickDualEarthHold || pick3of3ClashHold
+                          ? 0
+                          : pickM12Ok || (pickAnbOk && Boolean(mCur?.vip)) || pickM7Ok || pickPosInvOk || (pickM11Ok && Boolean(m11?.vip))
+                            ? 3
+                            : pickAnbOk || pickM8Ok || pickM11Ok
+                              ? 2
+                              : pickSafeOk
+                                ? 1
+                                : 0;
+                    const lockStatusLabel =
+                      pickDualEarthHold
+                        ? "⛔ رد تقابل دو EARTH"
+                        : fusionMode === "total_elem_12"
+                          ? pickM14Ok
+                            ? `🧬 حالت ۱۴: ${g.fusion_meta?.total_elem_12?.flipped ? "معکوس ضد EARTH" : "قفل قطبیت المنت کل"}`
+                            : "— خارج از سیگنال موتور ۱۴"
+                          : pick3of3ClashHold
+                            ? "⛔ مهار همزاد برابر ۳/۳"
+                            : pickAnbOk
+                              ? "🛡️ ضد NO-BET هوشمند"
+                            : pickM12Ok
+                              ? `🛡️ حالت ۱۲: ${g1?.m12_route?.flipped ? "معکوس ضدحذف" : "ابرقفل ۳ عددی"}`
+                        : pickM11Ok
+                          ? `🧭 حالت ۱۱: ${g1?.m11_route?.flipped ? "معکوس ضدحذف" : "۳ عددی مستقل"}`
+                          : pickPosInvOk
+                            ? "🔄 حالت ۹: معکوس دو-مثبت (+,+)"
+                            : comboTier === 3
+                              ? "✓ حالت ۷/۹ (قفل ایمن)"
+                              : comboTier === 2
+                                ? "✓ قفل ایمن هم‌جهت"
+                                : comboTier === 1
+                                  ? "✓ قفل ایمن پایه"
+                                  : pickPosInvTrap
+                                    ? "⛔ رد تله دو-مثبت"
+                                    : pickEarthBlocked
+                                      ? "⛔ رد قفل EARTH"
+                                      : pickNegAnchorFail
+                                        ? "⚠ بدون لنگر منفی"
+                                        : "⚠ واگرایی 1xxx/Σ8";
+
+                    const isComboQualified = comboTier >= 2;
+                    const gVipActive = pickM7Ok || activeVip3Of(g);
+                    const calMaxBuy =
+                      comboTier === 3
+                        ? 85
+                        : comboTier === 2
+                          ? 80
+                          : comboTier === 1
+                            ? teamF30Signed >= 0 && pickL5Wk >= 60
+                              ? 70
+                              : 58
+                            : 0;
+                    const calWinPct =
+                      comboTier === 3
+                        ? 88.7
+                        : comboTier === 2
+                          ? 83.2
+                          : comboTier === 1
+                            ? teamF30Signed >= 0 && pickL5Wk >= 60
+                              ? 75.5
+                              : 64.0
+                            : pickEarthBlocked
+                              ? 28.0
+                              : 48.0;
+                    const evEdge = Math.round(calWinPct - liveAskCents);
+                    const singleModeQual =
+                      !manualOverridden && !cardFlipDir[g.n] && fm
+                        ? curModeSig
+                        : isComboQualified;
+                    const isPositiveEv =
+                      comboTier >= 1 &&
+                      liveAskCents <= calMaxBuy &&
+                      liveAskCents >= 18;
+                    const isVip = pickM7Ok || gVipActive;
+                    const stakeUsd = kalshiCardStake[g.n] ?? (isVip ? kalshiVipStake : kalshiDefaultStake);
+                    const enabled =
+                      kalshiCardEnabled[g.n] ??
+                      Boolean(singleModeQual && liveAskCents <= Math.max(calMaxBuy, 82) && liveAskCents >= 18);
+                    const contracts = Math.max(1, Math.floor((stakeUsd * 100) / Math.max(1, limitCents)));
+                    return {
+                      gameNo: g.n,
+                      date: g.d,
+                      homeTeam: g.h,
+                      awayTeam: g.a,
+                      winnerTeam,
+                      winnerCode,
+                      ticker,
+                      eventTicker: ticker.split("-").slice(0, 2).join("-"),
+                      liveAskCents,
+                      twinPct,
+                      twinTot,
+                      hw,
+                      aw,
+                      f30,
+                      a25,
+                      agree,
+                      evEdge,
+                      calWinPct,
+                      comboTier,
+                      pick1xxx,
+                      pickAll8,
+                      d1Gap,
+                      d8Gap,
+                      pickElWk,
+                      oppElWk,
+                      pickL5Wk,
+                      teamF30Signed,
+                      pickEarthBlocked,
+                      pickNegAnchorFail,
+                      pickSafeOk,
+                      pickM7Ok,
+                      pickM8Ok,
+                      lockStatusLabel,
+                      isComboQualified,
+                      isPositiveEv,
+                      enabled,
+                      stakeUsd,
+                      limitCents,
+                      contracts,
+                    };
+                  });
+
+                const dayOrders = buildDayOrders();
+                const enabledOrders = dayOrders.filter((o) => o.enabled);
+                const totalPlannedUsd = enabledOrders.reduce(
+                  (acc, o) => acc + Number(((o.contracts * o.limitCents) / 100).toFixed(2)),
+                  0
+                );
+
+                // Rank strictly by Strategy Mode 7 Safe-Lock hierarchy:
+                // Tier 3 (Mode 7) > Tier 2 (Mode 8 Safe Consensus) > Tier 1 (Safe Double-Lock) > Tier 0 (Blocked)
+                const rankedForCombo = [...dayOrders].sort((a, b) => {
+                  if (b.comboTier !== a.comboTier) return b.comboTier - a.comboTier;
+                  const aF30Ok = a.teamF30Signed >= 0 ? 1 : 0;
+                  const bF30Ok = b.teamF30Signed >= 0 ? 1 : 0;
+                  if (bF30Ok !== aF30Ok) return bF30Ok - aF30Ok;
+                  const aDualNeg = a.pick1xxx <= 0 && a.pickAll8 < 0 ? 1 : 0;
+                  const bDualNeg = b.pick1xxx <= 0 && b.pickAll8 < 0 ? 1 : 0;
+                  if (bDualNeg !== aDualNeg) return bDualNeg - aDualNeg;
+                  if (b.pickL5Wk !== a.pickL5Wk) return b.pickL5Wk - a.pickL5Wk;
+                  if (b.evEdge !== a.evEdge) return b.evEdge - a.evEdge;
+                  return b.d8Gap - a.d8Gap;
+                });
+
+                const m7ComboOrders = rankedForCombo.filter((o) => o.comboTier === 3);
+                const qualifiedComboOrders = rankedForCombo.filter((o) => o.comboTier >= 2);
+                const safePoolOrders = rankedForCombo.filter((o) => o.comboTier >= 1);
+
+                const getBestComboGameNos = (cnt: number) => {
+                  const want = Math.min(4, Math.max(2, cnt));
+                  if (safePoolOrders.length >= 2) {
+                    return safePoolOrders.slice(0, Math.min(want, safePoolOrders.length)).map((o) => o.gameNo);
+                  }
+                  return safePoolOrders.map((o) => o.gameNo);
+                };
+
+                const getAutoQualifiedComboGameNos = () => {
+                  if (m7ComboOrders.length >= 2) {
+                    return m7ComboOrders.slice(0, Math.min(3, m7ComboOrders.length)).map((o) => o.gameNo);
+                  }
+                  if (qualifiedComboOrders.length >= 2) {
+                    return qualifiedComboOrders.slice(0, Math.min(3, qualifiedComboOrders.length)).map((o) => o.gameNo);
+                  }
+                  if (safePoolOrders.length >= 2) {
+                    return safePoolOrders.slice(0, 2).map((o) => o.gameNo);
+                  }
+                  return safePoolOrders.map((o) => o.gameNo);
+                };
+
+                const activeComboGameNos =
+                  comboSelectedByDate[activeDailyDate] && comboSelectedByDate[activeDailyDate].length >= 1
+                    ? comboSelectedByDate[activeDailyDate]
+                    : getAutoQualifiedComboGameNos();
+
+                const toggleGameInCombo = (gameNo: number) => {
+                  const cur = [...activeComboGameNos];
+                  const idx = cur.indexOf(gameNo);
+                  if (idx >= 0) {
+                    if (cur.length <= 1) return;
+                    cur.splice(idx, 1);
+                  } else {
+                    if (cur.length >= 4) {
+                      cur.pop();
+                    }
+                    cur.push(gameNo);
+                  }
+                  setComboSelectedByDate((prev) => ({ ...prev, [activeDailyDate]: cur }));
+                };
+
+                const comboLegOrders = activeComboGameNos
+                  .map((gn) => dayOrders.find((o) => o.gameNo === gn))
+                  .filter((o): o is NonNullable<typeof o> => Boolean(o));
+
+                const comboModelProb = comboLegOrders.reduce(
+                  (acc, o) => acc * Math.min(0.95, Math.max(0.15, (o.calWinPct || 50) / 100)),
+                  1
+                );
+                const comboModelProbPct = comboLegOrders.length > 0 ? Math.round(comboModelProb * 100) : 0;
+
+                const comboFairProb = comboLegOrders.reduce(
+                  (acc, o) => acc * Math.min(0.98, Math.max(0.02, (o.liveAskCents || 55) / 100)),
+                  1
+                );
+                const comboFairCents = Math.max(1, Math.min(95, Math.round(comboFairProb * 100)));
+                const comboKey = `${activeDailyDate}:${activeComboGameNos.join("-")}`;
+                const comboLimitCents = comboCustomLimitCents[comboKey] ?? Math.min(95, comboFairCents + 1);
+                const comboContracts = Math.max(1, Math.floor((comboStakeUsd * 100) / Math.max(1, comboLimitCents)));
+                const comboEstCostUsd = Number(((comboContracts * comboLimitCents) / 100).toFixed(2));
+                const comboMaxPayoutUsd = Number(comboContracts.toFixed(2));
+                const comboNetProfitUsd = Number((comboMaxPayoutUsd - comboEstCostUsd).toFixed(2));
+                const comboMultiplier = Number((100 / Math.max(1, comboLimitCents)).toFixed(2));
+
+                return (
+                  <div className="space-y-2">
+                    {/* Collapsible Dropdown A: Kalshi Batch & Auto-Betting Panel */}
+                    <div className="bg-white border border-sky-300 rounded-lg overflow-hidden shadow-2xs">
+                      <div
+                        onClick={() => setOpenKalshiAutoPanel((v) => !v)}
+                        className="px-3 py-2 bg-sky-100/80 hover:bg-sky-100 cursor-pointer flex flex-wrap items-center justify-between gap-2 transition-colors"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-emerald-700 text-white font-extrabold text-xs">
+                            پنل سفارش گروهی و خودکار Kalshi (KXATPMATCH / KXWTAMATCH)
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold border ${
+                              kalshiHasKey
+                                ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                                : "bg-amber-100 text-amber-900 border-amber-300"
+                            }`}
+                          >
+                            {kalshiHasKey ? `کلید متصل ✓ (${kalshiKeyMasked})` : "پیش‌نمایش Dry-Run"}
+                          </span>
+                          {kalshiBalance !== null && (
+                            <span className="px-2 py-0.5 rounded bg-white text-emerald-800 border border-emerald-300 font-mono text-xs font-extrabold">
+                              Balance: ${kalshiBalance}
+                            </span>
+                          )}
+                          <span className="text-[11px] font-mono text-sky-950 bg-white px-2 py-0.5 rounded border border-sky-200">
+                            انتخابی: <b>{enabledOrders.length}</b> از {dayOrders.length} • کل: <b>${totalPlannedUsd.toFixed(2)}</b>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          data-testid="button-toggle-kalshi-auto"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenKalshiAutoPanel((v) => !v);
+                          }}
+                          className="px-2.5 py-1 rounded border border-sky-300 bg-white hover:bg-sky-50 text-sky-950 text-xs font-extrabold"
+                        >
+                          {openKalshiAutoPanel ? "بستن پنل Kalshi ▲" : "باز کردن پنل Kalshi ▼"}
+                        </button>
+                      </div>
+
+                      {openKalshiAutoPanel && (
+                        <div className="p-3 space-y-3 bg-sky-50/40 border-t border-sky-200">
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const d = await apiRpcJson("/api/kalshi/markets?force=1");
+                                  if (d?.markets && Object.keys(d.markets).length > 0) {
+                                    setKalshiMarkets(d.markets);
+                                    return;
+                                  }
+                                } catch {}
+                                try {
+                                  const r2 = await fetch("/tennis_atp_predictions.json?t=" + Date.now());
+                                  if (r2.ok) {
+                                    const d2 = await r2.json();
+                                    if (d2?.markets) setKalshiMarkets(d2.markets);
+                                  }
+                                } catch {}
+                              }}
+                              className="px-2.5 py-1 rounded bg-white hover:bg-sky-50 text-sky-900 border border-sky-300 text-[11px] font-bold"
+                            >
+                              بروزرسانی قیمت‌های لحظه‌ای Kalshi ({Object.keys(kalshiMarkets).length} بازار باز)
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setKalshiConfigOpen((v) => !v)}
+                              className="px-2.5 py-1 rounded bg-sky-700 hover:bg-sky-800 text-white text-[11px] font-bold shadow-2xs"
+                            >
+                              {kalshiConfigOpen ? "بستن تنظیمات Kalshi ▲" : "تنظیم کلید API و زمان‌بند خودکار ▼"}
+                            </button>
+                          </div>
+
+                    {/* Action Bar for Selecting, Saving, Dry-Running, and Live Executing Daily Cards on Kalshi */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-sky-200/80">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: Record<number, boolean> = { ...kalshiCardEnabled };
+                            gamesOnDailyDate.forEach((g) => {
+                              next[g.n] = true;
+                            });
+                            setKalshiCardEnabled(next);
+                          }}
+                          className="px-2.5 py-1 rounded bg-white hover:bg-sky-50 text-sky-950 border border-sky-300 text-[11px] font-bold"
+                        >
+                          ✓ انتخاب همه کارت‌های روز ({gamesOnDailyDate.length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: Record<number, boolean> = { ...kalshiCardEnabled };
+                            dayOrders.forEach((o) => {
+                              next[o.gameNo] = Boolean(o.isPositiveEv);
+                            });
+                            setKalshiCardEnabled(next);
+                          }}
+                          className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 text-[11px] font-extrabold shadow-sm"
+                        >
+                          فقط ارزش مثبت سیستم جدید (+EV) ({dayOrders.filter((o) => o.isPositiveEv).length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: Record<number, boolean> = { ...kalshiCardEnabled };
+                            dayOrders.forEach((o) => {
+                              next[o.gameNo] = Boolean(o.isComboQualified);
+                            });
+                            setKalshiCardEnabled(next);
+                          }}
+                          className="px-2.5 py-1 rounded bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-[11px] font-bold"
+                        >
+                          فقط تاییدشده سیستم جدید (۶۲٫۵٪ • VIP ۷۲٪) ({dayOrders.filter((o) => o.isComboQualified).length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next: Record<number, boolean> = { ...kalshiCardEnabled };
+                            gamesOnDailyDate.forEach((g) => {
+                              next[g.n] = false;
+                            });
+                            setKalshiCardEnabled(next);
+                          }}
+                          className="px-2.5 py-1 rounded bg-white hover:bg-rose-50 text-rose-800 border border-rose-200 text-[11px] font-bold"
+                        >
+                          لغو انتخاب همه
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* 1. Save Plan to Server */}
+                        <button
+                          type="button"
+                          disabled={kalshiBusy}
+                          data-testid="btn-kalshi-save-plan"
+                          onClick={async () => {
+                            setKalshiBusy(true);
+                            try {
+                              const d = await apiRpcJson("/api/kalshi/save-plan", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ date: activeDailyDate, orders: dayOrders }),
+                              });
+                              if (d?.ok) {
+                                setKalshiExecReport({
+                                  mode: "save",
+                                  results: [],
+                                  summary: {
+                                    message: `برنامه ${d.savedCount ?? enabledOrders.length} کارت تاریخ ${activeDailyDate} با موفقیت روی سرور ذخیره و قفل شد.`,
+                                  },
+                                });
+                              } else {
+                                setKalshiExecReport({
+                                  mode: "save_err",
+                                  results: [],
+                                  error: d?.error ?? "خطا در ذخیره برنامه کارت‌ها در سرور",
+                                });
+                              }
+                            } catch (err) {
+                              setKalshiExecReport({
+                                mode: "save_err",
+                                results: [],
+                                error: (err as Error)?.message ?? "خطا در ذخیره برنامه کارت‌ها",
+                              });
+                            } finally {
+                              setKalshiBusy(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm"
+                        >
+                          💾 ذخیره و قفل برنامه کارت‌ها در سرور
+                        </button>
+
+                        {/* 2. Dry-Run Preview on Live Kalshi Orderbook */}
+                        <button
+                          type="button"
+                          disabled={kalshiBusy}
+                          data-testid="btn-kalshi-batch-dryrun"
+                          onClick={async () => {
+                            setKalshiBusy(true);
+                            try {
+                              let handled = false;
+                              try {
+                                const d = await apiRpcJson("/api/kalshi/execute", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    date: activeDailyDate,
+                                    orders: dayOrders,
+                                    mode: "dry_run",
+                                  }),
+                                });
+                                if (d?.ok) {
+                                  setKalshiExecReport(d);
+                                  handled = true;
+                                }
+                              } catch {}
+                              if (!handled) {
+                                const results = enabledOrders.map((ord) => {
+                                  const mkt = kalshiMarkets[ord.ticker];
+                                  const estCostUsd = Number(((ord.contracts * ord.limitCents) / 100).toFixed(2));
+                                  const potentialProfitUsd = Number(((ord.contracts * (100 - ord.limitCents)) / 100).toFixed(2));
+                                  return {
+                                    gameNo: ord.gameNo,
+                                    ticker: ord.ticker,
+                                    winnerTeam: ord.winnerTeam,
+                                    contracts: ord.contracts,
+                                    limitCents: ord.limitCents,
+                                    estCostUsd,
+                                    potentialProfitUsd,
+                                    message: mkt
+                                      ? `آماده ارسال ✓: خرید ${ord.contracts} قرارداد YES @ ${ord.limitCents}¢ (هزینه: $${estCostUsd} • سود خالص برد: +$${potentialProfitUsd})`
+                                      : `تخمین @ ${ord.limitCents}¢: خرید ${ord.contracts} قرارداد YES (هزینه: $${estCostUsd} • سود: +$${potentialProfitUsd})`,
+                                  };
+                                });
+                                setKalshiExecReport({
+                                  mode: "dry_run",
+                                  results,
+                                  summary: {
+                                    message: `پیش‌نمایش ${results.length} سفارش انتخابی تاریخ ${activeDailyDate} با قیمت‌های زنده اوردربوک Kalshi محاسبه شد.`,
+                                  },
+                                });
+                              }
+                            } finally {
+                              setKalshiBusy(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs shadow-sm"
+                        >
+                          🧪 تست و پیش‌نمایش سفارش‌ها در Kalshi (Dry-Run)
+                        </button>
+
+                        {/* 3. Live Order Submission to Kalshi */}
+                        <button
+                          type="button"
+                          disabled={kalshiBusy || enabledOrders.length === 0}
+                          data-testid="btn-kalshi-batch-submit"
+                          onClick={async () => {
+                            setKalshiBusy(true);
+                            try {
+                              const d = await apiRpcJson("/api/kalshi/execute", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  date: activeDailyDate,
+                                  orders: dayOrders,
+                                  mode: "live",
+                                }),
+                              });
+                              setKalshiExecReport(d);
+                              const stD = await apiRpcJson("/api/kalshi/state");
+                              if (stD?.ledger) setKalshiLedger(stD.ledger);
+                              const balD = await apiRpcJson("/api/kalshi/balance", { method: "POST" });
+                              if (balD?.ok && balD.balanceUsd) setKalshiBalance(balD.balanceUsd);
+                            } catch (err) {
+                              setKalshiExecReport({
+                                mode: "live",
+                                results: [],
+                                error: (err as Error)?.message ?? "خطا در ثبت سفارش‌های انتخابی در Kalshi",
+                              });
+                            } finally {
+                              setKalshiBusy(false);
+                            }
+                          }}
+                          className="px-3.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-sm"
+                        >
+                          {kalshiBusy
+                            ? "⏳ در حال ارسال به Kalshi..."
+                            : `🚀 ثبت خودکار سفارش‌های انتخابی در Kalshi (${enabledOrders.length} بازی)`}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Collapsible Kalshi API Key & Auto-Scheduler Drawer */}
+                    {kalshiConfigOpen && (
+                      <div className="bg-white rounded-lg border border-sky-300 p-3.5 space-y-3 text-xs">
+                        <div className="font-bold text-sky-950 border-b border-sky-100 pb-1.5">
+                          تنظیمات کلید API صرافی Kalshi (امضای RSA-PSS در بک‌اند سرور) و زمان‌بند اجرای خودکار روزانه
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-semibold text-slate-700">
+                              KALSHI API Key ID:
+                            </label>
+                            <Input
+                              value={kalshiKeyIdInput}
+                              onChange={(e) => setKalshiKeyIdInput(e.target.value)}
+                              placeholder={kalshiKeyMasked || "e.g. a9b8c7d6-..."}
+                              className="h-8 text-xs font-mono"
+                              dir="ltr"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1 md:col-span-2">
+                            <label className="text-[11px] font-semibold text-slate-700">
+                              RSA Private Key (PEM — کلید خصوصی فقط در سرور ذخیره می‌شود):
+                            </label>
+                            <textarea
+                              value={kalshiPemInput}
+                              onChange={(e) => setKalshiPemInput(e.target.value)}
+                              placeholder="-----BEGIN RSA PRIVATE KEY----- ..."
+                              rows={2}
+                              className="rounded border border-slate-300 p-1.5 text-[10px] font-mono"
+                              dir="ltr"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-semibold text-slate-700">
+                              محیط صرافی (Environment):
+                            </label>
+                            <select
+                              value={kalshiEnv}
+                              onChange={(e) => setKalshiEnv(e.target.value as "live" | "demo")}
+                              className="h-8 rounded border border-slate-300 px-2 text-xs font-mono"
+                              dir="ltr"
+                            >
+                              <option value="live">LIVE (api.elections.kalshi.com)</option>
+                              <option value="demo">DEMO (demo-api.kalshi.co)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end pt-1">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-semibold text-slate-700">
+                              مبلغ پیش‌فرض هر کارت عادی ($ USD):
+                            </label>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={250}
+                              value={kalshiDefaultStake}
+                              onChange={(e) => setKalshiDefaultStake(Number(e.target.value) || 3)}
+                              className="h-8 text-xs font-mono"
+                              dir="ltr"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-semibold text-slate-700">
+                              مبلغ کارت‌های VIP / هم‌جهت ($ USD):
+                            </label>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={500}
+                              value={kalshiVipStake}
+                              onChange={(e) => setKalshiVipStake(Number(e.target.value) || 6)}
+                              className="h-8 text-xs font-mono"
+                              dir="ltr"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 h-8">
+                            <input
+                              id="kalshi-auto-sched"
+                              type="checkbox"
+                              checked={kalshiAutoEnabled}
+                              onChange={(e) => setKalshiAutoEnabled(e.target.checked)}
+                              className="h-4 w-4"
+                            />
+                            <label htmlFor="kalshi-auto-sched" className="text-xs font-bold text-sky-950 cursor-pointer">
+                              اجرای خودکار روزانه در ساعت (ET):
+                            </label>
+                            <input
+                              type="time"
+                              value={kalshiAutoTimeEt}
+                              onChange={(e) => setKalshiAutoTimeEt(e.target.value)}
+                              className="h-8 rounded border border-slate-300 px-2 text-xs font-mono"
+                              dir="ltr"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const d = await apiRpcJson("/api/kalshi/config", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    keyId: kalshiKeyIdInput,
+                                    privateKeyPem: kalshiPemInput,
+                                    env: kalshiEnv,
+                                    defaultStakeUsd: kalshiDefaultStake,
+                                    vipStakeUsd: kalshiVipStake,
+                                    autoScheduleEnabled: kalshiAutoEnabled,
+                                    autoScheduleTimeEt: kalshiAutoTimeEt,
+                                  }),
+                                });
+                                if (d?.ok) {
+                                  setKalshiHasKey(Boolean(d.hasKey));
+                                  setKalshiKeyMasked(d.keyIdMasked ?? "");
+                                  setKalshiKeyIdInput("");
+                                  setKalshiPemInput("");
+                                } else {
+                                  setKalshiExecReport({ mode: "config_err", results: [], error: d?.error ?? "خطا در ذخیره تنظیمات Kalshi" });
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                            >
+                              ذخیره تنظیمات در سرور ✓
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const d = await apiRpcJson("/api/kalshi/balance", { method: "POST" });
+                                if (d?.ok) setKalshiBalance(d.balanceUsd);
+                                else setKalshiExecReport({ mode: "balance_err", results: [], error: d?.error ?? "خطا در دریافت موجودی" });
+                              }}
+                              className="px-3 py-1.5 rounded bg-sky-100 hover:bg-sky-200 text-sky-950 border border-sky-300 font-bold text-xs"
+                            >
+                              استعلام موجودی Kalshi
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Execution / Dry-Run Report Box */}
+                    {kalshiExecReport && (
+                      <div className="bg-white rounded-lg border border-sky-300 p-3 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-sky-950">
+                            {kalshiExecReport.mode === "dry_run"
+                              ? "🧪 گزارش پیش‌نمایش و شبیه‌سازی سفارش‌ها در Kalshi (Dry-Run)"
+                              : kalshiExecReport.mode === "live"
+                                ? "🚀 گزارش ثبت سفارش واقعی در Kalshi"
+                                : "ℹ️ پیام سیستم Kalshi"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setKalshiExecReport(null)}
+                            className="text-slate-500 hover:text-slate-800 text-[11px]"
+                          >
+                            بستن ✕
+                          </button>
+                        </div>
+
+                        {kalshiExecReport.error && (
+                          <div className="p-2 rounded bg-rose-50 border border-rose-300 text-rose-900 font-bold">
+                            {kalshiExecReport.error}
+                          </div>
+                        )}
+
+                        {kalshiExecReport.summary?.message && (
+                          <div className="p-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 font-bold">
+                            {kalshiExecReport.summary.message}
+                          </div>
+                        )}
+
+                        {kalshiExecReport.results && kalshiExecReport.results.length > 0 && (
+                          <div className="overflow-x-auto max-h-56" dir="ltr">
+                            <table className="w-full text-[11px] font-mono text-left border-collapse">
+                              <thead className="bg-sky-50 text-sky-950 border-b border-sky-200">
+                                <tr>
+                                  <th className="p-1.5">Game</th>
+                                  <th className="p-1.5">Kalshi Ticker (KXATPMATCH / KXWTAMATCH)</th>
+                                  <th className="p-1.5">Pick (YES)</th>
+                                  <th className="p-1.5">Contracts × Limit</th>
+                                  <th className="p-1.5">Est. Cost</th>
+                                  <th className="p-1.5">Net Profit</th>
+                                  <th className="p-1.5">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {kalshiExecReport.results.map((r, i) => (
+                                  <tr key={i} className="border-b border-sky-100">
+                                    <td className="p-1.5 font-bold">#{r.gameNo}</td>
+                                    <td className="p-1.5 font-bold text-sky-900">{r.ticker}</td>
+                                    <td className="p-1.5 text-emerald-800 font-bold">{r.winnerTeam}</td>
+                                    <td className="p-1.5">
+                                      {r.contracts ? `${r.contracts} × ${r.limitCents}¢` : "—"}
+                                    </td>
+                                    <td className="p-1.5 font-bold">${r.estCostUsd ?? "—"}</td>
+                                    <td className="p-1.5 text-emerald-700 font-bold">
+                                      {r.potentialProfitUsd ? `+$${r.potentialProfitUsd}` : "—"}
+                                    </td>
+                                    <td className="p-1.5">{r.message}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Collapsible Dropdown B: Kalshi 2-4 Leg Combo / Parlay Builder */}
+                    <div className="bg-white border border-indigo-300 rounded-lg overflow-hidden shadow-2xs">
+                      <div
+                        onClick={() => setComboOpen((v) => !v)}
+                        className="px-3 py-2 bg-indigo-50/90 hover:bg-indigo-100/80 cursor-pointer flex flex-wrap items-center justify-between gap-2 transition-colors"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-indigo-700 text-white font-extrabold text-xs">
+                            کمبوساز هوشمند و دستی Kalshi (Parlay / میکس ۲ تا ۴ بازی)
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-white border border-indigo-200 font-mono text-[11px] text-indigo-950 font-extrabold">
+                            سطح اول ایمن: {m7ComboOrders.length} | کمبو فعال: {comboLegOrders.length} بازی ({comboMultiplier}x)
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          data-testid="button-toggle-kalshi-combo"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setComboOpen((v) => !v);
+                          }}
+                          className="px-2.5 py-1 rounded border border-indigo-300 bg-white hover:bg-indigo-50 text-indigo-950 text-xs font-extrabold"
+                        >
+                          {comboOpen ? "بستن کمبوساز ▲" : "باز کردن کمبوساز ▼"}
+                        </button>
+                      </div>
+
+                      {comboOpen && (
+                        <div className="p-3 space-y-2.5 bg-indigo-50/30 border-t border-indigo-200/80">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 border border-emerald-400 text-[11px] font-extrabold">
+                              استراتزی کمبو: {fusionMode === "tri_gf_ultralock" ? "حالت ۱۲ (ابرقفل ۳ عددی)" : fusionMode === "anti_nobet_smart" ? "حالت ۱۳ (ضد NO-BET هوشمند)" : fusionMode === "total_elem_12" ? "حالت ۱۴ (المنت کل ۱۲P+تیم)" : fusionMode === "tri_gf_routed" ? "حالت ۱۱ (۳ عددی مستقل)" : fusionMode === "earth_neg_lock" ? "حالت ۷ (خالص منفی)" : "حالت ۹ (قفل ایمن)"} • کل قفل ایمن: {safePoolOrders.length} بازی
+                            </span>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setComboOpen(true);
+                                  setComboSelectedByDate((prev) => ({
+                                    ...prev,
+                                    [activeDailyDate]: getAutoQualifiedComboGameNos(),
+                                  }));
+                                }}
+                                className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold shadow-2xs"
+                              >
+                                انتخاب خودکار ایمن ({getAutoQualifiedComboGameNos().length})
+                              </button>
+                              <button
+                                type="button"
+                                disabled={safePoolOrders.length < 2}
+                                onClick={() => {
+                                  setComboOpen(true);
+                                  setComboSelectedByDate((prev) => ({
+                                    ...prev,
+                                    [activeDailyDate]: getBestComboGameNos(2),
+                                  }));
+                                }}
+                                className="px-2 py-1 rounded bg-white hover:bg-indigo-50 disabled:opacity-45 text-indigo-900 border border-indigo-300 text-[11px] font-bold"
+                              >
+                                بهترین ۲ بازی ایمن
+                              </button>
+                              <button
+                                type="button"
+                                disabled={safePoolOrders.length < 3}
+                                onClick={() => {
+                                  setComboOpen(true);
+                                  setComboSelectedByDate((prev) => ({
+                                    ...prev,
+                                    [activeDailyDate]: getBestComboGameNos(3),
+                                  }));
+                                }}
+                                className="px-2 py-1 rounded bg-white hover:bg-indigo-50 disabled:opacity-45 text-indigo-900 border border-indigo-300 text-[11px] font-bold"
+                              >
+                                ۳ بازی برتر ایمن
+                              </button>
+                              <button
+                                type="button"
+                                disabled={safePoolOrders.length < 4}
+                                onClick={() => {
+                                  setComboOpen(true);
+                                  setComboSelectedByDate((prev) => ({
+                                    ...prev,
+                                    [activeDailyDate]: getBestComboGameNos(4),
+                                  }));
+                                }}
+                                className="px-2 py-1 rounded bg-white hover:bg-indigo-50 disabled:opacity-45 text-indigo-900 border border-indigo-300 text-[11px] font-bold"
+                              >
+                                بهترین ۴ بازی ایمن
+                              </button>
+                            </div>
+                          </div>
+                          {safePoolOrders.length < 2 && (
+                            <div className="px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-950 text-[11px] font-bold">
+                              در این روز تنها {safePoolOrders.length} بازی از قفل‌های ضد EARTH و لنگر منفی عبور کرده است؛ بازی‌های ردشده به صورت خودکار وارد میکس نمی‌شوند (انتخاب دستی با کلیک روی کارت‌ها همچنان فعال است).
+                            </div>
+                          )}
+                          <div>
+                            <div className="text-[11px] font-bold text-indigo-950 mb-1.5">
+                              رتبه‌بندی بازی‌ها بر اساس استراتزی حالت ۷ (ضد EARTH + لنگر منفی) — بازی‌های دارای قفل EARTH یا واگرایی از انتخاب خودکار حذف شده‌اند:
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                              {rankedForCombo.map((ord) => {
+                                const legIdx = activeComboGameNos.indexOf(ord.gameNo);
+                                const isSel = legIdx >= 0;
+                                const isSafeCard = ord.comboTier >= 1;
+                                return (
+                                  <button
+                                    key={ord.gameNo}
+                                    type="button"
+                                    onClick={() => toggleGameInCombo(ord.gameNo)}
+                                    className={`text-right p-2 rounded-lg border transition-all flex flex-col justify-between ${
+                                      isSel
+                                        ? "bg-indigo-700 text-white border-indigo-900 shadow-sm ring-2 ring-indigo-300"
+                                        : ord.comboTier === 3
+                                          ? "bg-emerald-50/95 hover:bg-emerald-100 text-slate-900 border-2 border-emerald-500"
+                                          : ord.comboTier === 2
+                                            ? "bg-sky-50/95 hover:bg-sky-100 text-slate-900 border border-sky-400"
+                                            : isSafeCard
+                                              ? "bg-white hover:bg-sky-50 text-slate-800 border border-indigo-300"
+                                              : ord.pickEarthBlocked
+                                                ? "bg-rose-50/70 hover:bg-rose-100/70 text-slate-700 border border-rose-300 opacity-80"
+                                                : "bg-slate-50/80 hover:bg-slate-100 text-slate-600 border border-slate-300 opacity-80"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1 w-full">
+                                      <span className="font-mono text-[10px] font-extrabold">
+                                        #{ord.gameNo} {isSel ? `• Leg ${legIdx + 1} ✓` : ""}
+                                      </span>
+                                      <span
+                                        dir="ltr"
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-extrabold ${
+                                          isSel
+                                            ? "bg-amber-300 text-slate-950"
+                                            : ord.comboTier >= 2
+                                              ? "bg-emerald-200 text-emerald-950"
+                                              : isSafeCard
+                                                ? "bg-sky-100 text-sky-950"
+                                                : ord.pickEarthBlocked
+                                                  ? "bg-rose-200 text-rose-950"
+                                                  : "bg-slate-200 text-slate-700"
+                                        }`}
+                                      >
+                                        {ord.pickElWk || "—"} • 1x:{ord.pick1xxx > 0 ? `+${ord.pick1xxx}` : ord.pick1xxx} | Σ8:{ord.pickAll8 > 0 ? `+${ord.pickAll8}` : ord.pickAll8}
+                                      </span>
+                                    </div>
+                                    <div className="font-extrabold text-xs mt-1 flex items-center justify-between gap-1">
+                                      <span className="truncate" dir="ltr">
+                                        {ord.winnerTeam}
+                                      </span>
+                                      <span className={`text-[9.5px] font-mono shrink-0 ${isSel ? "text-amber-200" : "text-slate-500"}`} dir="ltr">
+                                        L5:{Math.round(ord.pickL5Wk)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1 mt-1.5 text-[9.5px]">
+                                      <span className={`font-mono ${isSel ? "text-indigo-100" : "text-slate-600"}`} dir="ltr">
+                                        Ask:{ord.liveAskCents}¢ ({ord.evEdge >= 0 ? `+${ord.evEdge}` : ord.evEdge}% EV)
+                                      </span>
+                                      <span
+                                        className={`font-extrabold px-1.5 py-0.5 rounded text-[9px] ${
+                                          isSel
+                                            ? ord.comboTier >= 1
+                                              ? "bg-emerald-500 text-white"
+                                              : "bg-rose-500 text-white"
+                                            : ord.comboTier === 3
+                                              ? "bg-emerald-700 text-white"
+                                              : ord.comboTier === 2
+                                                ? "bg-teal-700 text-white"
+                                                : ord.comboTier === 1
+                                                  ? "bg-sky-700 text-white"
+                                                  : ord.pickEarthBlocked
+                                                    ? "bg-rose-600 text-white"
+                                                    : "bg-amber-200 text-amber-950"
+                                        }`}
+                                      >
+                                        {ord.lockStatusLabel}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="bg-white border border-indigo-200 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {comboLegOrders.map((leg, i) => (
+                                <Fragment key={leg.gameNo}>
+                                  {i > 0 && (
+                                    <span className="font-extrabold text-indigo-700 text-sm px-0.5">×</span>
+                                  )}
+                                  <div
+                                    className={`px-2.5 py-1 rounded-md border text-xs ${
+                                      leg.comboTier >= 1
+                                        ? "bg-indigo-50 border-indigo-300"
+                                        : "bg-rose-50 border-rose-400"
+                                    }`}
+                                  >
+                                    <div className="font-extrabold text-indigo-950">
+                                      {i + 1}. {leg.winnerTeam}{" "}
+                                      <span className="font-mono text-[10px] text-indigo-700">(#{leg.gameNo})</span>
+                                    </div>
+                                    <div className="text-[10px] font-mono text-slate-700">
+                                      قیمت: <b>{leg.liveAskCents}¢</b> • {leg.pickElWk} •{" "}
+                                      <span dir="ltr">
+                                        1x:{leg.pick1xxx > 0 ? `+${leg.pick1xxx}` : leg.pick1xxx} | Σ8:{leg.pickAll8 > 0 ? `+${leg.pickAll8}` : leg.pickAll8}
+                                      </span>{" "}
+                                      • <b>{leg.lockStatusLabel}</b>
+                                    </div>
+                                  </div>
+                                </Fragment>
+                              ))}
+                              <span className="font-extrabold text-indigo-700 text-sm px-1">=</span>
+                              <div className="px-3 py-1 rounded-md bg-emerald-50 border border-emerald-400 text-xs">
+                                <div className="font-extrabold text-emerald-950">
+                                  قیمت منصفانه بازار: <span className="font-mono">{comboFairCents}¢</span> (ضریب: <span className="font-mono">{comboMultiplier}x</span>) • احتمال ترکیبی قفل ایمن: <span className="font-mono">{comboModelProbPct}%</span>
+                                </div>
+                                <div className="text-[10px] font-mono text-emerald-800">
+                                  خرید {comboContracts} قرارداد کمبو @ {comboLimitCents}¢ ➔ هزینه: <b>${comboEstCostUsd}</b> • دریافتی برد: <b>${comboMaxPayoutUsd}</b> (سود خالص: <b>+${comboNetProfitUsd}</b>)
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="bg-slate-50 border border-slate-300 rounded px-2 py-1">
+                                <label className="block text-[9px] text-slate-600 font-bold">مبلغ کل کمبو ($)</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={250}
+                                  step={0.5}
+                                  value={comboStakeUsd}
+                                  onChange={(e) => setComboStakeUsd(Math.max(1, Number(e.target.value) || 4))}
+                                  className="w-16 text-xs font-mono font-extrabold text-indigo-950 bg-transparent outline-none"
+                                />
+                              </div>
+
+                              <div className="bg-slate-50 border border-slate-300 rounded px-2 py-1">
+                                <label className="block text-[9px] text-slate-600 font-bold">قیمت لیمیت کمبو (¢)</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={98}
+                                  value={comboLimitCents}
+                                  onChange={(e) =>
+                                    setComboCustomLimitCents((prev) => ({
+                                      ...prev,
+                                      [comboKey]: Math.min(98, Math.max(1, Number(e.target.value) || comboFairCents)),
+                                    }))
+                                  }
+                                  className="w-14 text-xs font-mono font-extrabold text-indigo-950 bg-transparent outline-none"
+                                />
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={kalshiBusy || comboLegOrders.length < 2}
+                                data-testid="btn-kalshi-combo-dryrun"
+                                onClick={async () => {
+                                  setKalshiBusy(true);
+                                  try {
+                                    const d = await apiRpcJson("/api/kalshi/combo", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        date: activeDailyDate,
+                                        legs: comboLegOrders.map((l) => ({
+                                          gameNo: l.gameNo,
+                                          eventTicker: l.eventTicker,
+                                          marketTicker: l.ticker,
+                                          winnerTeam: l.winnerTeam,
+                                          yesAskCents: l.liveAskCents,
+                                          twinPct: l.twinPct,
+                                          agree: l.agree,
+                                        })),
+                                        stakeUsd: comboStakeUsd,
+                                        limitCents: comboLimitCents,
+                                        mode: "dry_run",
+                                      }),
+                                    });
+                                    setComboReport(d);
+                                  } catch (err) {
+                                    setComboReport({
+                                      ok: false,
+                                      error: (err as Error)?.message ?? "خطا در استعلام کمبو از سرور Kalshi",
+                                    });
+                                  } finally {
+                                    setKalshiBusy(false);
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-extrabold text-xs shadow-sm"
+                              >
+                                {kalshiBusy
+                                  ? "⏳ در حال ارتباط با Kalshi..."
+                                  : `🧪 استعلام تیکر و پیش‌نمایش کمبو (${comboLegOrders.length} بازی)`}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={kalshiBusy || comboLegOrders.length < 2}
+                                data-testid="btn-kalshi-combo-submit"
+                                onClick={async () => {
+                                  setKalshiBusy(true);
+                                  try {
+                                    const d = await apiRpcJson("/api/kalshi/combo", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        date: activeDailyDate,
+                                        legs: comboLegOrders.map((l) => ({
+                                          gameNo: l.gameNo,
+                                          eventTicker: l.eventTicker,
+                                          marketTicker: l.ticker,
+                                          winnerTeam: l.winnerTeam,
+                                          yesAskCents: l.liveAskCents,
+                                          twinPct: l.twinPct,
+                                          agree: l.agree,
+                                        })),
+                                        stakeUsd: comboStakeUsd,
+                                        limitCents: comboLimitCents,
+                                        mode: "live",
+                                      }),
+                                    });
+                                    setComboReport(d);
+                                    const balD = await apiRpcJson("/api/kalshi/balance", { method: "POST" });
+                                    if (balD?.ok && balD.balanceUsd) setKalshiBalance(balD.balanceUsd);
+                                    const stD = await apiRpcJson("/api/kalshi/state");
+                                    if (stD?.ledger) setKalshiLedger(stD.ledger);
+                                  } catch (err) {
+                                    setComboReport({
+                                      ok: false,
+                                      error: (err as Error)?.message ?? "خطا در ثبت سفارش کمبو در Kalshi",
+                                    });
+                                  } finally {
+                                    setKalshiBusy(false);
+                                  }
+                                }}
+                                className="px-3.5 py-1.5 rounded-md bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white font-extrabold text-xs shadow-sm"
+                              >
+                                {kalshiBusy
+                                  ? "⏳ در حال ثبت سفارش..."
+                                  : `🚀 ثبت سفارش کمبو (${comboLegOrders.length} بازی) در Kalshi`}
+                              </button>
+                            </div>
+                          </div>
+
+                          {comboReport && (
+                            <div
+                              className={`p-2.5 rounded-lg border text-xs font-mono ${
+                                comboReport.ok
+                                  ? "bg-emerald-50 border-emerald-400 text-emerald-950"
+                                  : "bg-rose-50 border-rose-300 text-rose-900"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-extrabold">
+                                  {comboReport.message ?? comboReport.error}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setComboReport(null)}
+                                  className="text-[11px] text-slate-600 hover:text-slate-900 font-bold"
+                                >
+                                  بستن ✕
+                                </button>
+                              </div>
+                              {comboReport.comboTicker && (
+                                <div className="mt-1 text-[11px] text-indigo-900">
+                                  Combo Ticker: <b>{comboReport.comboTicker}</b>{" "}
+                                  {comboReport.orderId ? `• Order ID: ${comboReport.orderId}` : ""}{" "}
+                                  {comboReport.rfqId ? `• RFQ ID: ${comboReport.rfqId}` : ""}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Daily Cards Grid (2 to 3 Cards per Row, Exact GOLD-FORMULA-PRIORITY Card Structure in Light Pale-Blue) */}
+              {histLoading ? (
+                <div className="p-6 text-center text-xs text-sky-800 bg-white rounded-lg border border-sky-200 flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> در حال محاسبه کارت‌های روزانه از ۲۱٬۴۹۸ بازی تاریخی...
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                  {[...gamesOnDailyDate]
+                    .map((g) => {
+                      const t12 = (manualPersp === "home" ? g.h_12 : g.a_12) ?? [];
+                      const tGeoFin = (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "";
+                      const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
+                      const tGeoTab = (manualPersp === "home" ? g.h_geo_tab : g.a_geo_tab) ?? "";
+                      const activeGeoKind: "fin" | "dyn" = dailyCardMode === "geo_dyn" ? "dyn" : manualGeoKind;
+                      const dPool = getDayPoolBefore(g.day, g.d);
+                      const savedState = manualFilters[g.n];
+                      const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
+                      const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
+                      const getRowGeo = (r: HistGameRow) =>
+                        manualPersp === "home"
+                          ? rowGeoKind === "dyn"
+                            ? r.hGeoDyn ?? r.hGeo
+                            : r.hGeo
+                          : rowGeoKind === "dyn"
+                            ? r.aGeoDyn ?? r.aGeo
+                            : r.aGeo;
+                      const getRowGeoTab = (r: HistGameRow) =>
+                        manualPersp === "home" ? (r.hGeoTab ?? "") : (r.aGeoTab ?? "");
+
+                      const ch3 = computeThreeChannelIndex(t12, tGeoFin, tGeoDyn, dPool, manualPersp, tGeoTab);
+                      const autoChosen =
+                        dailyCardMode === "geo_tab"
+                          ? ch3.geoTab
+                          : dailyCardMode === "geo"
+                            ? ch3.geoFin
+                            : dailyCardMode === "geo_dyn"
+                              ? ch3.geoDyn
+                              : ch3.step;
+
+                      const hasManualFilter = Boolean(
+                        savedState &&
+                          (Object.values(savedState.cols).some((v) => v && v !== "ALL") ||
+                            (savedState.geo && savedState.geo !== "ALL") ||
+                            (savedState.geoTab && savedState.geoTab !== "ALL"))
+                      );
+
+                      const isNhlSysMode =
+                        dailyCardMode === "nhl_best" ||
+                        dailyCardMode === "nhl_vip3" ||
+                        dailyCardMode === "nhl_f1_guard" ||
+                        dailyCardMode === "nhl_f1_idx_raw" ||
+                        dailyCardMode === "nhl_f1" ||
+                        dailyCardMode === "nhl_f1_union";
+
+                      const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g, dPool) : null;
+                      let cardPool = f1Pool ?? autoChosen.pool;
+                      let manualOverridden = false;
+
+                      if (hasManualFilter && savedState) {
+                        const manualPool = dPool.filter((r) => {
+                          const el = getRowEl12(r);
+                          for (let c = 0; c < 12; c++) {
+                            const sel = savedState.cols[c];
+                            if (sel && sel !== "ALL" && el[c] !== sel) return false;
+                          }
+                          if (savedState.geo && savedState.geo !== "ALL" && getRowGeo(r) !== savedState.geo) {
+                            return false;
+                          }
+                          if (savedState.geoTab && savedState.geoTab !== "ALL" && getRowGeoTab(r) !== savedState.geoTab) {
+                            return false;
+                          }
+                          return true;
+                        });
+                        if (manualPool.length >= 5 && manualPool.length <= 7) {
+                          cardPool = manualPool;
+                          manualOverridden = true;
+                        }
+                      }
+
+                      const isNaturalPool = Boolean(f1Pool) || manualOverridden || autoChosen.isNatural57;
+                      const cardIdx = computePoolNumIndex(cardPool);
+                      const hw = cardPool.filter((r) => r.mg > 0).length;
+                      const aw = cardPool.filter((r) => r.mg < 0).length;
+                      const tot = hw + aw;
+                      const pct = tot > 0 ? Math.round((Math.max(hw, aw) / tot) * 100) : 50;
+
+                      const hpElePCode = "";
+                      const apElePCode = "";
+                      const nat3Cnt = g.idx3?.nat ?? ch3.natCount;
+                      const minD3Val = g.idx3?.minD ?? ch3.minDelta;
+
+                      const baseHomeFav =
+                        isNhlSysMode && !manualOverridden && g.sys_win
+                          ? g.sys_win === g.h
+                          : hw > aw
+                            ? true
+                            : aw > hw
+                              ? false
+                              : (g.f30 ?? 0) >= 0;
+                      const homeFav = cardFlipDir[g.n] ? !baseHomeFav : baseHomeFav;
+                      const predTeam = homeFav ? g.h : g.a;
+                      const predRole = homeFav ? "برد میزبان" : "برد میهمان";
+
+                      const trapNoNat3 = Boolean(g.trap_tag);
+                      const trapEven6 = false;
+                      const trapBlind100 = false;
+                      const trapPas0000 = false;
+                      const hasInternalTrap = Boolean(g.trap_tag);
+
+                      const rawWtp = activeWtpOf(g) ?? {
+                        mon: g.d,
+                        htp: 50,
+                        atp: 50,
+                        dtp: 0,
+                        hrk: 15,
+                        ark: 15,
+                        hwl: "0-0",
+                        awl: "0-0",
+                        hpct: 50,
+                        apct: 50,
+                        hel: "AIR",
+                        ael: "AIR",
+                        l5h: 50,
+                        hodds: 1.83,
+                        aodds: 2.20,
+                        mel: "WATER",
+                      };
+                      const rawL5H = typeof rawWtp.l5h === "number" ? rawWtp.l5h : 50;
+                      const l5Pick = Math.round((homeFav ? rawL5H : 100 - rawL5H) * 10) / 10;
+                      const matchElem: "FIRE" | "AIR" | "WATER" | "EARTH" =
+                        l5Pick >= 58 ? "FIRE" : l5Pick >= 51 ? "AIR" : l5Pick >= 44 ? "WATER" : "EARTH";
+                      const elemFaMap: Record<string, string> = {
+                        FIRE: "آتش FIRE",
+                        AIR: "هوا AIR",
+                        WATER: "آب WATER",
+                        EARTH: "خاک EARTH",
+                      };
+                      const wtpObj = {
+                        ...rawWtp,
+                        dtp: cardFlipDir[g.n] ? -rawWtp.dtp : rawWtp.dtp,
+                        l5Pick,
+                        matchElem,
+                        matchElemFa: elemFaMap[matchElem] || matchElem,
+                        hel: rawWtp.hel || "AIR",
+                        ael: rawWtp.ael || "AIR",
+                        hodds: typeof rawWtp.hodds === "number" ? rawWtp.hodds : 1.83,
+                        aodds: typeof rawWtp.aodds === "number" ? rawWtp.aodds : 2.20,
+                      };
+                      const trapWeeklyMismatch =
+                        typeof rawWtp.l5h === "number" ? matchElem === "EARTH" : wtpObj.dtp <= -8.0;
+
+                      const isVip3 = activeVip3Of(g);
+                      const isBestGuard = Boolean(g.f1_guard);
+                      const isBestWtp = activeF1WtpOf(g);
+                      const isRawF1Idx = Boolean(g.f1_idx);
+                      const isBaseF1 = Boolean(g.f1);
+                      const isUnionSys = activeUnionOf(g);
+                      const isFilteredOutByWeekly = Boolean((isBestGuard || g.idx_rescue) && trapWeeklyMismatch);
+                      const isFilteredOutByTrap = Boolean(isBaseF1 && hasInternalTrap);
+                      const isFilteredOutByIdx = Boolean(isBaseF1 && !isRawF1Idx && !isBestGuard);
+                      const isIdxRescueOnly = Boolean(!g.f1 && g.idx_rescue);
+
+                      const manualNaturalQual =
+                        tot >= 5 &&
+                        tot <= 7 &&
+                        pct >= 71 &&
+                        Math.abs(hw - aw) >= 3 &&
+                        !hasInternalTrap &&
+                        !trapWeeklyMismatch;
+
+                      const isQualified =
+                        manualOverridden || !isNhlSysMode
+                          ? manualNaturalQual
+                          : dailyCardMode === "nhl_vip3"
+                            ? isVip3
+                            : dailyCardMode === "nhl_best"
+                              ? isBestWtp
+                              : dailyCardMode === "nhl_f1_guard"
+                                ? isBestGuard
+                                : dailyCardMode === "nhl_f1_idx_raw"
+                                  ? isRawF1Idx
+                                  : dailyCardMode === "nhl_f1_union"
+                                    ? isUnionSys
+                                    : isBaseF1;
+
+                      const isBorderlineRescued = Boolean(
+                        isQualified && (g.is_nat === false || g.b2b_tag === "B2B_PICK" || isIdxRescueOnly)
+                      );
+                      const isVipMismatchRescue = false;
+                      const calibratedWinPct =
+                        isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
+                          ? 78.5
+                          : isQualified && wtpObj.matchElem === "WATER"
+                            ? 70.5
+                            : isBorderlineRescued
+                              ? 71.5
+                              : isQualified
+                                ? 74.5
+                                : 50.0;
+                      const maxBuyCents =
+                        isQualified && (isVip3 || wtpObj.matchElem === "FIRE")
+                          ? 76
+                          : isQualified && wtpObj.matchElem === "WATER"
+                            ? 68
+                            : isBorderlineRescued
+                              ? 69
+                              : isQualified
+                                ? 72
+                                : 0;
+
+                      const kalshiTicker = buildKalshiNbaTicker(g.d, g.a, g.h, predTeam, ((g as any).tour === "WTA" || tour === "WTA") ? "WTA" : "ATP");
+                      const mktInfo = kalshiMarkets[kalshiTicker];
+                      const liveAsk = mktInfo && mktInfo.yesAskCents > 0 ? mktInfo.yesAskCents : 55;
+                      const isUnderdogCaution = liveAsk < 45;
+                      const evEdge = Math.round(calibratedWinPct - liveAsk);
+                      const isPosEv = isQualified && liveAsk <= maxBuyCents && !isUnderdogCaution;
+
+                      const hasFinalScore = Boolean(g.done && g.st !== "PENDING" && g.aw);
+                      const cardWon = !hasFinalScore ? null : predTeam === g.aw;
+                      const scoreDisplay =
+                        g.sc && g.sc !== "PENDING" && g.sc !== "UPCOMING"
+                          ? `${g.hc} ${g.sc} ${g.ac}`
+                          : g.hp !== undefined && g.ap !== undefined
+                            ? `${g.hc} ${g.hp}-${g.ap} ${g.ac}`
+                            : "";
+
+                      return {
+                        g,
+                        ch3,
+                        cardIdx,
+                        wtpObj,
+                        trapWeeklyMismatch,
+                        isVipMismatchRescue,
+                        hw,
+                        aw,
+                        tot,
+                        pct,
+                        nat3Cnt,
+                        minD3Val,
+                        trapNoNat3,
+                        trapEven6,
+                        trapBlind100,
+                        trapPas0000,
+                        hasInternalTrap,
+                        isBorderlineRescued,
+                        calibratedWinPct,
+                        maxBuyCents,
+                        isUnderdogCaution,
+                        isVip3,
+                        isBestGuard,
+                        isBestWtp,
+                        isBaseF1,
+                        isNaturalPool,
+                        isFilteredOutByWeekly,
+                        isFilteredOutByTrap,
+                        isFilteredOutByIdx,
+                        isIdxRescueOnly,
+                        isQualified,
+                        manualOverridden,
+                        isNhlSysMode,
+                        homeFav,
+                        predTeam,
+                        predRole,
+                        kalshiTicker,
+                        mktInfo,
+                        liveAsk,
+                        evEdge,
+                        isPosEv,
+                        hasFinalScore,
+                        cardWon,
+                        scoreDisplay,
+                      };
+                    })
+                    .filter((item) => {
+                      if (dailyCardFilter === "qualified") return item.isQualified;
+                      if (dailyCardFilter === "anti_nobet") return fusionMode === "total_elem_12" ? evalSmartMode14(item.g).sig : evalSmartAntiNoBet(item.g).sig;
+                      if (dailyCardFilter === "referee6") return fusionMode === "total_elem_12" ? evalSmartMode14(item.g).referee6.active : item.isQualified;
+                      if (dailyCardFilter === "ref_top") return fusionMode === "total_elem_12" ? evalSmartMode14(item.g).referee6.isTopSignal : item.isQualified;
+                      if (dailyCardFilter === "vip3") return item.isVip3;
+                      if (dailyCardFilter === "posev") return item.isPosEv;
+                      if (dailyCardFilter === "win") return item.cardWon === true;
+                      if (dailyCardFilter === "loss") return item.cardWon === false;
+                      if (dailyCardFilter === "pending") return item.cardWon === null;
+                      return true;
+                    })
+                    .sort((a, b) => {
+                      if (Number(b.isVip3) !== Number(a.isVip3)) return Number(b.isVip3) - Number(a.isVip3);
+                      if (Number(b.isQualified) !== Number(a.isQualified)) return Number(b.isQualified) - Number(a.isQualified);
+                      if (Number(b.isPosEv) !== Number(a.isPosEv)) return Number(b.isPosEv) - Number(a.isPosEv);
+                      const aUnan = a.ch3.unanimous && Math.abs(a.ch3.avgDelta) >= 2 ? 1 : 0;
+                      const bUnan = b.ch3.unanimous && Math.abs(b.ch3.avgDelta) >= 2 ? 1 : 0;
+                      if (bUnan !== aUnan) return bUnan - aUnan;
+                      if (b.pct !== a.pct) return b.pct - a.pct;
+                      if (Math.abs(b.cardIdx.delta) !== Math.abs(a.cardIdx.delta)) {
+                        return Math.abs(b.cardIdx.delta) - Math.abs(a.cardIdx.delta);
+                      }
+                      return a.g.n - b.g.n;
+                    })
+                    .map((item) => {
+                      const {
+                        g,
+                        ch3,
+                        cardIdx,
+                        wtpObj,
+                        trapWeeklyMismatch,
+                        isVipMismatchRescue,
+                        hw,
+                        aw,
+                        tot,
+                        pct,
+                        nat3Cnt,
+                        minD3Val,
+                        trapNoNat3,
+                        trapEven6,
+                        trapBlind100,
+                        hasInternalTrap,
+                        isBorderlineRescued,
+                        maxBuyCents,
+                        isUnderdogCaution,
+                        isVip3,
+                        isBaseF1,
+                        isNaturalPool,
+                        isFilteredOutByWeekly,
+                        isFilteredOutByTrap,
+                        isFilteredOutByIdx,
+                        isIdxRescueOnly,
+                        isQualified,
+                        manualOverridden,
+                        isNhlSysMode,
+                        homeFav,
+                        predTeam,
+                        predRole,
+                        kalshiTicker,
+                        liveAsk,
+                        evEdge,
+                        isPosEv,
+                        hasFinalScore,
+                        cardWon,
+                        scoreDisplay,
+                      } = item;
+
+                      const modeBadgeText = manualOverridden
+                        ? "فیلتر دستی فعال"
+                        : dailyCardMode === "nhl_vip3"
+                          ? "ویژه FIRE / VIP"
+                          : dailyCardMode === "nhl_best"
+                            ? "نهایی + ضریب Log5"
+                            : dailyCardMode === "nhl_f1_guard"
+                              ? "بدون جدول ۷۷٫۴٪"
+                              : dailyCardMode === "nhl_f1_idx_raw"
+                                ? "شاخص پایه ۶۲٫۵٪"
+                                : dailyCardMode === "nhl_f1_union"
+                                  ? "تلفیق ۱ + نجات"
+                                  : dailyCardMode === "nhl_f1"
+                                    ? "تلفیق ۱ پایه"
+                                    : dailyCardMode === "step"
+                                      ? "کانال STEP"
+                                      : dailyCardMode === "geo"
+                                        ? "کانال GEO-FIN"
+                                        : dailyCardMode === "geo_tab"
+                                          ? "کانال GEO-TAB"
+                                          : "کانال GEO-DYN";
+
+                      const defaultComboList =
+                        comboSelectedByDate[activeDailyDate] && comboSelectedByDate[activeDailyDate].length >= 2
+                          ? comboSelectedByDate[activeDailyDate]
+                          : (() => {
+                              const qualNos = [...gamesOnDailyDate]
+                                .filter((x) =>
+                                  dailyCardMode === "nhl_vip3"
+                                    ? activeVip3Of(x)
+                                    : dailyCardMode === "nhl_f1_guard"
+                                      ? Boolean(x.f1_guard ?? x.f1_idx)
+                                      : dailyCardMode === "nhl_f1_idx_raw"
+                                        ? Boolean(x.f1_idx)
+                                        : dailyCardMode === "nhl_f1_union"
+                                          ? activeUnionOf(x)
+                                          : dailyCardMode === "nhl_f1"
+                                            ? Boolean(x.f1)
+                                            : activeF1WtpOf(x)
+                                )
+                                .map((x) => x.n);
+                              if (qualNos.length >= 3) return qualNos.slice(0, 3);
+                              if (qualNos.length === 2) return qualNos.slice(0, 2);
+                              return gamesOnDailyDate.slice(0, 2).map((x) => x.n);
+                            })();
+
+                      const inComboIdx = defaultComboList.indexOf(g.n);
+                      const isCardInCombo = inComboIdx >= 0;
+
+                      const toggleThisCardCombo = () => {
+                        const cur = [...defaultComboList];
+                        const idx = cur.indexOf(g.n);
+                        if (idx >= 0) {
+                          if (cur.length <= 2) return;
+                          cur.splice(idx, 1);
+                        } else {
+                          if (cur.length >= 4) cur.pop();
+                          cur.push(g.n);
+                        }
+                        setComboSelectedByDate((prev) => ({
+                          ...prev,
+                          [activeDailyDate]: cur,
+                        }));
+                      };
+
+                      const cardEnabled = kalshiCardEnabled[g.n] ?? isPosEv;
+                      const cardStake =
+                        kalshiCardStake[g.n] ?? (isVip3 || isPosEv ? kalshiVipStake : kalshiDefaultStake);
+                      const cardLimit = kalshiCardLimit[g.n] ?? liveAsk;
+                      const cardContracts = Math.max(
+                        1,
+                        Math.floor((cardStake * 100) / Math.max(1, cardLimit))
+                      );
+                      const estCost = ((cardContracts * cardLimit) / 100).toFixed(2);
+                      const estNetWin = ((cardContracts * (100 - cardLimit)) / 100).toFixed(2);
+
+                      const showKalshiPanel =
+                        isQualified || cardEnabled || Boolean(openManualKalshiCards[g.n]);
+
+                      const showLegacyChannelBoxes = manualOverridden || !isNhlSysMode;
+                      const isPureGfFinMode = fusionMode === "gf_fin_pure";
+                      const isTriRoutedMode = fusionMode === "tri_gf_routed";
+                      const isTriUltraMode = fusionMode === "tri_gf_ultralock";
+                      const isAntiNoBetMode = fusionMode === "anti_nobet_smart";
+                      const isTotalElem12Mode = fusionMode === "total_elem_12";
+                      const isTriUltraFamily = isTriUltraMode || isAntiNoBetMode;
+                      const isTriAntiDropMode = isTriRoutedMode || isTriUltraFamily || isTotalElem12Mode;
+                      const presetShortMap: Record<FusionModeKey, string> = {
+                        tri_gf_ultralock: "حالت ۱۲ (ابرقفل ۳ عددی + ضدحذف)",
+                        anti_nobet_smart: "حالت ۱۳ (ضد NO-BET هوشمند: مستقیم + عکس)",
+                        total_elem_12: "حالت ۱۴ (قطبیت المنت کل ۱۲ بازیکن + تیم)",
+                        tri_gf_routed: "حالت ۱۱ (۳ عددی مستقل + ضدحذف)",
+                        gf_fin_pure: "حالت ۱۰ (موتور خالص GF-FIN)",
+                        pos_inv_lock: "حالت ۹ (قفل جامع v5)",
+                        earth_neg_lock: "حالت ۷ (قفل ایمن منفی)",
+                        safe_dl_core: "حالت ۸ (قفل دوگانه مستقل)",
+                        double_pwr_lock: "حالت ۶ (قفل ۱xxx+Σ8)",
+                        geo_1xxx_lock: "حالت ۵ (فیلتر رمل ۱xxx)",
+                        dual_pillar: "حالت ۱ (تلفیق دو-ستونی)",
+                        vip_cross: "حالت ۲ (شکارچی VIP)",
+                        astro_lock: "حالت ۳ (قفل نجومی)",
+                        diamond: "حالت ۴ (قفل الماس T∩P)",
+                      };
+                      const activePresetLabel = presetShortMap[fusionMode] || "موتور تلفیقی";
+                      const activeRouteCardObj = isTotalElem12Mode
+                        ? g.fusion_meta?.total_elem_12
+                        : isTriRoutedMode
+                          ? g.fusion_meta?.geo1xxx?.m11_route
+                          : isTriUltraFamily
+                            ? g.fusion_meta?.geo1xxx?.m12_route
+                            : undefined;
+                      const posInvTriggeredCard = Boolean(
+                        (fusionMode === "pos_inv_lock" && g.fusion_meta?.geo1xxx?.pos_inv?.triggered) ||
+                          (isTriAntiDropMode && activeRouteCardObj?.flipped)
+                      );
+                      const fmtHeroSigned = (v: number) => {
+                        const r = Math.round(Number(v || 0) * 10) / 10;
+                        return r > 0 ? `+${r.toFixed(1)}` : r === 0 ? "0.0" : r.toFixed(1);
+                      };
+                      const heroG1 = g.fusion_meta?.geo1xxx;
+                      const heroPick1xxx = heroG1 ? (homeFav ? heroG1.h_sum : heroG1.a_sum) : 0;
+                      const heroPickCnt = heroG1 ? (homeFav ? heroG1.h_cnt : heroG1.a_cnt) : 0;
+                      const heroPickAll8 = heroG1 ? (homeFav ? heroG1.h_all : heroG1.a_all) : 0;
+                      const heroHGf = typeof heroG1?.h_gf === "number" ? heroG1.h_gf : 0;
+                      const heroAGf = typeof heroG1?.a_gf === "number" ? heroG1.a_gf : 0;
+                      const heroPickGf = homeFav ? heroHGf : heroAGf;
+                      const heroGfMargin = Math.round(Math.abs(heroHGf - heroAGf) * 10) / 10;
+                      const rawGap3H =
+                        typeof heroG1?.gap3_h === "number"
+                          ? heroG1.gap3_h
+                          : heroG1
+                            ? Math.round(((heroG1.a_sum - heroG1.h_sum) + (heroG1.a_all - heroG1.h_all) + 1.5 * (heroAGf - heroHGf)) * 10) / 10
+                            : 0;
+                      const heroPickGap3 = Math.round((homeFav ? rawGap3H : -rawGap3H) * 10) / 10;
+                      const heroEngineObj =
+                        g.fusion_meta?.driver === "PLAYER"
+                          ? g.fusion_meta?.player
+                          : g.fusion_meta?.team;
+
+                      const cardBorderCls =
+                        isVip3 && isQualified && !isVipMismatchRescue
+                          ? "border-2 border-amber-400 ring-2 ring-amber-200/80 bg-white shadow-md"
+                          : isQualified && posInvTriggeredCard
+                            ? "border-2 border-indigo-500 ring-2 ring-indigo-200/80 bg-white shadow-md"
+                            : isQualified
+                              ? "border-2 border-emerald-400 ring-1 ring-emerald-200 bg-white shadow-sm"
+                              : showLegacyChannelBoxes && (isFilteredOutByWeekly || isFilteredOutByTrap || isFilteredOutByIdx)
+                                ? "border border-amber-300 bg-slate-50/95"
+                                : "border border-slate-200 bg-slate-50/85";
+
+                      const ribbonCls =
+                        isVip3 && isQualified && !isVipMismatchRescue
+                          ? "bg-gradient-to-r from-amber-600 via-emerald-700 to-teal-700 text-white"
+                          : isQualified && posInvTriggeredCard
+                            ? "bg-gradient-to-r from-indigo-700 via-sky-700 to-emerald-700 text-white"
+                            : isQualified
+                              ? "bg-emerald-700 text-white"
+                              : showLegacyChannelBoxes && isIdxRescueOnly
+                                ? "bg-sky-100 text-sky-900 border-b border-sky-200"
+                                : showLegacyChannelBoxes && (isFilteredOutByWeekly || isFilteredOutByTrap || isFilteredOutByIdx)
+                                  ? "bg-amber-100/80 text-amber-950 border-b border-amber-200"
+                                  : "bg-slate-100 text-slate-600 border-b border-slate-200";
+
+                      const trapReasonShort = g.trap_tag || "تله درونی/B2B";
+
+                      const ribbonTitle = !showLegacyChannelBoxes
+                        ? isPureGfFinMode
+                          ? isQualified
+                            ? `✓ سیگنال خالص GF-FIN • برنده کمتر/منفی‌تر (ΔGF=${heroGfMargin})`
+                            : "تساوی کامل GF-FIN (=)"
+                          : isQualified && posInvTriggeredCard
+                            ? `🔄 سیگنال فعال ${activePresetLabel} • ${isTriAntiDropMode ? "معکوس تله ضدحذف" : "معکوس دو-مثبت"} (${wtpObj.l5Pick}%)`
+                            : isQualified && isVip3
+                              ? `⭐ سیگنال VIP ${activePresetLabel} (${wtpObj.matchElem} ${wtpObj.l5Pick}% • ≤${maxBuyCents}¢)`
+                              : isQualified
+                                ? `✓ سیگنال فعال ${activePresetLabel} (${wtpObj.matchElem} ${wtpObj.l5Pick}% • ≤${maxBuyCents}¢)`
+                                : isTriAntiDropMode
+                                  ? `🧭 مسیر برنده بدون حذف (${predTeam === g.h ? g.hc : g.ac}) • ${activePresetLabel}`
+                                  : `خارج از سیگنال • ${activePresetLabel}`
+                        : isVipMismatchRescue
+                          ? "نجات VIP جدول (≤۵۲¢)"
+                          : isQualified && wtpObj.matchElem === "FIRE"
+                            ? `تایید ویژه عنصر آتش FIRE (${wtpObj.l5Pick}% • ≤۷۶¢)`
+                            : isVip3 && isQualified
+                              ? "VIP طلایی ۳ کاناله + جدول (≤۷۶¢)"
+                              : isQualified && manualOverridden
+                                ? "تایید فیلتر دستی (≤۷۳¢)"
+                                : isQualified && wtpObj.matchElem === "WATER"
+                                  ? `تایید عنصر آب WATER (${wtpObj.l5Pick}% • ≤۶۸¢)`
+                                  : isBorderlineRescued
+                                    ? "عبور مرزی + جدول (≤۶۹¢)"
+                                    : isQualified && isIdxRescueOnly
+                                      ? "تایید نجات ۳ کاناله (اجماع ۳/۳)"
+                                      : isQualified
+                                        ? `تایید عنصر هوا AIR (${wtpObj.l5Pick}% • ≤۷۲¢)`
+                                        : isFilteredOutByWeekly && !manualOverridden
+                                          ? `اخراج عنصر خاک EARTH (Log5 ${wtpObj.l5Pick}%)`
+                                          : isFilteredOutByTrap && !manualOverridden
+                                            ? `فیلتر تله درونی: ${trapReasonShort}`
+                                            : isIdxRescueOnly && !manualOverridden
+                                              ? "کاندید نجات شاخص ۳ کاناله"
+                                              : isFilteredOutByIdx && !manualOverridden
+                                                ? "حذف توسط شاخص عددی جدید"
+                                                : "خارج از سیگنال سیستم جدید";
+
+                      const twinRuleOk =
+                        isNhlSysMode && !manualOverridden
+                          ? isQualified && (isBaseF1 || isIdxRescueOnly)
+                          : isNaturalPool && tot >= 5 && tot <= 7 && pct >= 71 && Math.abs(hw - aw) >= 3 && !g.a1_veto;
+                      const idxFavOk = isQualified
+                        ? true
+                        : (homeFav ? cardIdx.delta > 0 : cardIdx.delta < 0) && (!hasInternalTrap || minD3Val >= 2);
+
+                      // Compute clean unified metrics for 2-Box Ticked Card + Game Result Footer + Collapsible Details
+                      const fm = g.fusion_meta;
+                      const tm = fm?.team ?? { pick: "", votes: "", pct: "", f30: 0, ch: "", sig: false, vip: false };
+                      const pm = fm?.player ?? { pick: "", votes: "", pct: "", f30: 0, ch: "", sig: false, vip: false };
+                      const dpMode = fm?.modes?.dual_pillar;
+                      const hpList = g.h_players ?? [];
+                      const apList = g.a_players ?? [];
+                      const outCnt = (g.h_out?.length ?? 0) + (g.a_out?.length ?? 0);
+                      const isLineupOpen = isCardBoxOpen(g.n, "lineup");
+                      const isBox1Open = isCardBoxOpen(g.n, "box1");
+                      const isSmartBoxOpen = isCardBoxOpen(g.n, "smart");
+                      const isBox2Open = isCardBoxOpen(g.n, "box2");
+                      const isDomBoxOpen = isCardBoxOpen(g.n, "dom");
+                      const isElemBoxOpen = isCardBoxOpen(g.n, "elem");
+                      const isFusion4BoxOpen = isCardBoxOpen(g.n, "fusion4");
+                      const isReferee6BoxOpen = isCardBoxOpen(g.n, "referee6");
+                      const isSixBoxesOpen = isCardBoxOpen(g.n, "sixboxes");
+
+                      const calcGeoFin = (efStr: string, gf?: string) => {
+                        if (gf && gf.length === 4) return gf;
+                        const parts = String(efStr || "0-0-0-0").split("-");
+                        return parts
+                          .slice(0, 4)
+                          .map((x) => (Math.abs(parseInt(x, 10) || 0) % 2 === 1 ? "1" : "0"))
+                          .join("");
+                      };
+                      const calcPlayerGfFin = (efStr: string, gf?: string, preVal?: number) => {
+                        if (typeof preVal === "number" && !Number.isNaN(preVal)) return preVal;
+                        const code = calcGeoFin(efStr, gf);
+                        const parts = String(efStr || "0-0-0-0")
+                          .split("-")
+                          .slice(0, 4)
+                          .map((x) => parseInt(x, 10) || 0);
+                        while (parts.length < 4) parts.push(0);
+                        const wts = [8, 4, 2, 1];
+                        let acc = 0;
+                        for (let i = 0; i < 4; i++) {
+                          const b = code[i] === "1" ? 1 : 0;
+                          acc += wts[i] * (2 * b - 1) * parts[i];
+                        }
+                        return Math.round(acc) / 10;
+                      };
+                      const fallbackSum1 = (arr: typeof hpList) => {
+                        let s = 0, c = 0, s0 = 0, c0 = 0, s11 = 0, c11 = 0, all = 0, gfAcc = 0;
+                        for (const p of arr) {
+                          const code = calcGeoFin(p.ef, p.gf);
+                          const pw = Number(p.pwr || 0);
+                          all += pw;
+                          gfAcc += calcPlayerGfFin(p.ef, p.gf, p.gf_fin);
+                          if (code.startsWith("1")) {
+                            s += pw;
+                            c += 1;
+                          } else {
+                            s0 += pw;
+                            c0 += 1;
+                            if (code === "0011") {
+                              s11 += pw;
+                              c11 += 1;
+                            }
+                          }
+                        }
+                        return {
+                          sum1: Math.round(s * 10) / 10,
+                          cnt1: c,
+                          sum0: Math.round(s0 * 10) / 10,
+                          cnt0: c0,
+                          sum0011: Math.round(s11 * 10) / 10,
+                          cnt0011: c11,
+                          sumAll: Math.round(all * 10) / 10,
+                          sumGf: Math.round(gfAcc * 10) / 10,
+                        };
+                      };
+                      const fbH = fallbackSum1(hpList);
+                      const fbA = fallbackSum1(apList);
+                      const g1 = fm?.geo1xxx ?? {
+                        h_sum: fbH.sum1,
+                        a_sum: fbA.sum1,
+                        h_cnt: fbH.cnt1,
+                        a_cnt: fbA.cnt1,
+                        h_0xxx: fbH.sum0,
+                        a_0xxx: fbA.sum0,
+                        h_0cnt: fbH.cnt0,
+                        a_0cnt: fbA.cnt0,
+                        h_0011: fbH.sum0011,
+                        a_0011: fbA.sum0011,
+                        h_0011_cnt: fbH.cnt0011,
+                        a_0011_cnt: fbA.cnt0011,
+                        h_all: fbH.sumAll,
+                        a_all: fbA.sumAll,
+                        h_gf: fbH.sumGf,
+                        a_gf: fbA.sumGf,
+                        diff: Math.round((fbH.sum1 - fbA.sum1) * 10) / 10,
+                        win: fbH.sum1 < fbA.sum1 ? g.h : fbA.sum1 < fbH.sum1 ? g.a : "",
+                        all_win: fbH.sumAll < fbA.sumAll ? g.h : fbA.sumAll < fbH.sumAll ? g.a : "",
+                      };
+                      const fmtSigned = (v: number) => {
+                        const r = Math.round(Number(v || 0) * 10) / 10;
+                        return r > 0 ? `+${r.toFixed(1)}` : r === 0 ? "0.0" : r.toFixed(1);
+                      };
+                      const shortCode = (tName: string) => (tName === g.h ? g.hc : tName === g.a ? g.ac : tName);
+
+                      const h0Val = typeof g1.h_0xxx === "number" ? g1.h_0xxx : fbH.sum0;
+                      const a0Val = typeof g1.a_0xxx === "number" ? g1.a_0xxx : fbA.sum0;
+                      const h0Cnt = typeof g1.h_0cnt === "number" ? g1.h_0cnt : fbH.cnt0;
+                      const a0Cnt = typeof g1.a_0cnt === "number" ? g1.a_0cnt : fbA.cnt0;
+                      const h0011Val = typeof g1.h_0011 === "number" ? g1.h_0011 : fbH.sum0011;
+                      const a0011Val = typeof g1.a_0011 === "number" ? g1.a_0011 : fbA.sum0011;
+                      const h0011Cnt = typeof g1.h_0011_cnt === "number" ? g1.h_0011_cnt : fbH.cnt0011;
+                      const a0011Cnt = typeof g1.a_0011_cnt === "number" ? g1.a_0011_cnt : fbA.cnt0011;
+                      const cold0Win =
+                        g1.cold0_win !== undefined
+                          ? g1.cold0_win
+                          : h0Val < a0Val
+                            ? g.h
+                            : a0Val < h0Val
+                              ? g.a
+                              : "";
+                      const coldTamePi = Boolean(g1.cold_tame_pi);
+                      const coldTameWin = g1.cold_tame_win ?? "";
+                      const hGfVal = typeof g1.h_gf === "number" ? g1.h_gf : fbH.sumGf;
+                      const aGfVal = typeof g1.a_gf === "number" ? g1.a_gf : fbA.sumGf;
+                      const hS3Val =
+                        typeof g1.h_s3 === "number"
+                          ? g1.h_s3
+                          : Math.round((g1.h_sum + g1.h_all + hGfVal) * 10) / 10;
+                      const aS3Val =
+                        typeof g1.a_s3 === "number"
+                          ? g1.a_s3
+                          : Math.round((g1.a_sum + g1.a_all + aGfVal) * 10) / 10;
+                      const s3Win =
+                        g1.s3_win !== undefined
+                          ? g1.s3_win
+                          : hS3Val < aS3Val
+                            ? g.h
+                            : aS3Val < hS3Val
+                              ? g.a
+                              : "";
+                      const isS3SignSplit = Boolean((hS3Val < 0 && aS3Val > 0) || (aS3Val < 0 && hS3Val > 0));
+                      const gfWin =
+                        g1.gf_win !== undefined
+                          ? g1.gf_win
+                          : hGfVal < aGfVal
+                            ? g.h
+                            : aGfVal < hGfVal
+                              ? g.a
+                              : "";
+                      const gfAbsDiff = Math.round(Math.abs(hGfVal - aGfVal) * 10) / 10;
+                      const all8Win =
+                        g1.all_win !== undefined
+                          ? g1.all_win
+                          : g1.h_all < g1.a_all
+                            ? g.h
+                            : g1.a_all < g1.h_all
+                              ? g.a
+                              : "";
+                      const dlWin = g1.dl_win !== undefined ? g1.dl_win : g1.win && g1.win === all8Win ? g1.win : "";
+                      const votes3 = [g1.win, all8Win, gfWin].filter(Boolean);
+                      const hV3 = votes3.filter((w) => w === g.h).length;
+                      const aV3 = votes3.filter((w) => w === g.a).length;
+                      const maj23Win = g1.maj23_win ?? (hV3 >= 2 ? g.h : aV3 >= 2 ? g.a : "");
+                      const triple3Win = g1.triple3_win ?? (hV3 === 3 ? g.h : aV3 === 3 ? g.a : "");
+
+                      const wtpAct: any = oddsFreqMode === "daily" ? (g.wtp_day ?? g.wtp ?? {}) : (g.wtp ?? {});
+                      const wtpWk: any = g.wtp ?? {};
+                      const wtpDy: any = g.wtp_day ?? wtpWk;
+                      const hEl = String(wtpAct.hel || wtpWk.hel || "AIR");
+                      const aEl = String(wtpAct.ael || wtpWk.ael || "AIR");
+                      const hL5 = Math.round(Number(wtpAct.l5h ?? 50) * 10) / 10;
+                      const aL5 = Math.round((100 - Number(wtpAct.l5h ?? 50)) * 10) / 10;
+
+                      const evalTarget = predTeam || dlWin || g.sys_win;
+                      const isTargetHome = evalTarget === g.h;
+                      const pickElWk = String(isTargetHome ? wtpWk.hel ?? "" : wtpWk.ael ?? "");
+                      const pickElDy = String(isTargetHome ? wtpDy.hel ?? "" : wtpDy.ael ?? "");
+                      const oppElWk = String(isTargetHome ? wtpWk.ael ?? "" : wtpWk.hel ?? "");
+                      const oppElDy = String(isTargetHome ? wtpDy.ael ?? "" : wtpDy.hel ?? "");
+                      const tS1 = isTargetHome ? g1.h_sum : g1.a_sum;
+                      const oS1 = isTargetHome ? g1.a_sum : g1.h_sum;
+                      const tS8 = isTargetHome ? g1.h_all : g1.a_all;
+                      const oS8 = isTargetHome ? g1.a_all : g1.h_all;
+                      const pickD1 = Math.round((oS1 - tS1) * 10) / 10;
+                      const pickD8 = Math.round((oS8 - tS8) * 10) / 10;
+                      const pickEarthOk = !((pickElWk === "EARTH" && oppElWk !== "EARTH") || (pickElDy === "EARTH" && oppElDy !== "EARTH"));
+                      const pickHasNeg = (tS1 <= 0 || tS8 < 0) || (pickD1 >= 4.0 && pickD8 >= 3.0);
+                      const pickMarginOk = pickD8 >= 1.2 || (pickD1 >= 3.5 && pickD8 >= 0.5) || (pickElWk === "FIRE" && pickD8 >= 0.4);
+                      const pickNegOk = pickHasNeg && pickMarginOk;
+                      const hasRawDl = Boolean(dlWin);
+                      const isSafeDl = Boolean(hasRawDl && (g1.guards ? g1.guards.safe_ok : pickEarthOk && pickNegOk));
+                      const isGfRescued = Boolean(g1.gf_rescued && isQualified && !hasRawDl);
+
+                      // Build Box 1 Ticked Checklist Rows strictly for the active Fusion Mode
+                      type CheckTick = "pass" | "trap" | "none";
+                      type CheckRow = {
+                        key: string;
+                        testId: string;
+                        stepTitle: string;
+                        stepSub?: string;
+                        hText: string;
+                        hSub?: string;
+                        hTick: CheckTick;
+                        aText: string;
+                        aSub?: string;
+                        aTick: CheckTick;
+                      };
+
+                      let warmWin = g1.win || "";
+                      let warmSub = "";
+                      if (isTriAntiDropMode && coldTamePi && coldTameWin) {
+                        warmWin = coldTameWin;
+                        warmSub = "مهار (+,+) با ۰xxx";
+                      } else if ((fusionMode === "pos_inv_lock" || isTriAntiDropMode) && g1.pos_inv?.triggered && g1.pos_inv?.win) {
+                        warmWin = g1.pos_inv.win;
+                        warmSub = "معکوس دو-مثبت (+,+)";
+                      } else if (isTriAntiDropMode && ((g1.h_cnt === 0) !== (g1.a_cnt === 0))) {
+                        warmWin = g1.h_cnt === 0 ? g.a : g.h;
+                        warmSub = "قانون حبس 1xxx=0";
+                      } else if (g1.pos_inv?.both_pos) {
+                        warmSub = "دو-مثبت متعادل (+,+)";
+                      }
+
+                      const rowWarm1xxx: CheckRow = {
+                        key: "warm1",
+                        testId: `row-geo1xxx-${g.n}`,
+                        stepTitle: "قطب گرم Σ(1xxx)",
+                        stepSub: warmSub || undefined,
+                        hText: `${fmtSigned(g1.h_sum)} (${g1.h_cnt})`,
+                        hSub: g1.h_cnt === 0 ? "حبس ۰xxx" : undefined,
+                        hTick: g1.h_cnt === 0 ? "trap" : warmWin === g.h ? "pass" : "none",
+                        aText: `${fmtSigned(g1.a_sum)} (${g1.a_cnt})`,
+                        aSub: g1.a_cnt === 0 ? "حبس ۰xxx" : undefined,
+                        aTick: g1.a_cnt === 0 ? "trap" : warmWin === g.a ? "pass" : "none",
+                      };
+
+                      const rowAll8: CheckRow = {
+                        key: "all8",
+                        testId: `row-geoall8-${g.n}`,
+                        stepTitle: "مجموع ۸ بازیکن Σ(8)",
+                        hText: fmtSigned(g1.h_all),
+                        hTick: all8Win === g.h ? "pass" : "none",
+                        aText: fmtSigned(g1.a_all),
+                        aTick: all8Win === g.a ? "pass" : "none",
+                      };
+
+                      const rowGfAndS3: CheckRow = {
+                        key: "gfs3",
+                        testId: `row-gffin-${g.n}`,
+                        stepTitle: isPureGfFinMode ? "شاخص خالص Σ(GF-FIN)" : isTriAntiDropMode ? "داور GF-FIN و Σ(3)" : "شاخص داور GF-FIN",
+                        stepSub: !isPureGfFinMode
+                          ? triple3Win
+                            ? `اجماع ۳/۳ (${shortCode(triple3Win)})`
+                            : maj23Win
+                              ? `اکثریت ۲/۳ (${shortCode(maj23Win)})`
+                              : isS3SignSplit
+                                ? "شکاف علامت Σ3"
+                                : undefined
+                          : undefined,
+                        hText: isTriAntiDropMode ? `GF:${fmtSigned(hGfVal)}` : fmtSigned(hGfVal),
+                        hSub: isTriAntiDropMode ? `Σ3:${fmtSigned(hS3Val)}${s3Win === g.h ? " ✓" : ""}` : undefined,
+                        hTick: gfWin === g.h ? "pass" : "none",
+                        aText: isTriAntiDropMode ? `GF:${fmtSigned(aGfVal)}` : fmtSigned(aGfVal),
+                        aSub: isTriAntiDropMode ? `Σ3:${fmtSigned(aS3Val)}${s3Win === g.a ? " ✓" : ""}` : undefined,
+                        aTick: gfWin === g.a ? "pass" : "none",
+                      };
+
+                      const rowCold0: CheckRow = {
+                        key: "cold0",
+                        testId: `row-geocold0-${g.n}`,
+                        stepTitle: "قطب سرد Σ(0xxx)",
+                        stepSub: h0011Cnt > 0 || a0011Cnt > 0 ? "همراه کد سرد 0011" : undefined,
+                        hText: `${fmtSigned(h0Val)} (${h0Cnt})`,
+                        hSub: h0011Cnt > 0 ? `0011:${fmtSigned(h0011Val)}` : undefined,
+                        hTick: cold0Win === g.h ? "pass" : "none",
+                        aText: `${fmtSigned(a0Val)} (${a0Cnt})`,
+                        aSub: a0011Cnt > 0 ? `0011:${fmtSigned(a0011Val)}` : undefined,
+                        aTick: cold0Win === g.a ? "pass" : "none",
+                      };
+
+                      const twinActiveWinner = dpMode?.sig
+                        ? dpMode.pick
+                        : tm.vip && !pm.sig
+                          ? tm.pick
+                          : pm.vip && !tm.sig
+                            ? pm.pick
+                            : "";
+                      const rowTwinCombined: CheckRow = {
+                        key: "twin",
+                        testId: `row-twin-${g.n}`,
+                        stepTitle: "موتور تلفیقی همزاد",
+                        stepSub: dpMode?.sig ? "تایید دو-ستونی" : twinActiveWinner ? "تایید VIP تک‌موتور" : "بدون سیگنال همزاد",
+                        hText: twinActiveWinner === g.h ? (dpMode?.sig ? "تایید T+P" : "VIP تک‌موتور") : "—",
+                        hSub: `${tm.pick === g.h ? "T✓" : "T—"} • ${pm.pick === g.h ? "P✓" : "P—"}`,
+                        hTick: twinActiveWinner === g.h ? "pass" : "none",
+                        aText: twinActiveWinner === g.a ? (dpMode?.sig ? "تایید T+P" : "VIP تک‌موتور") : "—",
+                        aSub: `${tm.pick === g.a ? "T✓" : "T—"} • ${pm.pick === g.a ? "P✓" : "P—"}`,
+                        aTick: twinActiveWinner === g.a ? "pass" : "none",
+                      };
+
+                      const rowStandings: CheckRow = {
+                        key: "standings",
+                        testId: `row-standings-${g.n}`,
+                        stepTitle: "عنصر جدول (Log5)",
+                        stepSub: hEl === "EARTH" && aEl === "EARTH" ? "تله دو EARTH" : undefined,
+                        hText: hEl === "EARTH" ? "تله EARTH" : hEl,
+                        hSub: `${hL5}%`,
+                        hTick: hEl === "EARTH" ? "trap" : "pass",
+                        aText: aEl === "EARTH" ? "تله EARTH" : aEl,
+                        aSub: `${aL5}%`,
+                        aTick: aEl === "EARTH" ? "trap" : "pass",
+                      };
+
+                      const rowTeamOnly: CheckRow = {
+                        key: "team_eng",
+                        testId: `row-team-eng-${g.n}`,
+                        stepTitle: "موتور تیم+استادیوم (T)",
+                        hText: tm.pick === g.h ? `${tm.pct} (${tm.votes})` : "—",
+                        hSub: tm.pick === g.h ? `F30:${tm.f30 >= 0 ? `+${tm.f30}` : tm.f30}` : undefined,
+                        hTick: tm.pick === g.h && tm.sig ? "pass" : "none",
+                        aText: tm.pick === g.a ? `${tm.pct} (${tm.votes})` : "—",
+                        aSub: tm.pick === g.a ? `F30:${tm.f30 >= 0 ? `+${tm.f30}` : tm.f30}` : undefined,
+                        aTick: tm.pick === g.a && tm.sig ? "pass" : "none",
+                      };
+
+                      const rowPlayerOnly: CheckRow = {
+                        key: "player_eng",
+                        testId: `row-player-eng-${g.n}`,
+                        stepTitle: "موتور ۸ بازیکن (P)",
+                        hText: pm.pick === g.h ? `${pm.pct} (${pm.votes})` : "—",
+                        hSub: pm.pick === g.h ? `F30:${pm.f30 >= 0 ? `+${pm.f30}` : pm.f30}` : undefined,
+                        hTick: pm.pick === g.h && pm.sig ? "pass" : "none",
+                        aText: pm.pick === g.a ? `${pm.pct} (${pm.votes})` : "—",
+                        aSub: pm.pick === g.a ? `F30:${pm.f30 >= 0 ? `+${pm.f30}` : pm.f30}` : undefined,
+                        aTick: pm.pick === g.a && pm.sig ? "pass" : "none",
+                      };
+
+                      const t12 = g.fusion_meta?.total_elem_12;
+                      const fmtFawe = (arr?: number[]) =>
+                        arr && arr.length === 4 ? arr.join("-") : "—";
+                      const t12HWarm = Number(t12?.h_w_gff ?? 0);
+                      const t12AWarm = Number(t12?.a_w_gff ?? 0);
+                      const t12HCold = Number(t12?.h_c_gff ?? 0);
+                      const t12ACold = Number(t12?.a_c_gff ?? 0);
+                      const t12HDelta = Number(t12?.h_d_gff ?? 0);
+                      const t12ADelta = Number(t12?.a_d_gff ?? 0);
+                      const t12HSum13 = Number(t12?.h_s_gff ?? 0);
+                      const t12ASum13 = Number(t12?.a_s_gff ?? 0);
+                      const t12HCnt1 = Number(t12?.h_cnt1 ?? 0);
+                      const t12ACnt1 = Number(t12?.a_cnt1 ?? 0);
+                      const t12HCnt0 = Number(t12?.h_cnt0 ?? 0);
+                      const t12ACnt0 = Number(t12?.a_cnt0 ?? 0);
+                      const t12HCnt0011 = Number(t12?.h_cnt0011 ?? 0);
+                      const t12ACnt0011 = Number(t12?.a_cnt0011 ?? 0);
+                      const t12WarmWin = t12
+                        ? t12HWarm < t12AWarm
+                          ? g.h
+                          : t12AWarm < t12HWarm
+                            ? g.a
+                            : ""
+                        : "";
+                      const t12ColdWin = t12
+                        ? t12HCold < t12ACold
+                          ? g.h
+                          : t12ACold < t12HCold
+                            ? g.a
+                            : ""
+                        : "";
+                      const t12DeltaWin = t12
+                        ? t12HDelta < t12ADelta
+                          ? g.h
+                          : t12ADelta < t12HDelta
+                            ? g.a
+                            : ""
+                        : "";
+                      const t12GffWin = t12
+                        ? t12.h_gff_tot < t12.a_gff_tot
+                          ? g.h
+                          : t12.a_gff_tot < t12.h_gff_tot
+                            ? g.a
+                            : ""
+                        : "";
+
+                      const rowT12Warm: CheckRow = {
+                        key: "t12_warm",
+                        testId: `row-t12-warm-${g.n}`,
+                        stepTitle: "قطب گرم Σ(1xxx) المنت کل",
+                        stepSub: "جمع GF-FIN شکل‌های ۱xxx (از ۱۳)",
+                        hText: t12 ? fmtSigned(t12HWarm) : "—",
+                        hSub: t12 ? `${t12HCnt1}/13 • Pwr:${fmtSigned(Number(t12.h_w_pwr ?? 0))}` : undefined,
+                        hTick: t12WarmWin === g.h ? "pass" : "none",
+                        aText: t12 ? fmtSigned(t12AWarm) : "—",
+                        aSub: t12 ? `${t12ACnt1}/13 • Pwr:${fmtSigned(Number(t12.a_w_pwr ?? 0))}` : undefined,
+                        aTick: t12WarmWin === g.a ? "pass" : "none",
+                      };
+
+                      const rowT12Cold: CheckRow = {
+                        key: "t12_cold",
+                        testId: `row-t12-cold-${g.n}`,
+                        stepTitle: "قطب سرد Σ(0xxx) المنت کل",
+                        stepSub: "جمع GF-FIN شکل‌های ۰xxx (از ۱۳)",
+                        hText: t12 ? fmtSigned(t12HCold) : "—",
+                        hSub: t12
+                          ? `${t12HCnt0}/13${t12HCnt0011 > 0 ? ` • 0011:${t12HCnt0011}` : ""} • Pwr:${fmtSigned(Number(t12.h_c_pwr ?? 0))}`
+                          : undefined,
+                        hTick: t12ColdWin === g.h ? "pass" : "none",
+                        aText: t12 ? fmtSigned(t12ACold) : "—",
+                        aSub: t12
+                          ? `${t12ACnt0}/13${t12ACnt0011 > 0 ? ` • 0011:${t12ACnt0011}` : ""} • Pwr:${fmtSigned(Number(t12.a_c_pwr ?? 0))}`
+                          : undefined,
+                        aTick: t12ColdWin === g.a ? "pass" : "none",
+                      };
+
+                      const rowT12Delta: CheckRow = {
+                        key: "t12_delta",
+                        testId: `row-t12-delta-${g.n}`,
+                        stepTitle: "تفاضل دو قطب Δ(1xxx−0xxx)",
+                        stepSub:
+                          t12WarmWin && t12ColdWin
+                            ? t12WarmWin === t12ColdWin
+                              ? "قطبیت کامل هم‌جهت"
+                              : "تضاد قطب گرم و سرد"
+                            : "شاخص قطبیت دوقطبی",
+                        hText: t12 ? fmtSigned(t12HDelta) : "—",
+                        hSub: t12 ? `ΔPwr:${fmtSigned(Number(t12.h_d_pwr ?? 0))}` : undefined,
+                        hTick: t12DeltaWin === g.h ? "pass" : "none",
+                        aText: t12 ? fmtSigned(t12ADelta) : "—",
+                        aSub: t12 ? `ΔPwr:${fmtSigned(Number(t12.a_d_pwr ?? 0))}` : undefined,
+                        aTick: t12DeltaWin === g.a ? "pass" : "none",
+                      };
+
+                      const rowT12Sum: CheckRow = {
+                        key: "t12_sum",
+                        testId: `row-t12-sum-${g.n}`,
+                        stepTitle: "جمع المنت کل (۱۲ بازیکن + تیم)",
+                        stepSub: "GF-FIN بردار کل + Σ13",
+                        hText: t12 ? fmtSigned(t12.h_gff_tot) : "—",
+                        hSub: t12 ? `${t12.h_gf_tot} • Σ13:${fmtSigned(t12HSum13)}` : undefined,
+                        hTick: t12GffWin === g.h ? "pass" : "none",
+                        aText: t12 ? fmtSigned(t12.a_gff_tot) : "—",
+                        aSub: t12 ? `${t12.a_gf_tot} • Σ13:${fmtSigned(t12ASum13)}` : undefined,
+                        aTick: t12GffWin === g.a ? "pass" : "none",
+                      };
+
+                      const sm14 = evalSmartMode14(g);
+                      const rowT12DomElem: CheckRow = {
+                        key: "t12_dom_elem",
+                        testId: `row-t12-dom-${g.n}`,
+                        stepTitle: "المنت غالب مجموع المنت‌ها",
+                        stepSub: sm14.dualWaterTrap
+                          ? "تله دوقلوی آب (۲×WATER)"
+                          : "بیشترین عنصر [F-A-W-E] و برتری ۳/۴",
+                        hText: sm14.dualWaterTrap
+                          ? `تله WATER (${sm14.hDomInfo.maxCnt})`
+                          : `${sm14.hDomInfo.dom} (${sm14.hDomInfo.maxCnt})${sm14.hLeadCnt === 3 ? " ★3/4" : ""}`,
+                        hSub: `[${sm14.hDomInfo.vecStr}] • ${sm14.hLeadCnt}/4`,
+                        hTick: sm14.dualWaterTrap
+                          ? "trap"
+                          : sm14.hLeadCnt === 3 || (sm14.domSplit && (sm14.hDomInfo.dom === "WATER" || sm14.hDomInfo.dom === "AIR"))
+                            ? "pass"
+                            : "none",
+                        aText: sm14.dualWaterTrap
+                          ? `تله WATER (${sm14.aDomInfo.maxCnt})`
+                          : `${sm14.aDomInfo.dom} (${sm14.aDomInfo.maxCnt})${sm14.aLeadCnt === 3 ? " ★3/4" : ""}`,
+                        aSub: `[${sm14.aDomInfo.vecStr}] • ${sm14.aLeadCnt}/4`,
+                        aTick: sm14.dualWaterTrap
+                          ? "trap"
+                          : sm14.aLeadCnt === 3 || (sm14.domSplit && (sm14.aDomInfo.dom === "WATER" || sm14.aDomInfo.dom === "AIR"))
+                            ? "pass"
+                            : "none",
+                      };
+
+                      const checklistRows: CheckRow[] = isPureGfFinMode
+                        ? [rowGfAndS3]
+                        : isTotalElem12Mode
+                          ? [rowT12Warm, rowT12Cold, rowT12Delta, rowT12Sum, rowT12DomElem]
+                          : isTriUltraFamily
+                            ? [rowWarm1xxx, rowAll8, rowGfAndS3, rowCold0, rowTwinCombined, rowStandings]
+                            : isTriRoutedMode
+                              ? [rowWarm1xxx, rowAll8, rowGfAndS3, rowCold0, rowStandings]
+                              : fusionMode === "earth_neg_lock" || fusionMode === "safe_dl_core" || fusionMode === "pos_inv_lock"
+                                ? [rowWarm1xxx, rowAll8, rowGfAndS3, rowTwinCombined, rowStandings]
+                                : fusionMode === "double_pwr_lock"
+                                  ? [rowWarm1xxx, rowAll8, rowTwinCombined]
+                                  : fusionMode === "geo_1xxx_lock"
+                                    ? [rowWarm1xxx, rowTwinCombined]
+                                    : [rowTeamOnly, rowPlayerOnly, rowStandings];
+
+                      const homeTicks = checklistRows.filter((r) => r.hTick === "pass").length;
+                      const awayTicks = checklistRows.filter((r) => r.aTick === "pass").length;
+
+                      // Smart Mode 14 Error-Filter, Dominant Element & Opposite-Team Box (v74 - Zero wtp EARTH)
+                      const showSmartM14Box = isTotalElem12Mode;
+                      const hIsSm14Base = sm14.baseM14Pick === g.h;
+                      const aIsSm14Base = sm14.baseM14Pick === g.a;
+                      const sm14ShortLock = (sm14.code || "").replace(/^TOT12_/, "").replace("EARTH_FLIP", "POLARITY_FLIP");
+                      const sm14Row1Lock: CheckRow = {
+                        key: "sm14_lock",
+                        testId: `row-sm14-lock-${g.n}`,
+                        stepTitle: "سلامت قفل پایه و ۳ تله خطا",
+                        stepSub: "رد ۲×WATER، دوقطبی<75% و میهمان Warm<0",
+                        hText: sm14.m14Sig && hIsSm14Base
+                          ? sm14.trapDualWater
+                            ? "تله ۲×WATER"
+                            : sm14.trapBipolarWeak
+                              ? "تله دوقطبی"
+                              : sm14.trapAwayNegWarm
+                                ? "تله Warm<0"
+                                : "قفل سالم"
+                          : hIsSm14Base
+                            ? "بدون قفل"
+                            : "سمت عکس",
+                        hSub: sm14.m14Sig && hIsSm14Base
+                          ? sm14ShortLock
+                          : hIsSm14Base
+                            ? `سمت پایه (${homeTicks}✓)`
+                            : `فاقد قفل (${homeTicks}✓)`,
+                        hTick: sm14.m14Sig && hIsSm14Base
+                          ? sm14.hasActiveTrap
+                            ? "trap"
+                            : "pass"
+                          : "none",
+                        aText: sm14.m14Sig && aIsSm14Base
+                          ? sm14.trapDualWater
+                            ? "تله ۲×WATER"
+                            : sm14.trapBipolarWeak
+                              ? "تله دوقطبی"
+                              : sm14.trapAwayNegWarm
+                                ? "تله میهمان Warm<0"
+                                : "قفل سالم"
+                          : aIsSm14Base
+                            ? "بدون قفل"
+                            : "سمت عکس",
+                        aSub: sm14.m14Sig && aIsSm14Base
+                          ? sm14.trapAwayNegWarm
+                            ? `Warm:${fmtSigned(sm14.aWarm)}`
+                            : sm14ShortLock
+                          : aIsSm14Base
+                            ? `سمت پایه (${awayTicks}✓)`
+                            : `فاقد قفل (${awayTicks}✓)`,
+                        aTick: sm14.m14Sig && aIsSm14Base
+                          ? sm14.hasActiveTrap
+                            ? "trap"
+                            : "pass"
+                          : "none",
+                      };
+                      const sm14Row2Dom: CheckRow = {
+                        key: "sm14_dom",
+                        testId: `row-sm14-dom-${g.n}`,
+                        stepTitle: "المنت غالب و برتری [F-A-W-E]",
+                        stepSub: "رد ۲×WATER | تایید ۳/۴ عناصر و شکاف",
+                        hText: sm14.dualWaterTrap
+                          ? `تله ۲×WATER`
+                          : sm14.hLeadCnt === 3
+                            ? `${sm14.hDomInfo.dom} ★۳/۴`
+                            : `${sm14.hDomInfo.dom} (${sm14.hDomInfo.maxCnt})`,
+                        hSub: `[${sm14.hDomInfo.vecStr}] • ${sm14.hLeadCnt}/4`,
+                        hTick: sm14.dualWaterTrap
+                          ? "trap"
+                          : sm14.hLeadCnt === 3 || (sm14.domSplit && (sm14.sig ? sm14.pick === g.h : sm14.hDomInfo.dom !== "EARTH"))
+                            ? "pass"
+                            : "none",
+                        aText: sm14.dualWaterTrap
+                          ? `تله ۲×WATER`
+                          : sm14.aLeadCnt === 3
+                            ? `${sm14.aDomInfo.dom} ★۳/۴`
+                            : `${sm14.aDomInfo.dom} (${sm14.aDomInfo.maxCnt})`,
+                        aSub: `[${sm14.aDomInfo.vecStr}] • ${sm14.aLeadCnt}/4`,
+                        aTick: sm14.dualWaterTrap
+                          ? "trap"
+                          : sm14.aLeadCnt === 3 || (sm14.domSplit && (sm14.sig ? sm14.pick === g.a : sm14.aDomInfo.dom !== "EARTH"))
+                            ? "pass"
+                            : "none",
+                      };
+                      const hPureL5Pass =
+                        (hIsSm14Base && sm14.m14Sig && !sm14.hasActiveTrap) ||
+                        (hIsSm14Base && hL5 >= 75) ||
+                        (!hIsSm14Base && (hL5 >= 62 || (sm14.m11FavOpp && sm14.spwrFavOpp && hL5 >= 55)));
+                      const aPureL5Pass =
+                        (aIsSm14Base && sm14.m14Sig && !sm14.hasActiveTrap) ||
+                        (aIsSm14Base && aL5 >= 75) ||
+                        (!aIsSm14Base && (aL5 >= 62 || (sm14.m11FavOpp && sm14.spwrFavOpp && aL5 >= 55)));
+                      const sm14Row3Log5: CheckRow = {
+                        key: "sm14_log5",
+                        testId: `row-sm14-log5-${g.n}`,
+                        stepTitle: "احتمال برد جدول (Log5 خالص)",
+                        stepSub: "مستقیم ≥75% | عکس ≥62% (طلایی ≥55%)",
+                        hText: `${hL5}%`,
+                        hSub: hL5 >= 75 ? "آستانه مستقیم" : hL5 >= 62 ? "آستانه عکس" : "زیر آستانه",
+                        hTick: hPureL5Pass ? "pass" : "none",
+                        aText: `${aL5}%`,
+                        aSub: aL5 >= 75 ? "آستانه مستقیم" : aL5 >= 62 ? "آستانه عکس" : "زیر آستانه",
+                        aTick: aPureL5Pass ? "pass" : "none",
+                      };
+                      const hM11Team = Boolean(sm14.m11Sig && sm14.m11Pick === g.h);
+                      const aM11Team = Boolean(sm14.m11Sig && sm14.m11Pick === g.a);
+                      const hM11Dir = Boolean(sm14.m11Pick === g.h);
+                      const aM11Dir = Boolean(sm14.m11Pick === g.a);
+                      const sm14Row4Opp: CheckRow = {
+                        key: "sm14_opp",
+                        testId: `row-sm14-opp-${g.n}`,
+                        stepTitle: "تایید چرخش به تیم عکس",
+                        stepSub: "۱۲ بازیکن خالص / قفل ۱۱ / توان ۱۳",
+                        hText: !hIsSm14Base
+                          ? hM11Team && sm14.spwrFavOpp
+                            ? "طلایی M11+Pwr"
+                            : hM11Team
+                              ? "قفل حالت ۱۱"
+                              : sm14.hasActiveTrap && hM11Dir
+                                ? "مسیر ۱۱ ضدتله"
+                                : sm14.p12FavOpp
+                                  ? "برتری ۱۲ بازیکن"
+                                  : "بدون تایید"
+                          : sm14.p12FavBase
+                            ? "هم‌جهت ۱۲P"
+                            : "واگرا با ۱۲P",
+                        hSub: `12P:${fmtSigned(sm14.hP12)} • Pwr:${fmtSigned(sm14.hSPwr)}`,
+                        hTick: !hIsSm14Base
+                          ? hM11Team || sm14.p12FavOpp || (sm14.hasActiveTrap && hM11Dir)
+                            ? "pass"
+                            : "none"
+                          : (sm14.kind === "M14_CORE_CLEAN" || sm14.kind === "M14_DIRECT_RELEASE") && sm14.p12FavBase
+                            ? "pass"
+                            : "none",
+                        aText: !aIsSm14Base
+                          ? aM11Team && sm14.spwrFavOpp
+                            ? "طلایی M11+Pwr"
+                            : aM11Team
+                              ? "قفل حالت ۱۱"
+                              : sm14.hasActiveTrap && aM11Dir
+                                ? "مسیر ۱۱ ضدتله"
+                                : sm14.p12FavOpp
+                                  ? "برتری ۱۲ بازیکن"
+                                  : "بدون تایید"
+                          : sm14.p12FavBase
+                            ? "هم‌جهت ۱۲P"
+                            : "واگرا با ۱۲P",
+                        aSub: `12P:${fmtSigned(sm14.aP12)} • Pwr:${fmtSigned(sm14.aSPwr)}`,
+                        aTick: !aIsSm14Base
+                          ? aM11Team || sm14.p12FavOpp || (sm14.hasActiveTrap && aM11Dir)
+                            ? "pass"
+                            : "none"
+                          : (sm14.kind === "M14_CORE_CLEAN" || sm14.kind === "M14_DIRECT_RELEASE") && sm14.p12FavBase
+                            ? "pass"
+                            : "none",
+                      };
+                      const sm14Row5Shield: CheckRow = {
+                        key: "sm14_shield",
+                        testId: `row-sm14-shield-${g.n}`,
+                        stepTitle: "حکم نهایی باکس هوشمند ۱۴",
+                        stepSub: "حذف تیم تله بازنده و انتخاب برنده",
+                        hText: sm14.hasActiveTrap && hIsSm14Base
+                          ? "حذف تیم تله"
+                          : sm14.kind === "M14_VETO_TRAP" && !hIsSm14Base
+                            ? "مسیر عکس (بدون بت)"
+                            : sm14.sig && sm14.pick === g.h
+                              ? sm14.kind === "M14_TRAP_FLIP"
+                                ? "چرخش ضدتله ✓"
+                                : sm14.kind === "M14_OPPOSITE_FLIP"
+                                  ? "تیم عکس مجاز"
+                                  : sm14.kind === "M14_DIRECT_RELEASE"
+                                    ? "مستقیم مجاز"
+                                    : sm14.vip
+                                      ? "سیگنال VIP ★"
+                                      : "سیگنال سالم"
+                              : "خنثی",
+                        hTick: sm14.hasActiveTrap && hIsSm14Base
+                          ? "trap"
+                          : sm14.sig && sm14.pick === g.h
+                            ? "pass"
+                            : "none",
+                        aText: sm14.hasActiveTrap && aIsSm14Base
+                          ? "حذف تیم تله"
+                          : sm14.kind === "M14_VETO_TRAP" && !aIsSm14Base
+                            ? "مسیر عکس (بدون بت)"
+                            : sm14.sig && sm14.pick === g.a
+                              ? sm14.kind === "M14_TRAP_FLIP"
+                                ? "چرخش ضدتله ✓"
+                                : sm14.kind === "M14_OPPOSITE_FLIP"
+                                  ? "تیم عکس مجاز"
+                                  : sm14.kind === "M14_DIRECT_RELEASE"
+                                    ? "مستقیم مجاز"
+                                    : sm14.vip
+                                      ? "سیگنال VIP ★"
+                                      : "سیگنال سالم"
+                              : "خنثی",
+                        aTick: sm14.hasActiveTrap && aIsSm14Base
+                          ? "trap"
+                          : sm14.sig && sm14.pick === g.a
+                            ? "pass"
+                            : "none",
+                      };
+                      const sm14Rows: CheckRow[] = [sm14Row1Lock, sm14Row2Dom, sm14Row3Log5, sm14Row4Opp, sm14Row5Shield];
+                      const sm14HomeTicks = sm14Rows.filter((r) => r.hTick === "pass").length;
+                      const sm14AwayTicks = sm14Rows.filter((r) => r.aTick === "pass").length;
+                      const sm14Won = hasFinalScore && sm14.sig ? sm14.pick === g.aw : null;
+                      const sm14SavedTrap = hasFinalScore && sm14.kind === "M14_VETO_TRAP" ? sm14.baseM14Pick !== g.aw : null;
+
+                      // Smart Anti-NO-BET Box (Box 1 Style Ticked Checklist)
+                      const anb = evalSmartAntiNoBet(g);
+                      const showAntiNoBetBox =
+                        (isTriUltraMode && anb.kind !== "M12_CORE") || isAntiNoBetMode;
+                      const hIsAnbP = anb.baseM12Pick === g.h;
+                      const aIsAnbP = anb.baseM12Pick === g.a;
+                      const hDpOpp = !hIsAnbP && anb.dpSig && anb.dpPick === g.h;
+                      const aDpOpp = !aIsAnbP && anb.dpSig && anb.dpPick === g.a;
+                      const hColdNeg = cold0Win === g.h && h0Val < 0;
+                      const aColdNeg = cold0Win === g.a && a0Val < 0;
+
+                      const anbRowM11: CheckRow = {
+                        key: "anb_m11",
+                        testId: `row-anb-m11-${g.n}`,
+                        stepTitle: "قفل ۳ عددی مستقل (حالت ۱۱)",
+                        stepSub: "شرط گروه ۱ مستقیم",
+                        hText:
+                          anb.m11Sig && anb.m11Pick === g.h
+                            ? "فعال"
+                            : anb.m11Pick === g.h
+                              ? "بدون قفل"
+                              : "—",
+                        hSub: hIsAnbP ? "سمت پایه" : "سمت عکس",
+                        hTick: anb.m11Sig && anb.m11Pick === g.h ? "pass" : "none",
+                        aText:
+                          anb.m11Sig && anb.m11Pick === g.a
+                            ? "فعال"
+                            : anb.m11Pick === g.a
+                              ? "بدون قفل"
+                              : "—",
+                        aSub: aIsAnbP ? "سمت پایه" : "سمت عکس",
+                        aTick: anb.m11Sig && anb.m11Pick === g.a ? "pass" : "none",
+                      };
+
+                      const hL5Pass =
+                        hEl !== "EARTH" &&
+                        ((hIsAnbP && hL5 >= 75) ||
+                          (!hIsAnbP && hL5 >= 60) ||
+                          (!hIsAnbP && hDpOpp && hL5 >= 52));
+                      const aL5Pass =
+                        aEl !== "EARTH" &&
+                        ((aIsAnbP && aL5 >= 75) ||
+                          (!aIsAnbP && aL5 >= 60) ||
+                          (!aIsAnbP && aDpOpp && aL5 >= 52));
+
+                      const anbRowLog5: CheckRow = {
+                        key: "anb_log5",
+                        testId: `row-anb-log5-${g.n}`,
+                        stepTitle: "قدرت جدول غیر EARTH",
+                        stepSub: "مستقیم ≥75% | عکس ≥60%",
+                        hText: hEl === "EARTH" ? "تله EARTH" : hEl,
+                        hSub: `${hL5}%`,
+                        hTick: hEl === "EARTH" ? "trap" : hL5Pass ? "pass" : "none",
+                        aText: aEl === "EARTH" ? "تله EARTH" : aEl,
+                        aSub: `${aL5}%`,
+                        aTick: aEl === "EARTH" ? "trap" : aL5Pass ? "pass" : "none",
+                      };
+
+                      const anbRowOppPole: CheckRow = {
+                        key: "anb_pole",
+                        testId: `row-anb-pole-${g.n}`,
+                        stepTitle: "قطب سرد ۰xxx و همزاد مخالف",
+                        stepSub: "تایید چرخش به تیم عکس",
+                        hText:
+                          hDpOpp && hColdNeg
+                            ? "همزاد + ۰xxx"
+                            : hDpOpp
+                              ? "همزاد مخالف"
+                              : hColdNeg
+                                ? "قطب سرد منفی"
+                                : "—",
+                        hSub: `${fmtSigned(h0Val)}`,
+                        hTick: (!hIsAnbP && (hDpOpp || hColdNeg)) ? "pass" : "none",
+                        aText:
+                          aDpOpp && aColdNeg
+                            ? "همزاد + ۰xxx"
+                            : aDpOpp
+                              ? "همزاد مخالف"
+                              : aColdNeg
+                                ? "قطب سرد منفی"
+                                : "—",
+                        aSub: `${fmtSigned(a0Val)}`,
+                        aTick: (!aIsAnbP && (aDpOpp || aColdNeg)) ? "pass" : "none",
+                      };
+
+                      const anbRowShield: CheckRow = {
+                        key: "anb_shield",
+                        testId: `row-anb-shield-${g.n}`,
+                        stepTitle: "سپر ایمنی (ضد ۲-EARTH و ۳/۳)",
+                        stepSub: "فیلتر بازی‌های خنثی",
+                        hText:
+                          anb.kind === "HOLD_DUAL_EARTH"
+                            ? "دو EARTH"
+                            : anb.kind === "HOLD_3OF3_CLASH" && !hIsAnbP
+                              ? "تضاد ۳/۳"
+                              : anb.is3of3P && !hIsAnbP && anb.kind !== "M12_CORE"
+                                ? "منع عکس ۳/۳"
+                                : anb.sig && anb.pick === g.h
+                                  ? "مجاز"
+                                  : "سالم",
+                        hTick:
+                          anb.kind === "HOLD_DUAL_EARTH" ||
+                          ((anb.kind === "HOLD_3OF3_CLASH" || anb.is3of3P) && !hIsAnbP && anb.kind !== "M12_CORE")
+                            ? "trap"
+                            : anb.sig && anb.pick === g.h
+                              ? "pass"
+                              : "none",
+                        aText:
+                          anb.kind === "HOLD_DUAL_EARTH"
+                            ? "دو EARTH"
+                            : anb.kind === "HOLD_3OF3_CLASH" && !aIsAnbP
+                              ? "تضاد ۳/۳"
+                              : anb.is3of3P && !aIsAnbP && anb.kind !== "M12_CORE"
+                                ? "منع عکس ۳/۳"
+                                : anb.sig && anb.pick === g.a
+                                  ? "مجاز"
+                                  : "سالم",
+                        aTick:
+                          anb.kind === "HOLD_DUAL_EARTH" ||
+                          ((anb.kind === "HOLD_3OF3_CLASH" || anb.is3of3P) && !aIsAnbP && anb.kind !== "M12_CORE")
+                            ? "trap"
+                            : anb.sig && anb.pick === g.a
+                              ? "pass"
+                              : "none",
+                      };
+
+                      const anbRows: CheckRow[] = [anbRowM11, anbRowLog5, anbRowOppPole, anbRowShield];
+                      const anbHomeTicks = anbRows.filter((r) => r.hTick === "pass").length;
+                      const anbAwayTicks = anbRows.filter((r) => r.aTick === "pass").length;
+                      const anbWon =
+                        hasFinalScore && anb.sig ? anb.pick === g.aw : null;
+
+                      // Box 2: Exact Lock Name & Verdict Mapping
+                      const m12Code = g1.m12_route?.code ?? "";
+                      const m11Code = g1.m11_route?.code ?? "";
+                      const m12LockTitleMap: Record<string, string> = {
+                        ULTRA_LOCK: "ابرقفل پایه ۳ عددی + تایید موتور همزاد",
+                        ULTRA_3OF3_TWIN: "قفل توافق کامل ۳ از ۳ عدد منفی + هر دو موتور همزاد",
+                        ULTRA_FIRE_KEEP: "قفل حفظ برتری آتشین (FIRE) بدون حذف بازی",
+                        ULTRA_EARTH_FLIP: "قفل چرخش ضدتله EARTH به حریف سالم + تایید همزاد",
+                        ULTRA_POS_INV: "قفل معکوس دو-مثبت (+,+) به سود مثبت بزرگ‌تر",
+                        ULTRA_POS_BAL: "قفل دو-مثبت متعادل (+,+) با تایید موتور همزاد",
+                        ULTRA_COLD_ANCHOR_KEEP: "قفل مهار دو-مثبت با لنگر منفی قطب سرد ۰xxx",
+                        ULTRA_BIPOLAR_0011: "قفل هم‌جهتی قطب گرم ۱xxx و قطب سرد ۰xxx/0011 + همزاد",
+                        ULTRA_ZERO_1XXX_OPP: "قفل حبس ۱xxx=0.0 (انتقال برد به حریف غیر EARTH)",
+                        ULTRA_S3_SPLIT: "قفل شکاف علامت Σ(3) منفی برابر مثبت + تایید همزاد",
+                        ULTRA_GF_FLIP: "قفل چرخش داور سنگین GF-FIN به سود حریف",
+                        ULTRA_TWIN_TIEBREAK: "قفل گره‌گشایی موتور همزاد در نبرد دو تیم غیر EARTH",
+                        ULTRA_DUAL_EARTH_HOLD: "قفل ایمنی ۱ (v68): توقف تقابل پرنوسان دو تیم EARTH",
+                        ULTRA_3OF3_CLASH_HOLD: "قفل ایمنی ۲ (v68): مهار چرخش همزاد برابر اجماع ۳/۳ اعداد",
+                        ULTRA_GF_HOLD: "قفل ایمنی ۳: توقف به علت مخالفت سنگین داور GF-FIN",
+                        ULTRA_FALLBACK: "مسیر پایه ۳ عددی (بدون احراز شرایط ابرقفل)",
+                      };
+
+                      const anbTitleMap: Record<AntiNoBetKind, string> = {
+                        M12_CORE: m12LockTitleMap[m12Code] || "سیگنال اصلی حالت ۱۲ (تایید مستقیم ابرقفل)",
+                        DIRECT_RELEASE: "گروه ۱ ضد NO-BET: آزادسازی مستقیم بازی حذف‌شده",
+                        OPPOSITE_FLIP: "گروه ۲ ضد NO-BET: چرخش هوشمند به تیم عکس",
+                        HOLD_DUAL_EARTH: "سپر ایمنی ضد NO-BET: توقف تقابل دو EARTH",
+                        HOLD_3OF3_CLASH: "سپر ایمنی ضد NO-BET: مهار تضاد همزاد برابر ۳/۳",
+                        HOLD_NEUTRAL: "توقف خنثی ضد NO-BET (خارج از شرایط مستقیم و عکس)",
+                      };
+
+                      const t12Code = t12?.code ?? "";
+                      const t12TitleMap: Record<string, string> = {
+                        TOT12_POLARITY_LOCK: "قفل قطبیت کامل موتور ۱۴ (قطب گرم + تفاضل دوقطبی + المنت کل)",
+                        TOT12_BIPOLAR_HARMONY: "قفل هم‌جهتی دوقطبی Σ(1xxx) و Σ(0xxx) در ۱۳ موجودیت",
+                        TOT12_COLD_TOTAL: "قفل قطب سرد Σ(0xxx) + جمع کل ۱۳ موجودیت + المنت کل",
+                        TOT12_3OF3: "اجماع ۳/۳ المنت کل (۱۲P+تیم + ۱۲P + کیفیت کل)",
+                        TOT12_MAJ_CONFIRM: "اکثریت ۲/۳ المنت کل ۱۲P+تیم + تایید",
+                        TOT12_GF_PAIR: "توافق جفت GF-FIN (۱۲ بازیکن و ۱۲P+تیم)",
+                        TOT12_EARTH_FLIP: "قفل قطبیت المنت کل موتور ۱۴ + برتری احتمال جدول (Log5)",
+                        TOT12_DUAL_EARTH_HOLD: "مسیر پایه موتور ۱۴ (بدون احراز آستانه احتمال جدول)",
+                        TOT12_HOLD: "مسیر پایه دوقطبی موتور ۱۴ (خارج از شرط قفل ورود)",
+                      };
+
+                      const isSafetyHold = Boolean(
+                        !isQualified &&
+                          ((isTriUltraFamily && (hEl === "EARTH" && aEl === "EARTH")) ||
+                            (isTotalElem12Mode && (sm14.kind === "M14_VETO_TRAP" || sm14.dualWaterTrap)) ||
+                            (isTriUltraMode && (m12Code === "ULTRA_DUAL_EARTH_HOLD" || m12Code === "ULTRA_3OF3_CLASH_HOLD" || m12Code === "ULTRA_GF_HOLD")) ||
+                            (isAntiNoBetMode && (anb.kind === "HOLD_DUAL_EARTH" || anb.kind === "HOLD_3OF3_CLASH")) ||
+                            (!isPureGfFinMode && !isTriAntiDropMode && (!pickEarthOk || !pickNegOk)))
+                      );
+
+                      const lockTitleFa = manualOverridden
+                        ? "فیلتر دستی کاربر (۱۲ ستون همزاد)"
+                        : isTotalElem12Mode
+                          ? sm14.kind === "M14_TRAP_FLIP"
+                            ? "قانون ۱+۲ حالت ۱۴: تشخیص تله روی تیم بازنده و چرخش برد به تیم عکس"
+                            : sm14.kind === "M14_OPPOSITE_FLIP"
+                              ? "قانون ۲ حالت ۱۴: چرخش هوشمند به تیم عکس فاقد شرایط"
+                              : sm14.kind === "M14_DIRECT_RELEASE"
+                                ? "قانون ۳ حالت ۱۴: آزادسازی مستقیم با احتمال برد قاطع (Log5≥75%)"
+                                : sm14.kind === "M14_VETO_TRAP"
+                                  ? "قانون ۱ حالت ۱۴: مهار تله تیم بازنده (چرخش مسیر جایگزین به تیم عکس • بدون بت)"
+                                  : t12TitleMap[t12Code] || "موتور المنت کل ۱۲ بازیکن + تیم"
+                          : isAntiNoBetMode
+                            ? anbTitleMap[anb.kind]
+                            : isTriUltraMode
+                              ? m12LockTitleMap[m12Code] || "ابرقفل ۳ عددی تلفیقی حالت ۱۲"
+                              : isTriRoutedMode
+                                ? g1.m11_route?.flipped
+                                  ? `چرخش ضدحذف موتور ۳ عددی مستقل (${m11Code || "ROUTED"})`
+                                  : isQualified
+                                    ? `قفل ۳ عددی مستقل بدون همزاد (${m11Code || "M11"})`
+                                    : "مسیر پایه ۳ عددی مستقل (بدون احراز قفل)"
+                                : isPureGfFinMode
+                                  ? `موتور خالص GF-FIN (کمتر/منفی‌تر برنده • ΔGF=${gfAbsDiff})`
+                                  : fusionMode === "pos_inv_lock" && g1.pos_inv?.triggered
+                                    ? "قفل معکوس دو-مثبت (+,+) در حالت ۹"
+                                    : isGfRescued
+                                      ? `قفل داور ۲ از ۳ شاخص GF-FIN (ΔGF=${gfAbsDiff})`
+                                      : isSafeDl
+                                        ? "قفل ایمن دوگانه ۱xxx + Σ(8) + ضد EARTH + لنگر منفی"
+                                        : !pickEarthOk
+                                          ? "توقف قفل ضد EARTH"
+                                          : !pickNegOk && !isPure2EngineMode
+                                            ? "توقف قفل لنگر منفی"
+                                            : activePresetLabel;
+
+                      const lockReasonFa =
+                        isTotalElem12Mode
+                          ? sm14.reasonFa
+                          : isAntiNoBetMode
+                            ? anb.reasonFa
+                            : isTriUltraMode && g1.m12_route?.reason_fa
+                              ? g1.m12_route.reason_fa
+                              : isTriRoutedMode && g1.m11_route?.reason_fa
+                                ? g1.m11_route.reason_fa
+                                : fusionMode === "pos_inv_lock" && g1.pos_inv?.reason_fa
+                                  ? g1.pos_inv.reason_fa
+                                  : "";
+
+                      const cleanBorderCls =
+                        isQualified && isVip3
+                          ? "border-2 border-amber-400 ring-2 ring-amber-200/70 bg-white shadow-sm"
+                          : isQualified
+                            ? "border-2 border-emerald-500 ring-1 ring-emerald-200/80 bg-white shadow-sm"
+                            : isSafetyHold
+                              ? "border border-amber-300 bg-white"
+                              : "border border-slate-200 bg-slate-50/90";
+
+                      return (
+                        <div
+                          key={g.n}
+                          data-testid={`nba-daily-card-${g.n}`}
+                          className={`rounded-xl overflow-hidden flex flex-col justify-between transition-all ${cleanBorderCls}`}
+                        >
+                          {/* Minimal Clean Matchup Header (Full Untruncated Team Names) */}
+                          <div
+                            className={`px-3 py-2 border-b flex items-start justify-between gap-2 ${
+                              isQualified && isVip3
+                                ? "bg-amber-50/90 border-amber-300"
+                                : isQualified
+                                  ? "bg-emerald-50/90 border-emerald-300"
+                                  : "bg-sky-100/60 border-sky-200"
+                            }`}
+                            dir="rtl"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-extrabold text-slate-950 leading-snug break-words" dir="ltr">
+                                <span className="text-sky-800">{g.h}</span>{" "}
+                                <span className="text-[10px] text-slate-500">({g.hc})</span>{" "}
+                                <span className="text-slate-400 mx-0.5">vs</span>{" "}
+                                <span className="text-indigo-900">{g.a}</span>{" "}
+                                <span className="text-[10px] text-slate-500">({g.ac})</span>
+                              </div>
+                              <div className="text-[10px] text-slate-600 font-semibold mt-0.5 flex flex-wrap items-center gap-2">
+                                <span>میزبان: <b>{g.hc}</b> • میهمان: <b>{g.ac}</b></span>
+                                {cardFlipDir[g.n] && (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-950 font-bold text-[9.5px]">
+                                    جهت معکوس دستی
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-left shrink-0 font-mono text-[10px] text-slate-600 font-bold" dir="ltr">
+                              <div>#{g.n}</div>
+                              <div>{g.d}</div>
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 space-y-2 flex-1 flex flex-col justify-start" dir="rtl">
+                            {/* ============================================================ */}
+                            {/* HERO 6-BOX FINAL REFEREE: Ranked Weighted 6-Box Scoring Box (v82) */}
+                            {/* ============================================================ */}
+                            {isTotalElem12Mode && (() => {
+                              const r6 = sm14.referee6;
+                              const r6Won = hasFinalScore ? r6.pick === g.aw : null;
+                              const r6PickIsHome = r6.pick === g.h;
+
+                              const tierPillFa =
+                                r6.tier === "DIAMOND"
+                                  ? "★★ رتبه ۱ الماسی ۶ باکس"
+                                  : r6.tier === "STRONG_SIGNAL"
+                                    ? r6.isOppositeWin
+                                      ? "★ رتبه ۲ قوی (معکوس ⇄)"
+                                      : "★ رتبه ۲ سیگنال قوی ۶ باکس"
+                                    : r6.tier === "RANKED_CONSENSUS"
+                                      ? r6.isOppositeWin
+                                        ? "✓ رتبه ۳ رتبه‌بندی (معکوس ⇄)"
+                                        : "✓ رتبه ۳ تایید رتبه‌بندی ۶ باکس"
+                                      : "◔ رتبه ۴ برتری خفیف امتیازی";
+
+                              const outerCls =
+                                r6.tier === "DIAMOND"
+                                  ? "border-2 border-amber-500 bg-gradient-to-b from-amber-100/95 via-amber-50/75 to-emerald-50/60 shadow-sm"
+                                  : r6.tier === "STRONG_SIGNAL"
+                                    ? r6.isOppositeWin
+                                      ? "border-2 border-violet-500 bg-gradient-to-b from-violet-100/95 via-purple-50/75 to-sky-50/70 shadow-sm"
+                                      : "border-2 border-emerald-500 bg-gradient-to-b from-emerald-100/90 via-teal-50/65 to-sky-50/70 shadow-sm"
+                                    : r6.tier === "RANKED_CONSENSUS"
+                                      ? "border-2 border-teal-500 bg-gradient-to-b from-teal-100/90 via-cyan-50/75 to-sky-50/70 shadow-sm"
+                                      : "border-2 border-sky-400 bg-gradient-to-b from-sky-100/90 via-sky-50/75 to-white";
+
+                              const headerBarCls =
+                                r6.tier === "DIAMOND"
+                                  ? "bg-amber-200/85 border-amber-400 text-slate-950"
+                                  : r6.tier === "STRONG_SIGNAL"
+                                    ? r6.isOppositeWin
+                                      ? "bg-violet-200/85 border-violet-400 text-violet-950"
+                                      : "bg-emerald-200/80 border-emerald-400 text-emerald-950"
+                                    : r6.tier === "RANKED_CONSENSUS"
+                                      ? "bg-teal-200/80 border-teal-400 text-teal-950"
+                                      : "bg-sky-200/80 border-sky-300 text-sky-950";
+
+                              const tierBadgeCls =
+                                r6.tier === "DIAMOND"
+                                  ? "bg-amber-500 text-slate-950 border-amber-700"
+                                  : r6.tier === "STRONG_SIGNAL"
+                                    ? r6.isOppositeWin
+                                      ? "bg-violet-700 text-white border-violet-900"
+                                      : "bg-emerald-600 text-white border-emerald-800"
+                                    : r6.tier === "RANKED_CONSENSUS"
+                                      ? "bg-teal-700 text-white border-teal-900"
+                                      : "bg-sky-700 text-white border-sky-900";
+
+                              // 6 Ranked Rows sorted strictly by predictive importance (Rank 1 -> Rank 6)
+                              const r6Rows: CheckRow[] = r6.rankedBoxes.map((rb) => {
+                                const hWinsBox = rb.team === g.h && rb.pts > 0;
+                                const aWinsBox = rb.team === g.a && rb.pts > 0;
+                                return {
+                                  key: `r82_${rb.id}`,
+                                  testId: `row-r82-${rb.id}-${g.n}`,
+                                  stepTitle: `رتبه ${rb.rank} اهمیت: ${rb.boxTitleFa}`,
+                                  stepSub: `حداکثر وزن: ${rb.maxPts} امتیاز • وضعیت: ${rb.tagFa}`,
+                                  hText: hWinsBox ? `+${rb.pts} امتیاز ✓` : "۰ امتیاز",
+                                  hSub: hWinsBox ? rb.tagFa : undefined,
+                                  hTick: hWinsBox ? "pass" : "none",
+                                  aText: aWinsBox ? `+${rb.pts} امتیاز ✓` : "۰ امتیاز",
+                                  aSub: aWinsBox ? rb.tagFa : undefined,
+                                  aTick: aWinsBox ? "pass" : "none",
+                                };
+                              });
+
+                              return (
+                                <div
+                                  data-testid={`box-referee6-${g.n}`}
+                                  className={`rounded-xl overflow-hidden ${outerCls}`}
+                                >
+                                  {/* Top Colorful Header Strip */}
+                                  <div className={`px-3 py-2 border-b flex flex-wrap items-center justify-between gap-1.5 ${headerBarCls}`}>
+                                    <span className="text-[12px] font-extrabold tracking-tight shrink-0">
+                                      داور رتبه‌بندی ۶ باکس (v82)
+                                    </span>
+                                    <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                                      <span className={`px-2 py-0.5 rounded-md text-[10.5px] font-extrabold border shadow-2xs whitespace-nowrap ${tierBadgeCls}`}>
+                                        {tierPillFa}
+                                      </span>
+                                      {r6Won !== null && (
+                                        <span
+                                          data-testid={`referee6-outcome-${g.n}`}
+                                          className={`px-2 py-0.5 rounded-md font-extrabold text-[10.5px] border shadow-2xs whitespace-nowrap ${
+                                            r6Won
+                                              ? "bg-emerald-600 text-white border-emerald-800"
+                                              : "bg-rose-600 text-white border-rose-800"
+                                          }`}
+                                        >
+                                          {r6.active
+                                            ? r6Won
+                                              ? "برد داور ✓"
+                                              : "باخت داور ✕"
+                                            : r6Won
+                                              ? "برتری درست ✓"
+                                              : "برتری نادرست ✕"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Large Easy-to-Read Main Verdict Body */}
+                                  <div className="p-3 space-y-2.5">
+                                    {/* Big Winner & Weighted Scoreboard Callout Box */}
+                                    <div
+                                      className={`rounded-lg px-3 py-2.5 border flex flex-wrap items-center justify-between gap-2 ${
+                                        r6.tier === "DIAMOND"
+                                          ? "bg-white/95 border-amber-400"
+                                          : r6.isOppositeWin && r6.active
+                                            ? "bg-white/95 border-violet-400"
+                                            : r6.active
+                                              ? "bg-white/95 border-emerald-400"
+                                              : "bg-white/95 border-sky-300"
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="text-[10.5px] font-bold text-slate-600">
+                                          {r6.active
+                                            ? r6.isOppositeWin
+                                              ? "تیم برنده رتبه‌بندی ۶ باکس (چرخش به تیم معکوس ⇄):"
+                                              : "تیم برنده رتبه‌بندی ۶ باکس:"
+                                            : "تیم پیشرو در جمع امتیاز ۶ باکس (برتری سبک):"}
+                                        </div>
+                                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                          <span
+                                            dir="ltr"
+                                            className={`text-[15px] font-extrabold leading-tight ${
+                                              r6.tier === "DIAMOND"
+                                                ? "text-amber-950"
+                                                : r6.isOppositeWin && r6.active
+                                                  ? "text-violet-950"
+                                                  : r6.active
+                                                    ? "text-emerald-950"
+                                                    : "text-sky-950"
+                                            }`}
+                                          >
+                                            {r6.pick} ({getTeam3Code(r6.pick)})
+                                          </span>
+                                          <span className="px-2 py-0.5 rounded-md bg-sky-100 border border-sky-300 text-sky-950 text-[10.5px] font-extrabold">
+                                            {r6PickIsHome ? "میزبان ✓" : "میهمان ✓"}
+                                          </span>
+                                          {r6.isOppositeWin && (
+                                            <span className="px-2 py-0.5 rounded-md bg-violet-100 border border-violet-400 text-violet-950 text-[10px] font-extrabold">
+                                              معکوس {getTeam3Code(r6.sugPick)} ⇄
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Big Side-by-Side Weighted Points + Raw Ticks Scoreboard */}
+                                      <div className="flex items-center gap-1.5 shrink-0" dir="ltr">
+                                        <div
+                                          className={`px-2.5 py-1 rounded-lg border text-center min-w-[64px] ${
+                                            r6.pick === g.h
+                                              ? r6.tier === "DIAMOND"
+                                                ? "bg-amber-500 text-slate-950 border-amber-700 shadow-2xs"
+                                                : r6.isOppositeWin && r6.active
+                                                  ? "bg-violet-600 text-white border-violet-800 shadow-2xs"
+                                                  : r6.active
+                                                    ? "bg-emerald-600 text-white border-emerald-700 shadow-2xs"
+                                                    : "bg-sky-600 text-white border-sky-700 shadow-2xs"
+                                              : "bg-slate-100 text-slate-800 border-slate-300"
+                                          }`}
+                                        >
+                                          <div className="text-[9.5px] font-bold opacity-90">{g.hc}</div>
+                                          <div className="text-[13px] font-mono font-extrabold leading-tight">
+                                            {r6.ptsHome}p
+                                          </div>
+                                          <div className="text-[8.5px] font-mono opacity-85">
+                                            ({r6.totHomeTicks}✓)
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] font-extrabold text-slate-500">Δ{r6.deltaPts}</span>
+                                        <div
+                                          className={`px-2.5 py-1 rounded-lg border text-center min-w-[64px] ${
+                                            r6.pick === g.a
+                                              ? r6.tier === "DIAMOND"
+                                                ? "bg-amber-500 text-slate-950 border-amber-700 shadow-2xs"
+                                                : r6.isOppositeWin && r6.active
+                                                  ? "bg-violet-600 text-white border-violet-800 shadow-2xs"
+                                                  : r6.active
+                                                    ? "bg-emerald-600 text-white border-emerald-700 shadow-2xs"
+                                                    : "bg-sky-600 text-white border-sky-700 shadow-2xs"
+                                              : "bg-slate-100 text-slate-800 border-slate-300"
+                                          }`}
+                                        >
+                                          <div className="text-[9.5px] font-bold opacity-90">{g.ac}</div>
+                                          <div className="text-[13px] font-mono font-extrabold leading-tight">
+                                            {r6.ptsAway}p
+                                          </div>
+                                          <div className="text-[8.5px] font-mono opacity-85">
+                                            ({r6.totAwayTicks}✓)
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* 6 Ranked Mini-Boxes Ordered from Rank 1 (Most Important) to Rank 6 */}
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                      {r6.rankedBoxes.map((rb) => {
+                                        const hasWin = Boolean(rb.team && rb.pts > 0);
+                                        const agreesWithPick = hasWin && rb.team === r6.pick;
+                                        const pillCls = !hasWin
+                                          ? rb.tagFa.includes("✕")
+                                            ? "bg-rose-100 border-rose-300 text-rose-900"
+                                            : "bg-white/85 border-slate-200 text-slate-600"
+                                          : agreesWithPick
+                                            ? rb.pts >= 8
+                                              ? "bg-amber-100 border-amber-400 text-amber-950"
+                                              : "bg-emerald-100/95 border-emerald-400 text-emerald-950"
+                                            : "bg-amber-50 border-amber-300 text-amber-900";
+                                        return (
+                                          <div
+                                            key={rb.id}
+                                            className={`rounded-md border px-2 py-1 flex flex-col justify-between leading-tight ${pillCls}`}
+                                          >
+                                            <div className="flex items-center justify-between gap-1">
+                                              <span className="text-[9px] font-extrabold truncate">{rb.boxTitleFa}</span>
+                                              <span className="px-1 py-0 rounded bg-black/10 text-[8.5px] font-mono font-extrabold shrink-0">
+                                                R{rb.rank}
+                                              </span>
+                                            </div>
+                                            <span dir="ltr" className="text-[10.5px] font-mono font-extrabold truncate mt-0.5">
+                                              {hasWin ? `${getTeam3Code(rb.team)} +${rb.pts}` : rb.tagFa}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* Clear Readable Explanation + Toggle for 6-Box Ranked Breakdown Table */}
+                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                                      <p className="text-[11px] font-bold text-slate-800 leading-relaxed flex-1 min-w-[180px]">
+                                        {r6.reasonFa}
+                                      </p>
+                                      <button
+                                        type="button"
+                                        data-testid={`toggle-referee6-${g.n}`}
+                                        onClick={() => toggleCardBox(g.n, "referee6")}
+                                        className="px-2.5 py-1 rounded-md bg-white hover:bg-sky-100 border border-sky-300 text-sky-950 font-extrabold text-[10px] shadow-2xs transition-colors shrink-0"
+                                      >
+                                        {isReferee6BoxOpen ? "بستن جدول رتبه‌بندی ▲" : "جدول رتبه‌بندی ۶ باکس ▼"}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Collapsible 6-Row Ranked Box Weight Table */}
+                                  {isReferee6BoxOpen && (
+                                    <table className="w-full text-[10.5px] border-collapse bg-white border-t border-sky-200">
+                                      <thead>
+                                        <tr className="bg-sky-50 border-b border-sky-200 text-slate-800">
+                                          <th className="py-1.5 px-2.5 text-right font-extrabold w-[46%]">رتبه اهمیت و وزن باکس</th>
+                                          <th className="py-1.5 px-1.5 text-center font-extrabold border-r border-sky-100 w-[27%]">
+                                            میزبان ({g.hc}: {r6.ptsHome}p)
+                                          </th>
+                                          <th className="py-1.5 px-1.5 text-center font-extrabold border-r border-sky-100 w-[27%]">
+                                            میهمان ({g.ac}: {r6.ptsAway}p)
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-sky-100">
+                                        {r6Rows.map((r) => {
+                                          const renderR6Cell = (txt: string, sub: string | undefined, tick: CheckTick) => (
+                                            <div className="flex flex-col items-center justify-center leading-tight py-1">
+                                              <div className="inline-flex items-center gap-1 font-extrabold text-slate-900">
+                                                {tick === "pass" ? (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[10px] shrink-0">
+                                                    ✓
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-600 font-sans font-extrabold text-[10px] shrink-0">
+                                                    —
+                                                  </span>
+                                                )}
+                                                <span className={tick === "none" ? "text-slate-500 font-semibold" : ""}>{txt}</span>
+                                              </div>
+                                              {sub && (
+                                                <div className="text-[9px] text-slate-600 font-mono tabular-nums mt-0.5">
+                                                  {sub}
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                          return (
+                                            <tr key={r.key} data-testid={r.testId}>
+                                              <td className="py-1.5 px-2.5 text-right align-middle">
+                                                <div className="font-extrabold text-slate-900 leading-snug">{r.stepTitle}</div>
+                                                {r.stepSub && (
+                                                  <div className="text-[9px] text-slate-500 leading-tight mt-0.5">{r.stepSub}</div>
+                                                )}
+                                              </td>
+                                              <td
+                                                className={`py-1.5 px-1.5 text-center align-middle border-r border-sky-100 ${
+                                                  r.hTick === "pass" ? "bg-emerald-50/80" : ""
+                                                }`}
+                                              >
+                                                {renderR6Cell(r.hText, r.hSub, r.hTick)}
+                                              </td>
+                                              <td
+                                                className={`py-1.5 px-1.5 text-center align-middle border-r border-sky-100 ${
+                                                  r.aTick === "pass" ? "bg-emerald-50/80" : ""
+                                                }`}
+                                              >
+                                                {renderR6Cell(r.aText, r.aSub, r.aTick)}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
+                            {/* ============================================================ */}
+                            {/* MASTER DROPDOWN FOR ALL 6 SIGNAL BOXES (Mode 14)             */}
+                            {/* ============================================================ */}
+                            {isTotalElem12Mode && (
+                              <button
+                                type="button"
+                                data-testid={`toggle-sixboxes-${g.n}`}
+                                onClick={() => toggleCardBox(g.n, "sixboxes")}
+                                className={`w-full rounded-lg border px-3 py-2 flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-extrabold transition-colors shadow-2xs ${
+                                  isSixBoxesOpen
+                                    ? "bg-sky-700 text-white border-sky-800"
+                                    : "bg-sky-100/90 hover:bg-sky-200/80 text-sky-950 border-sky-300"
+                                }`}
+                              >
+                                <span className="shrink-0">
+                                  دراپ‌داون مجموعه ۶ باکس سیگنال کارت
+                                </span>
+                                <div className="flex flex-wrap items-center justify-end gap-1.5 min-w-0">
+                                  <span
+                                    dir="ltr"
+                                    className={`font-mono text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${
+                                      isSixBoxesOpen
+                                        ? "bg-sky-800 text-sky-100 border-sky-600"
+                                        : "bg-white text-slate-800 border-sky-200"
+                                    }`}
+                                  >
+                                    {g.hc}:{sm14.referee6.ptsHome}p ({sm14.referee6.totHomeTicks}✓) | {g.ac}:{sm14.referee6.ptsAway}p ({sm14.referee6.totAwayTicks}✓)
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] border whitespace-nowrap ${
+                                      isSixBoxesOpen
+                                        ? "bg-white text-sky-950 border-white"
+                                        : "bg-sky-600 text-white border-sky-700"
+                                    }`}
+                                  >
+                                    {isSixBoxesOpen ? "بستن ۶ باکس ▲" : "باز کردن ۶ باکس ▼"}
+                                  </span>
+                                </div>
+                              </button>
+                            )}
+
+                            {(!isTotalElem12Mode || isSixBoxesOpen) && (
+                              <div
+                                data-testid={`sixboxes-body-${g.n}`}
+                                className={
+                                  isTotalElem12Mode
+                                    ? "space-y-2 rounded-xl border border-sky-300 bg-sky-50/60 p-2"
+                                    : "space-y-2"
+                                }
+                              >
+                            {/* ============================================================ */}
+                            {/* BOX 1: Collapsible Dropdown — Per-Team Ticked Checklist      */}
+                            {/* ============================================================ */}
+                            <div
+                              data-testid={`box1-checklist-${g.n}`}
+                              className="rounded-lg border border-sky-300 bg-white overflow-hidden shadow-2xs"
+                            >
+                              <button
+                                type="button"
+                                data-testid={`toggle-box1-${g.n}`}
+                                onClick={() => toggleCardBox(g.n, "box1")}
+                                className={`w-full px-2.5 py-1.5 bg-sky-100/85 hover:bg-sky-200/70 transition-colors flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-right ${
+                                  isBox1Open ? "border-b border-sky-200" : ""
+                                }`}
+                              >
+                                <span className="font-extrabold text-sky-950">
+                                  باکس ۱ • چک‌لیست شاخص‌های دو تیم
+                                </span>
+                                <div className="inline-flex items-center gap-1 shrink-0">
+                                  <span
+                                    dir="ltr"
+                                    className="whitespace-nowrap font-mono font-extrabold text-[9.5px] px-1.5 py-0.5 rounded bg-white border border-sky-200 text-slate-800"
+                                  >
+                                    {g.hc}: {homeTicks}✓ | {g.ac}: {awayTicks}✓
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-white/90 border border-sky-300 text-sky-950 font-extrabold text-[9px]">
+                                    {isBox1Open ? "بستن ▲" : "باز کردن ▼"}
+                                  </span>
+                                </div>
+                              </button>
+
+                              {isBox1Open && (
+                                <table className="w-full text-[10px] border-collapse">
+                                  <thead>
+                                    <tr className="bg-slate-50 border-b border-sky-100 text-slate-700">
+                                      <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص مرحله</th>
+                                      <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[30%]">
+                                        میزبان ({g.hc})
+                                      </th>
+                                      <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[30%]">
+                                        میهمان ({g.ac})
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {checklistRows.map((r, idx) => {
+                                      const renderCell = (txt: string, sub: string | undefined, tick: CheckTick) => (
+                                        <div className="flex flex-col items-center justify-center leading-tight py-0.5">
+                                          <div className="inline-flex items-center gap-1 font-mono tabular-nums" dir="ltr">
+                                            {tick === "pass" ? (
+                                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                ✓
+                                              </span>
+                                            ) : tick === "trap" ? (
+                                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                ✕
+                                              </span>
+                                            ) : (
+                                              <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-100 text-slate-400 font-sans text-[9px] shrink-0">
+                                                —
+                                              </span>
+                                            )}
+                                            <span
+                                              className={
+                                                tick === "pass"
+                                                  ? "font-extrabold text-emerald-900"
+                                                  : tick === "trap"
+                                                    ? "font-extrabold text-rose-800"
+                                                    : "text-slate-600 font-medium"
+                                              }
+                                            >
+                                              {txt}
+                                            </span>
+                                          </div>
+                                          {sub && (
+                                            <span className="text-[8.5px] font-mono text-slate-500 mt-0.5" dir="ltr">
+                                              {sub}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                      return (
+                                        <tr
+                                          key={r.key}
+                                          data-testid={r.testId}
+                                          className="hover:bg-sky-50/40 transition-colors"
+                                        >
+                                          <td className="py-1 px-2 align-middle">
+                                            <div className="font-bold text-slate-900 leading-snug">
+                                              {idx + 1}. {r.stepTitle}
+                                            </div>
+                                            {r.stepSub && (
+                                              <div className="text-[8.5px] font-bold text-indigo-800 leading-tight mt-0.5">
+                                                {r.stepSub}
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td
+                                            className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                              r.hTick === "pass"
+                                                ? "bg-emerald-50/55"
+                                                : r.hTick === "trap"
+                                                  ? "bg-rose-50/55"
+                                                  : ""
+                                            }`}
+                                          >
+                                            {renderCell(r.hText, r.hSub, r.hTick)}
+                                          </td>
+                                          <td
+                                            className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                              r.aTick === "pass"
+                                                ? "bg-emerald-50/55"
+                                                : r.aTick === "trap"
+                                                  ? "bg-rose-50/55"
+                                                  : ""
+                                            }`}
+                                          >
+                                            {renderCell(r.aText, r.aSub, r.aTick)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+
+                            {/* ============================================================ */}
+                            {/* SMART ANTI-NO-BET BOX (Collapsible Dropdown)                 */}
+                            {/* ============================================================ */}
+                            {showAntiNoBetBox && (
+                              <div
+                                data-testid={`box-anti-nobet-${g.n}`}
+                                className={`rounded-lg border overflow-hidden shadow-2xs ${
+                                  anb.kind === "DIRECT_RELEASE" || anb.kind === "M12_CORE"
+                                    ? "border-emerald-400 bg-white"
+                                    : anb.kind === "OPPOSITE_FLIP"
+                                      ? "border-indigo-400 bg-white"
+                                      : "border-slate-300 bg-white"
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  data-testid={`toggle-anb-${g.n}`}
+                                  onClick={() => toggleCardBox(g.n, "smart")}
+                                  className={`w-full px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-right transition-colors ${
+                                    anb.kind === "DIRECT_RELEASE" || anb.kind === "M12_CORE"
+                                      ? "bg-emerald-100/85 hover:bg-emerald-200/70 border-emerald-200"
+                                      : anb.kind === "OPPOSITE_FLIP"
+                                        ? "bg-indigo-100/85 hover:bg-indigo-200/70 border-indigo-200"
+                                        : "bg-slate-100 hover:bg-slate-200/70 border-slate-200"
+                                  } ${isSmartBoxOpen ? "border-b" : ""}`}
+                                >
+                                  <span className="font-extrabold text-slate-950">
+                                    باکس ضد NO-BET هوشمند
+                                  </span>
+                                  <div className="inline-flex items-center gap-1 shrink-0">
+                                    <span
+                                      dir="ltr"
+                                      className="whitespace-nowrap font-mono font-extrabold text-[9.5px] px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-800"
+                                    >
+                                      {g.hc}: {anbHomeTicks}✓ | {g.ac}: {anbAwayTicks}✓
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                        anb.sig
+                                          ? "bg-emerald-600 text-white border-emerald-700"
+                                          : "bg-white text-slate-600 border-slate-300"
+                                      }`}
+                                    >
+                                      {anb.sig ? `✓ ${getTeam3Code(anb.pick)}` : "بدون بت"}
+                                    </span>
+                                    {anbWon !== null && (
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                          anbWon
+                                            ? "bg-emerald-600 text-white border-emerald-700"
+                                            : "bg-rose-600 text-white border-rose-700"
+                                        }`}
+                                      >
+                                        {anbWon ? "برد ✓" : "باخت ✕"}
+                                      </span>
+                                    )}
+                                    <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-300 text-slate-800 font-extrabold text-[9px]">
+                                      {isSmartBoxOpen ? "بستن ▲" : "باز کردن ▼"}
+                                    </span>
+                                  </div>
+                                </button>
+
+                                {isSmartBoxOpen && (
+                                  <>
+                                    <table className="w-full text-[10px] border-collapse">
+                                      <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-100 text-slate-700">
+                                          <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص ضد NO-BET</th>
+                                          <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
+                                            میزبان ({g.hc})
+                                          </th>
+                                          <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
+                                            میهمان ({g.ac})
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {anbRows.map((r, idx) => {
+                                          const renderAnbCell = (txt: string, sub: string | undefined, tick: CheckTick) => (
+                                            <div className="flex flex-col items-center justify-center leading-tight py-0.5">
+                                              <div className="inline-flex items-center gap-1 font-mono tabular-nums" dir="ltr">
+                                                {tick === "pass" ? (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                    ✓
+                                                  </span>
+                                                ) : tick === "trap" ? (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                    ✕
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-100 text-slate-400 font-sans text-[9px] shrink-0">
+                                                    —
+                                                  </span>
+                                                )}
+                                                <span
+                                                  className={
+                                                    tick === "pass"
+                                                      ? "font-extrabold text-emerald-900"
+                                                      : tick === "trap"
+                                                        ? "font-extrabold text-rose-800"
+                                                        : "text-slate-600 font-medium"
+                                                  }
+                                                >
+                                                  {txt}
+                                                </span>
+                                              </div>
+                                              {sub && (
+                                                <span className="text-[8.5px] font-mono text-slate-500 mt-0.5" dir="ltr">
+                                                  {sub}
+                                                </span>
+                                              )}
+                                            </div>
+                                          );
+                                          return (
+                                            <tr
+                                              key={r.key}
+                                              data-testid={r.testId}
+                                              className="hover:bg-sky-50/40 transition-colors"
+                                            >
+                                              <td className="py-1 px-2 align-middle">
+                                                <div className="font-bold text-slate-900 leading-snug">
+                                                  {idx + 1}. {r.stepTitle}
+                                                </div>
+                                                {r.stepSub && (
+                                                  <div className="text-[8.5px] font-bold text-indigo-800 leading-tight mt-0.5">
+                                                    {r.stepSub}
+                                                  </div>
+                                                )}
+                                              </td>
+                                              <td
+                                                className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                                  r.hTick === "pass"
+                                                    ? "bg-emerald-50/55"
+                                                    : r.hTick === "trap"
+                                                      ? "bg-rose-50/55"
+                                                      : ""
+                                                }`}
+                                              >
+                                                {renderAnbCell(r.hText, r.hSub, r.hTick)}
+                                              </td>
+                                              <td
+                                                className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                                  r.aTick === "pass"
+                                                    ? "bg-emerald-50/55"
+                                                    : r.aTick === "trap"
+                                                      ? "bg-rose-50/55"
+                                                      : ""
+                                                }`}
+                                              >
+                                                {renderAnbCell(r.aText, r.aSub, r.aTick)}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+
+                                    <div
+                                      data-testid={`anti-nobet-verdict-${g.n}`}
+                                      className={`px-2.5 py-1.5 border-t flex items-center justify-between gap-2 text-[10px] ${
+                                        anb.kind === "DIRECT_RELEASE" || anb.kind === "M12_CORE"
+                                          ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                                          : anb.kind === "OPPOSITE_FLIP"
+                                            ? "bg-indigo-50 border-indigo-200 text-indigo-950"
+                                            : "bg-slate-50 border-slate-200 text-slate-700"
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-extrabold leading-snug">
+                                          {anb.kind === "DIRECT_RELEASE" ? (
+                                            <>
+                                              ✓ گروه ۱ (مستقیم): برد{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {anb.pick} ({getTeam3Code(anb.pick)})
+                                              </span>
+                                            </>
+                                          ) : anb.kind === "OPPOSITE_FLIP" ? (
+                                            <>
+                                              ↺ گروه ۲ (تیم عکس): برد{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {anb.pick} ({getTeam3Code(anb.pick)})
+                                              </span>{" "}
+                                              — عکسِ{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {getTeam3Code(anb.baseM12Pick)}
+                                              </span>
+                                            </>
+                                          ) : anb.kind === "M12_CORE" ? (
+                                            <>
+                                              ✓ سیگنال اصلی حالت ۱۲:{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {anb.pick} ({getTeam3Code(anb.pick)})
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <>⛔ توقف واقعی ضد NO-BET — بدون بت</>
+                                          )}
+                                        </div>
+                                        <div className="text-[9px] text-slate-600 mt-0.5 leading-snug">
+                                          {anb.reasonFa}
+                                        </div>
+                                      </div>
+                                      {anbWon !== null && (
+                                        <span
+                                          className={`shrink-0 px-2 py-0.5 rounded font-extrabold text-[9.5px] border ${
+                                            anbWon
+                                              ? "bg-emerald-600 text-white border-emerald-700"
+                                              : "bg-rose-600 text-white border-rose-700"
+                                          }`}
+                                        >
+                                          {anbWon ? "برد ✓" : "باخت ✕"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ============================================================ */}
+                            {/* SMART MODE 14 BOX (Collapsible Dropdown)                     */}
+                            {/* ============================================================ */}
+                            {showSmartM14Box && (
+                              <div
+                                data-testid={`box-smart-m14-${g.n}`}
+                                className={`rounded-lg border overflow-hidden shadow-2xs ${
+                                  sm14.kind === "M14_CORE_CLEAN" || sm14.kind === "M14_DIRECT_RELEASE"
+                                    ? "border-emerald-400 bg-white"
+                                    : sm14.kind === "M14_OPPOSITE_FLIP" || sm14.kind === "M14_TRAP_FLIP"
+                                      ? "border-indigo-400 bg-white"
+                                      : sm14.kind === "M14_VETO_TRAP"
+                                        ? "border-rose-400 bg-white"
+                                        : "border-slate-300 bg-white"
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  data-testid={`toggle-sm14-${g.n}`}
+                                  onClick={() => toggleCardBox(g.n, "smart")}
+                                  className={`w-full px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-right transition-colors ${
+                                    sm14.kind === "M14_CORE_CLEAN" || sm14.kind === "M14_DIRECT_RELEASE"
+                                      ? "bg-emerald-100/85 hover:bg-emerald-200/70 border-emerald-200"
+                                      : sm14.kind === "M14_OPPOSITE_FLIP" || sm14.kind === "M14_TRAP_FLIP"
+                                        ? "bg-indigo-100/85 hover:bg-indigo-200/70 border-indigo-200"
+                                        : sm14.kind === "M14_VETO_TRAP"
+                                          ? "bg-rose-100/85 hover:bg-rose-200/70 border-rose-200"
+                                          : "bg-slate-100 hover:bg-slate-200/70 border-slate-200"
+                                  } ${isSmartBoxOpen ? "border-b" : ""}`}
+                                >
+                                  <span className="font-extrabold text-slate-950">
+                                    باکس هوشمند حالت ۱۴ • اصلاح خطا و تیم عکس
+                                  </span>
+                                  <div className="inline-flex items-center gap-1 shrink-0">
+                                    <span
+                                      dir="ltr"
+                                      className="whitespace-nowrap font-mono font-extrabold text-[9.5px] px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-800"
+                                    >
+                                      {g.hc}: {sm14HomeTicks}✓ | {g.ac}: {sm14AwayTicks}✓
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                        sm14.sig
+                                          ? sm14.kind === "M14_OPPOSITE_FLIP" || sm14.kind === "M14_TRAP_FLIP"
+                                            ? "bg-indigo-600 text-white border-indigo-700"
+                                            : "bg-emerald-600 text-white border-emerald-700"
+                                          : sm14.kind === "M14_VETO_TRAP"
+                                            ? "bg-rose-600 text-white border-rose-700"
+                                            : "bg-white text-slate-600 border-slate-300"
+                                      }`}
+                                    >
+                                      {sm14.sig
+                                        ? `${sm14.kind === "M14_OPPOSITE_FLIP" || sm14.kind === "M14_TRAP_FLIP" ? "↺" : "✓"} ${getTeam3Code(sm14.pick)}`
+                                        : sm14.kind === "M14_VETO_TRAP"
+                                          ? "✕ مهار تله"
+                                          : "بدون بت"}
+                                    </span>
+                                    {sm14Won !== null && (
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                          sm14Won
+                                            ? "bg-emerald-600 text-white border-emerald-700"
+                                            : "bg-rose-600 text-white border-rose-700"
+                                        }`}
+                                      >
+                                        {sm14Won ? "برد ✓" : "باخت ✕"}
+                                      </span>
+                                    )}
+                                    <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-300 text-slate-800 font-extrabold text-[9px]">
+                                      {isSmartBoxOpen ? "بستن ▲" : "باز کردن ▼"}
+                                    </span>
+                                  </div>
+                                </button>
+
+                                {isSmartBoxOpen && (
+                                  <>
+                                    <table className="w-full text-[10px] border-collapse">
+                                      <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-100 text-slate-700">
+                                          <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص هوشمند ۱۴</th>
+                                          <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
+                                            میزبان ({g.hc})
+                                          </th>
+                                          <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
+                                            میهمان ({g.ac})
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {sm14Rows.map((r, idx) => {
+                                          const renderSm14Cell = (txt: string, sub: string | undefined, tick: CheckTick) => (
+                                            <div className="flex flex-col items-center justify-center leading-tight py-0.5">
+                                              <div className="inline-flex items-center gap-1 font-mono tabular-nums" dir="ltr">
+                                                {tick === "pass" ? (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                    ✓
+                                                  </span>
+                                                ) : tick === "trap" ? (
+                                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                    ✕
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-100 text-slate-400 font-sans text-[9px] shrink-0">
+                                                    —
+                                                  </span>
+                                                )}
+                                                <span
+                                                  className={
+                                                    tick === "pass"
+                                                      ? "font-extrabold text-emerald-900"
+                                                      : tick === "trap"
+                                                        ? "font-extrabold text-rose-800"
+                                                        : "text-slate-600 font-medium"
+                                                  }
+                                                >
+                                                  {txt}
+                                                </span>
+                                              </div>
+                                              {sub && (
+                                                <span className="text-[8.5px] font-mono text-slate-500 mt-0.5" dir="ltr">
+                                                  {sub}
+                                                </span>
+                                              )}
+                                            </div>
+                                          );
+                                          return (
+                                            <tr
+                                              key={r.key}
+                                              data-testid={r.testId}
+                                              className="hover:bg-sky-50/40 transition-colors"
+                                            >
+                                              <td className="py-1 px-2 align-middle">
+                                                <div className="font-bold text-slate-900 leading-snug">
+                                                  {idx + 1}. {r.stepTitle}
+                                                </div>
+                                                {r.stepSub && (
+                                                  <div className="text-[8.5px] font-bold text-indigo-800 leading-tight mt-0.5">
+                                                    {r.stepSub}
+                                                  </div>
+                                                )}
+                                              </td>
+                                              <td
+                                                className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                                  r.hTick === "pass"
+                                                    ? "bg-emerald-50/55"
+                                                    : r.hTick === "trap"
+                                                      ? "bg-rose-50/55"
+                                                      : ""
+                                                }`}
+                                              >
+                                                {renderSm14Cell(r.hText, r.hSub, r.hTick)}
+                                              </td>
+                                              <td
+                                                className={`py-1 px-1.5 border-r border-slate-100 align-middle ${
+                                                  r.aTick === "pass"
+                                                    ? "bg-emerald-50/55"
+                                                    : r.aTick === "trap"
+                                                      ? "bg-rose-50/55"
+                                                      : ""
+                                                }`}
+                                              >
+                                                {renderSm14Cell(r.aText, r.aSub, r.aTick)}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+
+                                    <div
+                                      data-testid={`smart-m14-verdict-${g.n}`}
+                                      className={`px-2.5 py-1.5 border-t flex items-center justify-between gap-2 text-[10px] ${
+                                        sm14.kind === "M14_CORE_CLEAN" || sm14.kind === "M14_DIRECT_RELEASE"
+                                          ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                                          : sm14.kind === "M14_OPPOSITE_FLIP" || sm14.kind === "M14_TRAP_FLIP"
+                                            ? "bg-indigo-50 border-indigo-200 text-indigo-950"
+                                            : sm14.kind === "M14_VETO_TRAP"
+                                              ? "bg-rose-50 border-rose-200 text-rose-950"
+                                              : "bg-slate-50 border-slate-200 text-slate-700"
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-extrabold leading-snug">
+                                          {sm14.kind === "M14_CORE_CLEAN" ? (
+                                            <>
+                                              ✓ سیگنال سالم حالت ۱۴:{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                              </span>
+                                            </>
+                                          ) : sm14.kind === "M14_DIRECT_RELEASE" ? (
+                                            <>
+                                              ✓ قانون ۳ (آزادسازی مستقیم Log5≥75%): برد{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                              </span>
+                                            </>
+                                          ) : sm14.kind === "M14_TRAP_FLIP" ? (
+                                            <>
+                                              ↺ قانون ۱+۲ (حذف تله بازنده → برد تیم عکس):{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                              </span>{" "}
+                                              — ردِ{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {getTeam3Code(sm14.baseM14Pick)}
+                                              </span>
+                                            </>
+                                          ) : sm14.kind === "M14_OPPOSITE_FLIP" ? (
+                                            <>
+                                              ↺ قانون ۲ (تیم عکس فاقد شرایط): برد{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                              </span>{" "}
+                                              — عکسِ{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {getTeam3Code(sm14.baseM14Pick)}
+                                              </span>
+                                            </>
+                                          ) : sm14.kind === "M14_VETO_TRAP" ? (
+                                            <>
+                                              ✕ مهار تله تیم بازنده ({getTeam3Code(sm14.baseM14Pick)}) → مسیر جایگزین بدون بت:{" "}
+                                              <span dir="ltr" className="inline-block font-mono">
+                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <>⛔ توقف ایمنی حالت ۱۴ — بدون بت</>
+                                          )}
+                                        </div>
+                                        <div className="text-[9px] text-slate-600 mt-0.5 leading-snug">
+                                          {sm14.reasonFa}
+                                        </div>
+                                      </div>
+                                      {sm14Won !== null && (
+                                        <span
+                                          className={`shrink-0 px-2 py-0.5 rounded font-extrabold text-[9.5px] border ${
+                                            sm14Won
+                                              ? "bg-emerald-600 text-white border-emerald-700"
+                                              : "bg-rose-600 text-white border-rose-700"
+                                          }`}
+                                        >
+                                          {sm14Won ? "برد ✓" : "باخت ✕"}
+                                        </span>
+                                      )}
+                                      {sm14SavedTrap !== null && (
+                                        <span
+                                          className={`shrink-0 px-2 py-0.5 rounded font-extrabold text-[9.5px] border ${
+                                            sm14SavedTrap
+                                              ? "bg-emerald-600 text-white border-emerald-700"
+                                              : "bg-amber-100 text-amber-950 border-amber-400"
+                                          }`}
+                                        >
+                                          {sm14SavedTrap ? "مهار باخت ✓" : "رد محتاطانه"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ============================================================ */}
+                            {/* BOX 2: Collapsible Dropdown — Final Verdict & Mode 14 Boxes  */}
+                            {/* ============================================================ */}
+                            <div
+                              data-testid={`box2-verdict-${g.n}`}
+                              className={`rounded-lg border overflow-hidden shadow-2xs ${
+                                isQualified && isVip3
+                                  ? "border-amber-400 bg-amber-50/40"
+                                  : isQualified
+                                    ? "border-emerald-400 bg-emerald-50/40"
+                                    : isSafetyHold
+                                      ? "border-amber-300 bg-amber-50/30"
+                                      : "border-slate-300 bg-white"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                data-testid={`toggle-box2-${g.n}`}
+                                onClick={() => toggleCardBox(g.n, "box2")}
+                                className="w-full px-2.5 py-1.5 bg-slate-100/90 hover:bg-slate-200/75 transition-colors border-b border-slate-200 flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-right"
+                              >
+                                <span className="font-extrabold text-slate-900">
+                                  باکس ۲ • حکم نهایی، قفل و پیش‌بینی روز
+                                </span>
+                                <div className="inline-flex items-center gap-1 shrink-0">
+                                  <span
+                                    dir="ltr"
+                                    className="font-mono font-extrabold text-[9.5px] px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-900"
+                                  >
+                                    {getTeam3Code(predTeam)}
+                                  </span>
+                                  <span
+                                    data-testid={`badge-preset-status-${g.n}`}
+                                    className={`px-2 py-0.5 rounded text-[9.5px] font-extrabold border ${
+                                      isQualified && isVip3
+                                        ? "bg-amber-400 text-slate-950 border-amber-500"
+                                        : isQualified
+                                          ? "bg-emerald-600 text-white border-emerald-700"
+                                          : isSafetyHold
+                                            ? "bg-rose-600 text-white border-rose-700"
+                                            : "bg-slate-200 text-slate-700 border-slate-300"
+                                    }`}
+                                  >
+                                    {isQualified && isVip3
+                                      ? "★ سیگنال ویژه VIP"
+                                      : isQualified
+                                        ? "✓ سیگنال فعال"
+                                        : isSafetyHold
+                                          ? "⛔ مهار قفل ایمنی"
+                                          : "خارج از سیگنال"}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-800 font-extrabold text-[9px]">
+                                    {isBox2Open ? "بستن ▲" : "باز کردن ▼"}
+                                  </span>
+                                </div>
+                              </button>
+
+                              {isBox2Open && (
+                                <div className="p-2.5 pb-1.5 space-y-2 text-[10.5px]">
+                                  {/* Used Lock Row */}
+                                  <div
+                                    data-testid={`text-lock-used-${g.n}`}
+                                    className="rounded-md bg-white border border-slate-200 px-2.5 py-1.5"
+                                  >
+                                    <div className="text-[9.5px] text-slate-500 font-bold">
+                                      قفل و مرحله استفاده‌شده ({activePresetLabel}):
+                                    </div>
+                                    <div className="font-extrabold text-slate-900 mt-0.5 leading-snug">
+                                      {lockTitleFa}
+                                    </div>
+                                    {lockReasonFa && lockReasonFa !== lockTitleFa && (
+                                      <div className="text-[9.5px] text-sky-900 font-semibold mt-0.5 leading-snug">
+                                        {lockReasonFa}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Final Prediction Row */}
+                                  <div
+                                    data-testid={`text-final-pred-${g.n}`}
+                                    className={`rounded-md px-2.5 py-1.5 border flex flex-wrap items-center justify-between gap-1.5 ${
+                                      isQualified
+                                        ? "bg-emerald-100/80 border-emerald-400 text-emerald-950"
+                                        : "bg-sky-50/80 border-sky-200 text-slate-800"
+                                    }`}
+                                  >
+                                    <span className="font-bold text-[10px] shrink-0">
+                                      {isQualified
+                                        ? "پیش‌بینی نهایی سیگنال:"
+                                        : isTotalElem12Mode && sm14.kind === "M14_VETO_TRAP"
+                                          ? `مسیر جایگزین ضدتله (ردِ ${getTeam3Code(sm14.baseM14Pick)} • بدون بت):`
+                                          : "مسیر پیشنهادی (بدون بت):"}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1.5 font-extrabold text-xs">
+                                      <bdi dir="ltr">{predTeam}</bdi>
+                                      <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-300 text-[9.5px] font-bold text-slate-800 shrink-0">
+                                        {homeFav ? "میزبان" : "میهمان"} {isQualified ? "✓" : ""}
+                                      </span>
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {isTotalElem12Mode && (
+                                <div className="px-2.5 py-2 space-y-2 text-[10px]">
+                                  {/* Collapsible Sub-Box 2A: Dominant Element [F-A-W-E] */}
+                                  <div
+                                    data-testid={`box2-dom-elem-${g.n}`}
+                                    className={`rounded-lg border overflow-hidden shadow-2xs ${
+                                      sm14.dualWaterTrap
+                                        ? "bg-rose-50 border-rose-300 text-rose-950"
+                                        : sm14.hLeadCnt === 3 || sm14.aLeadCnt === 3 || sm14.domSplit
+                                          ? "bg-indigo-50/80 border-indigo-300 text-indigo-950"
+                                          : "bg-sky-50/80 border-sky-300 text-slate-800"
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      data-testid={`toggle-dom-${g.n}`}
+                                      onClick={() => toggleCardBox(g.n, "dom")}
+                                      className={`w-full px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-right hover:bg-sky-100/60 transition-colors ${
+                                        isDomBoxOpen ? "border-b border-sky-200" : ""
+                                      }`}
+                                    >
+                                      <span className="font-extrabold shrink-0">
+                                        المنت غالب [F-A-W-E]:
+                                      </span>
+                                      <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                                        <span className="font-mono font-bold tabular-nums bg-white/90 px-1.5 py-0.5 rounded border border-sky-200 text-[9px]" dir="ltr">
+                                          {g.hc}: {sm14.hDomInfo.dom}({sm14.hDomInfo.maxCnt}) | {g.ac}: {sm14.aDomInfo.dom}({sm14.aDomInfo.maxCnt})
+                                        </span>
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                            sm14.dualWaterTrap
+                                              ? "bg-rose-600 text-white border-rose-700"
+                                              : sm14.hLeadCnt === 3 || sm14.aLeadCnt === 3
+                                                ? "bg-amber-400 text-slate-950 border-amber-500"
+                                                : (sm14.hDomInfo.isTie && !sm14.aDomInfo.isTie) || (sm14.aDomInfo.isTie && !sm14.hDomInfo.isTie)
+                                                  ? "bg-teal-600 text-white border-teal-700"
+                                                  : sm14.domSplit
+                                                    ? "bg-emerald-600 text-white border-emerald-700"
+                                                    : "bg-white text-slate-700 border-slate-300"
+                                          }`}
+                                        >
+                                          {sm14.dualWaterTrap
+                                            ? "✕ تله ۲×WATER"
+                                            : sm14.hLeadCnt === 3
+                                              ? `★ برتری ۳/۴ (${g.hc})`
+                                              : sm14.aLeadCnt === 3
+                                                ? `★ برتری ۳/۴ (${g.ac})`
+                                                : sm14.hDomInfo.isTie && !sm14.aDomInfo.isTie
+                                                  ? `★ تعادل دوگانه (${g.hc})`
+                                                  : sm14.aDomInfo.isTie && !sm14.hDomInfo.isTie
+                                                    ? `★ تعادل دوگانه (${g.ac})`
+                                                    : sm14.domSplit
+                                                      ? "✓ شکاف المنت غالب"
+                                                      : "هم‌المنت"}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 rounded bg-white border border-sky-300 text-sky-950 font-extrabold text-[9px]">
+                                          {isDomBoxOpen ? "بستن ▲" : "باز کردن ▼"}
+                                        </span>
+                                      </div>
+                                    </button>
+
+                                    {isDomBoxOpen && (
+                                      <table className="w-full text-[9.5px] border-collapse bg-white/95 font-mono" dir="ltr">
+                                        <thead>
+                                          <tr className="bg-sky-50 border-b border-sky-100 text-slate-700">
+                                            <th className="py-1 px-2 text-left font-extrabold">TEAM</th>
+                                            <th className="py-1 px-1 text-center font-extrabold">FIRE</th>
+                                            <th className="py-1 px-1 text-center font-extrabold">AIR</th>
+                                            <th className="py-1 px-1 text-center font-extrabold">WATER</th>
+                                            <th className="py-1 px-1 text-center font-extrabold">EARTH</th>
+                                            <th className="py-1 px-1.5 text-center font-extrabold">Σ</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-sky-100 text-slate-900">
+                                          <tr>
+                                            <td className="py-1 px-2 font-extrabold">{g.hc} (H)</td>
+                                            {[0, 1, 2, 3].map((idx) => (
+                                              <td
+                                                key={idx}
+                                                className={`py-1 px-1 text-center font-bold ${
+                                                  sm14.hDomInfo.vec[idx] > sm14.aDomInfo.vec[idx]
+                                                    ? "bg-emerald-50 text-emerald-900 font-extrabold"
+                                                    : ""
+                                                }`}
+                                              >
+                                                {sm14.hDomInfo.vec[idx]}
+                                              </td>
+                                            ))}
+                                            <td className="py-1 px-1.5 text-center font-extrabold bg-sky-50/70">
+                                              {sm14.elemFollow.hSum}
+                                            </td>
+                                          </tr>
+                                          <tr>
+                                            <td className="py-1 px-2 font-extrabold">{g.ac} (A)</td>
+                                            {[0, 1, 2, 3].map((idx) => (
+                                              <td
+                                                key={idx}
+                                                className={`py-1 px-1 text-center font-bold ${
+                                                  sm14.aDomInfo.vec[idx] > sm14.hDomInfo.vec[idx]
+                                                    ? "bg-emerald-50 text-emerald-900 font-extrabold"
+                                                    : ""
+                                                }`}
+                                              >
+                                                {sm14.aDomInfo.vec[idx]}
+                                              </td>
+                                            ))}
+                                            <td className="py-1 px-1.5 text-center font-extrabold bg-sky-50/70">
+                                              {sm14.elemFollow.aSum}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  </div>
+
+                                  {/* Collapsible Sub-Box 2B: Follow-Up Element Winner */}
+                                  {(() => {
+                                    const ef = sm14.elemFollow;
+                                    const elemAlign =
+                                      !ef.hasPick
+                                        ? "NEUTRAL"
+                                        : isQualified
+                                          ? ef.pick === predTeam
+                                            ? "AGREE"
+                                            : "CLASH"
+                                          : ef.pickL5 >= 60
+                                            ? "LOG5_ALIGN"
+                                            : "SOLO";
+                                    const elemWon = hasFinalScore && ef.hasPick ? ef.pick === g.aw : null;
+                                    const hTick: CheckTick =
+                                      ef.pick === g.h ? "pass" : ef.oppTrapSide === g.h ? "trap" : "none";
+                                    const aTick: CheckTick =
+                                      ef.pick === g.a ? "pass" : ef.oppTrapSide === g.a ? "trap" : "none";
+                                    return (
+                                      <div
+                                        data-testid={`box2-elem-followup-${g.n}`}
+                                        className={`rounded-lg border overflow-hidden shadow-2xs text-[10px] ${
+                                          elemAlign === "AGREE"
+                                            ? "border-emerald-400 bg-sky-50/70"
+                                            : elemAlign === "CLASH"
+                                              ? "border-amber-400 bg-amber-50/50"
+                                              : "border-sky-300 bg-sky-50/90"
+                                        }`}
+                                      >
+                                        <button
+                                          type="button"
+                                          data-testid={`toggle-elem-${g.n}`}
+                                          onClick={() => toggleCardBox(g.n, "elem")}
+                                          className={`w-full px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-right transition-colors ${
+                                            elemAlign === "AGREE"
+                                              ? "bg-emerald-100/80 hover:bg-emerald-200/70 border-emerald-200 text-emerald-950"
+                                              : elemAlign === "CLASH"
+                                                ? "bg-amber-100/85 hover:bg-amber-200/70 border-amber-300 text-amber-950"
+                                                : "bg-sky-100/85 hover:bg-sky-200/70 border-sky-200 text-sky-950"
+                                          } ${isElemBoxOpen ? "border-b" : ""}`}
+                                        >
+                                          <span className="font-extrabold">
+                                            باکس برنده المنت غالب (قوانین فالوآپ):
+                                          </span>
+                                          <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                                            <span
+                                              dir="ltr"
+                                              className="font-mono font-extrabold text-[9px] px-1.5 py-0.5 rounded bg-white border border-sky-200 text-slate-900"
+                                            >
+                                              {ef.hasPick ? `${getTeam3Code(ef.pick)} ✓` : "—"}
+                                            </span>
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border shrink-0 ${
+                                                elemAlign === "AGREE"
+                                                  ? "bg-emerald-600 text-white border-emerald-700"
+                                                  : elemAlign === "CLASH"
+                                                    ? "bg-amber-500 text-slate-950 border-amber-600"
+                                                    : elemAlign === "LOG5_ALIGN"
+                                                      ? "bg-sky-600 text-white border-sky-700"
+                                                      : ef.hasPick
+                                                        ? "bg-white text-sky-950 border-sky-300"
+                                                        : "bg-white text-slate-600 border-slate-300"
+                                              }`}
+                                            >
+                                              {elemAlign === "AGREE"
+                                                ? "✓ هم‌جهت با ۱۴"
+                                                : elemAlign === "CLASH"
+                                                  ? "⚠ تضاد با ۱۴"
+                                                  : elemAlign === "LOG5_ALIGN"
+                                                    ? "✓ جدول ≥60%"
+                                                    : ef.hasPick
+                                                      ? "مستقل المنت"
+                                                      : "خنثی"}
+                                            </span>
+                                            {elemWon !== null && (
+                                              <span
+                                                className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border shrink-0 ${
+                                                  elemWon
+                                                    ? "bg-emerald-600 text-white border-emerald-700"
+                                                    : "bg-rose-600 text-white border-rose-700"
+                                                }`}
+                                              >
+                                                {elemWon ? "برد ✓" : "باخت ✕"}
+                                              </span>
+                                            )}
+                                            <span className="px-1.5 py-0.5 rounded bg-white/95 border border-sky-300 text-sky-950 font-extrabold text-[9px]">
+                                              {isElemBoxOpen ? "بستن ▲" : "باز کردن ▼"}
+                                            </span>
+                                          </div>
+                                        </button>
+
+                                        {isElemBoxOpen && (
+                                          <>
+                                            <table className="w-full text-[10px] border-collapse bg-white/85">
+                                              <tbody>
+                                                <tr>
+                                                  <td className="py-1.5 px-2 text-right align-middle w-[40%]">
+                                                    <div className="font-extrabold text-slate-900 leading-snug">
+                                                      {ef.ruleTitleFa}
+                                                    </div>
+                                                    <div className="text-[9px] text-slate-600 font-mono tabular-nums mt-0.5" dir="ltr">
+                                                      Σ[F-A-W-E]: {g.hc}={ef.hSum} | {g.ac}={ef.aSum}
+                                                    </div>
+                                                  </td>
+                                                  <td
+                                                    className={`py-1.5 px-1.5 text-center align-middle border-r border-sky-100 w-[30%] ${
+                                                      hTick === "pass"
+                                                        ? "bg-emerald-50/70"
+                                                        : hTick === "trap"
+                                                          ? "bg-rose-50/60"
+                                                          : ""
+                                                    }`}
+                                                  >
+                                                    <div className="inline-flex items-center gap-1 font-extrabold text-slate-900" dir="ltr">
+                                                      {hTick === "pass" ? (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          ✓
+                                                        </span>
+                                                      ) : hTick === "trap" ? (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          ✕
+                                                        </span>
+                                                      ) : (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-600 font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          —
+                                                        </span>
+                                                      )}
+                                                      <span>{g.hc}: {ef.hLabel}</span>
+                                                    </div>
+                                                    <div className="text-[9px] text-slate-600 font-mono tabular-nums mt-0.5" dir="ltr">
+                                                      [{sm14.hDomInfo.vecStr}]
+                                                    </div>
+                                                  </td>
+                                                  <td
+                                                    className={`py-1.5 px-1.5 text-center align-middle border-r border-sky-100 w-[30%] ${
+                                                      aTick === "pass"
+                                                        ? "bg-emerald-50/70"
+                                                        : aTick === "trap"
+                                                          ? "bg-rose-50/60"
+                                                          : ""
+                                                    }`}
+                                                  >
+                                                    <div className="inline-flex items-center gap-1 font-extrabold text-slate-900" dir="ltr">
+                                                      {aTick === "pass" ? (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          ✓
+                                                        </span>
+                                                      ) : aTick === "trap" ? (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          ✕
+                                                        </span>
+                                                      ) : (
+                                                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-600 font-sans font-extrabold text-[9.5px] shrink-0">
+                                                          —
+                                                        </span>
+                                                      )}
+                                                      <span>{g.ac}: {ef.aLabel}</span>
+                                                    </div>
+                                                    <div className="text-[9px] text-slate-600 font-mono tabular-nums mt-0.5" dir="ltr">
+                                                      [{sm14.aDomInfo.vecStr}]
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              </tbody>
+                                            </table>
+
+                                            <div className="px-2.5 py-1 border-t border-sky-200/80 bg-sky-50/90 flex flex-wrap items-center justify-between gap-1.5">
+                                              <span className="font-extrabold text-slate-900">
+                                                {ef.hasPick ? (
+                                                  <>
+                                                    تیم برنده المنت غالب:{" "}
+                                                    <span dir="ltr" className="inline-block font-mono text-sky-950">
+                                                      {ef.pick} ({getTeam3Code(ef.pick)})
+                                                    </span>
+                                                  </>
+                                                ) : (
+                                                  "تیم برنده المنت غالب: — خنثی (جلوگیری از ورود نویز)"
+                                                )}
+                                              </span>
+                                              {hasFinalScore ? (
+                                                ef.hasPick ? (
+                                                  <span
+                                                    data-testid={`elem-followup-outcome-${g.n}`}
+                                                    className={`px-1.5 py-0.5 rounded font-extrabold text-[9.5px] border shrink-0 ${
+                                                      elemWon
+                                                        ? "bg-emerald-600 text-white border-emerald-700"
+                                                        : "bg-rose-600 text-white border-rose-700"
+                                                    }`}
+                                                  >
+                                                    {elemWon ? "درستی پیش‌بینی المنت: برد ✓" : "درستی پیش‌بینی المنت: باخت ✕"}
+                                                  </span>
+                                                ) : (
+                                                  <span
+                                                    data-testid={`elem-followup-outcome-${g.n}`}
+                                                    className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 font-bold text-[9.5px] shrink-0"
+                                                  >
+                                                    نتیجه المنت: خنثی —
+                                                  </span>
+                                                )
+                                              ) : (
+                                                <span className="px-1.5 py-0.5 rounded bg-white text-sky-900 border border-sky-300 font-bold text-[9px] shrink-0">
+                                                  {ef.tier === "STRONG" ? "قانون قوی فالوآپ ★" : ef.tier === "MEDIUM" ? "قانون متوسط فالوآپ" : "بدون حکم"}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+
+                                  {/* Collapsible Sub-Box 2C: Ticked 4-Pattern Fusion Box */}
+                                  {(() => {
+                                    const ef = sm14.elemFollow;
+                                    const f4 = sm14.fusion4;
+                                    const f4Won = hasFinalScore && f4.active ? f4.pick === g.aw : null;
+                                    const f4SavedAir = hasFinalScore && f4.p4AirTrap ? f4.sugPick !== g.aw : null;
+                                    const f4Rows: CheckRow[] = [
+                                      {
+                                        key: "f4_p1",
+                                        testId: `row-f4-p1-${g.n}`,
+                                        stepTitle: "۱. هم‌جهتی دو باکس + میزبان + مسیر ۱۱",
+                                        stepSub: "قوی≥52% یا متوسط≥58% • تاریخچه ۸۲.۲٪ (+۱۰.۸pp)",
+                                        hText: f4.p1Hit
+                                          ? "تایید پترن ۱"
+                                          : !ef.hasPick
+                                            ? "المنت خنثی"
+                                            : ef.pick !== g.h
+                                              ? "المنت میهمان"
+                                              : !f4.agreeBoxes
+                                                ? "تضاد دو باکس"
+                                                : !f4.epM11Dir
+                                                  ? "بدون مسیر M11"
+                                                  : ef.tier === "STRONG"
+                                                    ? `L5:${sm14.hL5}%<52%`
+                                                    : `L5:${sm14.hL5}%<58%`,
+                                        hSub: f4.p1Hit ? `L5:${sm14.hL5}% • M11✓` : undefined,
+                                        hTick: f4.p1Hit ? "pass" : "none",
+                                        aText: "ویژه میزبان",
+                                        aTick: "none",
+                                      },
+                                      {
+                                        key: "f4_p2",
+                                        testId: `row-f4-p2-${g.n}`,
+                                        stepTitle: "۲. هم‌جهتی با سیگنال ۱۴ / تیم / قفل ۱۱ / ۱۲P+Σ",
+                                        stepSub: "تاریخچه ۸۳.۷٪ (فصل ۲۶-۲۷: ۳۱/۳۱ = ۱۰۰٪)",
+                                        hText:
+                                          f4.p2Hit && ef.pick === g.h
+                                            ? "تایید پترن ۲"
+                                            : ef.pick === g.h && f4.agreeBoxes
+                                              ? ef.tier !== "STRONG"
+                                                ? "المنت متوسط"
+                                                : "بدون قفل۱۱/Σ"
+                                              : "غیرفعال",
+                                        hSub:
+                                          f4.p2Hit && ef.pick === g.h
+                                            ? !f4.isNoBetM14 && f4.epM11Sig
+                                              ? "سیگنال ۱۴ + قفل M11"
+                                              : !f4.isNoBetM14
+                                                ? "هم‌جهت سیگنال ۱۴ ✓"
+                                                : f4.epM11Sig
+                                                  ? "قفل M11 فعال"
+                                                  : f4.sugTeamSig
+                                                    ? "سیگنال تیم + المنت قوی"
+                                                    : "12P + Σ + ≥60%"
+                                            : undefined,
+                                        hTick: f4.p2Hit && ef.pick === g.h ? "pass" : "none",
+                                        aText:
+                                          f4.p2Hit && ef.pick === g.a
+                                            ? "تایید پترن ۲"
+                                            : ef.pick === g.a && f4.agreeBoxes
+                                              ? ef.tier !== "STRONG"
+                                                ? "المنت متوسط"
+                                                : "بدون قفل۱۱/Σ"
+                                              : "غیرفعال",
+                                        aSub:
+                                          f4.p2Hit && ef.pick === g.a
+                                            ? !f4.isNoBetM14 && f4.epM11Sig
+                                              ? "سیگنال ۱۴ + قفل M11"
+                                              : !f4.isNoBetM14
+                                                ? "هم‌جهت سیگنال ۱۴ ✓"
+                                                : f4.epM11Sig
+                                                  ? "قفل M11 فعال"
+                                                  : f4.sugTeamSig
+                                                    ? "سیگنال تیم + المنت قوی"
+                                                    : "12P + Σ + ≥60%"
+                                            : undefined,
+                                        aTick: f4.p2Hit && ef.pick === g.a ? "pass" : "none",
+                                      },
+                                      {
+                                        key: "f4_p3",
+                                        testId: `row-f4-p3-${g.n}`,
+                                        stepTitle: "۳. المنت قوی + ۱۲ بازیکن + جدول ≥62%",
+                                        stepSub: "تاریخچه ۷۸.۱٪ (فصل ۲۵-۲۶: ۸۴.۴٪ • ۲۶-۲۷: ۸۳.۳٪)",
+                                        hText:
+                                          f4.p3Hit && ef.pick === g.h
+                                            ? "تایید پترن ۳"
+                                            : ef.pick === g.h
+                                              ? ef.tier !== "STRONG"
+                                                ? "المنت متوسط"
+                                                : !f4.epP12Ok
+                                                  ? "بدون برتری 12P"
+                                                  : !f4.agreeBoxes && !f4.isNoBetM14
+                                                    ? "تضاد سیگنال ۱۴"
+                                                    : `L5:${sm14.hL5}%<62%`
+                                              : "غیرفعال",
+                                        hSub: f4.p3Hit && ef.pick === g.h ? `12P✓ • L5:${sm14.hL5}%` : undefined,
+                                        hTick: f4.p3Hit && ef.pick === g.h ? "pass" : "none",
+                                        aText:
+                                          f4.p3Hit && ef.pick === g.a
+                                            ? "تایید پترن ۳"
+                                            : ef.pick === g.a
+                                              ? ef.tier !== "STRONG"
+                                                ? "المنت متوسط"
+                                                : !f4.epP12Ok
+                                                  ? "بدون برتری 12P"
+                                                  : !f4.agreeBoxes && !f4.isNoBetM14
+                                                    ? "تضاد سیگنال ۱۴"
+                                                    : `L5:${sm14.aL5}%<62%`
+                                              : "غیرفعال",
+                                        aSub: f4.p3Hit && ef.pick === g.a ? `12P✓ • L5:${sm14.aL5}%` : undefined,
+                                        aTick: f4.p3Hit && ef.pick === g.a ? "pass" : "none",
+                                      },
+                                      {
+                                        key: "f4_p4",
+                                        testId: `row-f4-p4-${g.n}`,
+                                        stepTitle: "۴. تضاد دو باکس + سیگنال تیم یا ۱۴(≥75%)",
+                                        stepSub: "بدون اشباع AIR/EARTH • تاریخچه ۷۹.۷٪",
+                                        hText:
+                                          f4.p4Hit && f4.sugPick === g.h
+                                            ? "برد پیشنهادی"
+                                            : f4.p4AirTrap && f4.sugPick === g.h
+                                              ? "مهار اشباع AIR"
+                                              : "غیرفعال",
+                                        hSub:
+                                          f4.p4Hit && f4.sugPick === g.h
+                                            ? f4.sugTeamSig
+                                              ? "سیگنال تیم ✓"
+                                              : `سیگنال ۱۴ (${sm14.hL5}%)`
+                                            : f4.p4AirTrap && f4.sugPick === g.h
+                                              ? "رد تله پترن ۴"
+                                              : undefined,
+                                        hTick:
+                                          f4.p4Hit && f4.sugPick === g.h
+                                            ? "pass"
+                                            : f4.p4AirTrap && f4.sugPick === g.h
+                                              ? "trap"
+                                              : "none",
+                                        aText:
+                                          f4.p4Hit && f4.sugPick === g.a
+                                            ? "برد پیشنهادی"
+                                            : f4.p4AirTrap && f4.sugPick === g.a
+                                              ? "مهار اشباع AIR"
+                                              : "غیرفعال",
+                                        aSub:
+                                          f4.p4Hit && f4.sugPick === g.a
+                                            ? f4.sugTeamSig
+                                              ? "سیگنال تیم ✓"
+                                              : `سیگنال ۱۴ (${sm14.aL5}%)`
+                                            : f4.p4AirTrap && f4.sugPick === g.a
+                                              ? "رد تله پترن ۴"
+                                              : undefined,
+                                        aTick:
+                                          f4.p4Hit && f4.sugPick === g.a
+                                            ? "pass"
+                                            : f4.p4AirTrap && f4.sugPick === g.a
+                                              ? "trap"
+                                              : "none",
+                                      },
+                                    ];
+                                    const f4HomeTicks = f4Rows.filter((r) => r.hTick === "pass").length;
+                                    const f4AwayTicks = f4Rows.filter((r) => r.aTick === "pass").length;
+
+                                    return (
+                                      <div
+                                        data-testid={`box2-nobet-elem-fusion-${g.n}`}
+                                        className={`rounded-lg border overflow-hidden shadow-2xs text-[10px] ${
+                                          f4.active
+                                            ? "border-teal-400 bg-sky-50/80"
+                                            : f4.p4AirTrap
+                                              ? "border-rose-300 bg-rose-50/40"
+                                              : "border-sky-300 bg-sky-50/85"
+                                        }`}
+                                      >
+                                        <button
+                                          type="button"
+                                          data-testid={`toggle-fusion4-${g.n}`}
+                                          onClick={() => toggleCardBox(g.n, "fusion4")}
+                                          className={`w-full px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-right transition-colors ${
+                                            f4.active
+                                              ? "bg-teal-100/85 hover:bg-teal-200/70 border-teal-300 text-teal-950"
+                                              : f4.p4AirTrap
+                                                ? "bg-rose-100/80 hover:bg-rose-200/70 border-rose-200 text-rose-950"
+                                                : "bg-sky-100/85 hover:bg-sky-200/70 border-sky-200 text-sky-950"
+                                          } ${isFusion4BoxOpen ? "border-b" : ""}`}
+                                        >
+                                          <span className="font-extrabold">
+                                            باکس تلفیق ۴ پترن (باکس ۲ + المنت غالب • v82):
+                                          </span>
+                                          <div className="flex flex-wrap items-center justify-end gap-1 min-w-0">
+                                            <span
+                                              dir="ltr"
+                                              className="font-mono font-extrabold text-[9px] px-1.5 py-0.5 rounded bg-white border border-sky-200 text-slate-800"
+                                            >
+                                              {g.hc}: {f4HomeTicks}✓ | {g.ac}: {f4AwayTicks}✓
+                                            </span>
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                                f4.active
+                                                  ? "bg-teal-600 text-white border-teal-700"
+                                                  : f4.p4AirTrap
+                                                    ? "bg-rose-600 text-white border-rose-700"
+                                                    : "bg-white text-slate-600 border-slate-300"
+                                              }`}
+                                            >
+                                              {f4.active
+                                                ? `★ ${getTeam3Code(f4.pick)} (${f4.tags.join("+")})`
+                                                : f4.p4AirTrap
+                                                  ? "✕ اشباع AIR"
+                                                  : "— بدون پترن"}
+                                            </span>
+                                            {f4Won !== null && (
+                                              <span
+                                                className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border ${
+                                                  f4Won
+                                                    ? "bg-emerald-600 text-white border-emerald-700"
+                                                    : "bg-rose-600 text-white border-rose-700"
+                                                }`}
+                                              >
+                                                {f4Won ? "برد ✓" : "باخت ✕"}
+                                              </span>
+                                            )}
+                                            <span className="px-1.5 py-0.5 rounded bg-white/95 border border-sky-300 text-sky-950 font-extrabold text-[9px]">
+                                              {isFusion4BoxOpen ? "بستن ▲" : "باز کردن ▼"}
+                                            </span>
+                                          </div>
+                                        </button>
+
+                                        {isFusion4BoxOpen && (
+                                          <>
+                                            <table className="w-full text-[10px] border-collapse bg-white/90">
+                                              <thead>
+                                                <tr className="bg-sky-50/70 border-b border-sky-100 text-slate-700">
+                                                  <th className="py-1 px-2 text-right font-extrabold w-[44%]">پترن ثابت سه‌فصله</th>
+                                                  <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[28%]">
+                                                    میزبان ({g.hc})
+                                                  </th>
+                                                  <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[28%]">
+                                                    میهمان ({g.ac})
+                                                  </th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-sky-100/80">
+                                                {f4Rows.map((r) => {
+                                                  const renderF4Cell = (txt: string, sub: string | undefined, tick: CheckTick) => (
+                                                    <div className="flex flex-col items-center justify-center leading-tight py-0.5">
+                                                      <div className="inline-flex items-center gap-1 font-extrabold text-slate-900">
+                                                        {tick === "pass" ? (
+                                                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                            ✓
+                                                          </span>
+                                                        ) : tick === "trap" ? (
+                                                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-rose-600 text-white font-sans font-extrabold text-[9.5px] shrink-0">
+                                                            ✕
+                                                          </span>
+                                                        ) : (
+                                                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-600 font-sans font-extrabold text-[9.5px] shrink-0">
+                                                            —
+                                                          </span>
+                                                        )}
+                                                        <span className={tick === "none" ? "text-slate-500 font-semibold" : ""}>{txt}</span>
+                                                      </div>
+                                                      {sub && (
+                                                        <div className="text-[8.5px] text-slate-600 font-mono tabular-nums mt-0.5" dir="ltr">
+                                                          {sub}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                  return (
+                                                    <tr key={r.key} data-testid={r.testId}>
+                                                      <td className="py-1 px-2 text-right align-middle">
+                                                        <div className="font-extrabold text-slate-900 leading-snug">{r.stepTitle}</div>
+                                                        {r.stepSub && (
+                                                          <div className="text-[8.5px] text-slate-500 leading-tight">{r.stepSub}</div>
+                                                        )}
+                                                      </td>
+                                                      <td
+                                                        className={`py-1 px-1 text-center align-middle border-r border-sky-100 ${
+                                                          r.hTick === "pass" ? "bg-emerald-50/75" : r.hTick === "trap" ? "bg-rose-50/70" : ""
+                                                        }`}
+                                                      >
+                                                        {renderF4Cell(r.hText, r.hSub, r.hTick)}
+                                                      </td>
+                                                      <td
+                                                        className={`py-1 px-1 text-center align-middle border-r border-sky-100 ${
+                                                          r.aTick === "pass" ? "bg-emerald-50/75" : r.aTick === "trap" ? "bg-rose-50/70" : ""
+                                                        }`}
+                                                      >
+                                                        {renderF4Cell(r.aText, r.aSub, r.aTick)}
+                                                      </td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+
+                                            <div className="px-2.5 py-1 border-t border-sky-200/80 bg-sky-50/90 flex flex-wrap items-center justify-between gap-1.5">
+                                              <span className="font-extrabold text-slate-900">
+                                                {f4.active ? (
+                                                  <>
+                                                    نتیجه تلفیق ۴ پترن:{" "}
+                                                    <span dir="ltr" className="inline-block font-mono text-teal-950">
+                                                      {f4.pick} ({getTeam3Code(f4.pick)})
+                                                    </span>
+                                                  </>
+                                                ) : f4.p4AirTrap ? (
+                                                  `مهار خطای اشباع AIR روی ${getTeam3Code(f4.sugPick)} (ورود ممنوع)`
+                                                ) : !f4.isNoBetM14 ? (
+                                                  f4.clashBoxes
+                                                    ? "هشدار: سیگنال ۱۴ فعال اما در تضاد با المنت غالب (فاقد پترن ۴)"
+                                                    : "سیگنال اصلی ۱۴ برقرار است (المنت غالب خنثی)"
+                                                ) : (
+                                                  "نتیجه تلفیق ۴ پترن: — خارج از هر ۴ پترن (بدون بت قطعی)"
+                                                )}
+                                              </span>
+                                              {hasFinalScore && (
+                                                f4.active ? (
+                                                  <span
+                                                    data-testid={`fusion4-outcome-${g.n}`}
+                                                    className={`px-1.5 py-0.5 rounded font-extrabold text-[9.5px] border shrink-0 ${
+                                                      f4Won
+                                                        ? "bg-emerald-600 text-white border-emerald-700"
+                                                        : "bg-rose-600 text-white border-rose-700"
+                                                    }`}
+                                                  >
+                                                    {f4Won ? "درستی تلفیق ۴ پترن: برد ✓" : "درستی تلفیق ۴ پترن: باخت ✕"}
+                                                  </span>
+                                                ) : f4.p4AirTrap ? (
+                                                  <span
+                                                    data-testid={`fusion4-outcome-${g.n}`}
+                                                    className={`px-1.5 py-0.5 rounded font-extrabold text-[9.5px] border shrink-0 ${
+                                                      f4SavedAir
+                                                        ? "bg-emerald-600 text-white border-emerald-700"
+                                                        : "bg-slate-200 text-slate-700 border-slate-300"
+                                                    }`}
+                                                  >
+                                                    {f4SavedAir ? "مهار تله اشباع: موفق ✓" : "توقف اشباع AIR"}
+                                                  </span>
+                                                ) : (
+                                                  <span
+                                                    data-testid={`fusion4-outcome-${g.n}`}
+                                                    className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 font-bold text-[9.5px] shrink-0"
+                                                  >
+                                                    تلفیق ۴ پترن: خنثی —
+                                                  </span>
+                                                )
+                                              )}
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              )}
+
+                            </div>
+                              </div>
+                            )}
+
+                            {/* Always-Visible Game Result Banner (Visible Even When 6 Boxes Are Collapsed) */}
+                            <div
+                              data-testid={`card-result-footer-${g.n}`}
+                              className={`rounded-lg px-3 py-2 border flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-extrabold shadow-2xs ${
+                                !hasFinalScore
+                                  ? "bg-sky-100/80 border-sky-200 text-sky-950"
+                                  : isTotalElem12Mode
+                                    ? sm14.referee6.active && sm14.referee6.pick === g.aw
+                                      ? "bg-emerald-600 border-emerald-700 text-white"
+                                      : sm14.referee6.active && sm14.referee6.pick !== g.aw
+                                        ? "bg-rose-600 border-rose-700 text-white"
+                                        : "bg-slate-800 border-slate-900 text-white"
+                                    : isQualified && cardWon
+                                      ? "bg-emerald-600 border-emerald-700 text-white"
+                                      : isQualified && !cardWon
+                                        ? "bg-rose-600 border-rose-700 text-white"
+                                        : "bg-slate-800 border-slate-900 text-white"
+                              }`}
+                            >
+                              {hasFinalScore ? (
+                                <>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span>نتیجه بازی:</span>
+                                    <span className="font-mono px-1.5 py-0.5 rounded bg-black/20 text-white" dir="ltr">
+                                      {scoreDisplay}
+                                    </span>
+                                    <span className="text-[10px] opacity-95">
+                                      (برنده: <bdi dir="ltr">{g.aw}</bdi>)
+                                    </span>
+                                  </div>
+                                  <span className="px-2 py-0.5 rounded bg-white/95 text-slate-950 text-[10px] font-extrabold">
+                                    {isTotalElem12Mode
+                                      ? sm14.referee6.active
+                                        ? sm14.referee6.pick === g.aw
+                                          ? "برد داور ۶ باکس ✓ (WIN)"
+                                          : "باخت داور ۶ باکس ✕ (LOSS)"
+                                        : sm14.referee6.pick === g.aw
+                                          ? "رتبه ۴ (برتری خفیف): درست ✓"
+                                          : "رتبه ۴ (برتری خفیف): نادرست ✕"
+                                      : isQualified
+                                        ? cardWon
+                                          ? "برد سیگنال ✓ (WIN)"
+                                          : "باخت سیگنال ✕ (LOSS)"
+                                        : isSafetyHold && !cardWon
+                                          ? "بدون سیگنال • مهار موفق تله ✓"
+                                          : `بدون سیگنال • مسیر: ${cardWon ? "درست ✓" : "نادرست ✕"}`}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>نتیجه بازی: در انتظار برگزاری (PENDING)</span>
+                                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white text-sky-950 border border-sky-200" dir="ltr">
+                                    {g.hc} vs {g.ac}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+
+                            {/* ============================================================ */}
+                            {/* Single Collapsible Dropdown for All Secondary Card Details   */}
+                            {/* ============================================================ */}
+                            <div className="mt-auto rounded-lg border border-sky-200 bg-white overflow-hidden">
+                              <button
+                                type="button"
+                                data-testid={`button-fusion-lineup-${g.n}`}
+                                onClick={() => toggleCardBox(g.n, "lineup")}
+                                className="w-full px-2.5 py-1.5 bg-sky-50/80 hover:bg-sky-100/80 text-sky-950 text-[10px] font-extrabold flex items-center justify-between gap-2 transition-colors"
+                              >
+                                <span>
+                                  {isTotalElem12Mode
+                                    ? `جزئیات موتور ۱۴ (شاخص GEO هر ${t12?.h_cnt12 ?? 12} بازیکن + تیم${outCnt > 0 ? ` • ${outCnt} غایب OUT` : ""} • پنل Kalshi ${liveAsk}¢)`
+                                    : `جزئیات تکمیلی (لیست ۸ بازیکن${outCnt > 0 ? ` • ${outCnt} غایب OUT` : ""} • پنل Kalshi ${liveAsk}¢)`}
+                                </span>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-white border border-sky-300 text-sky-950 text-[9.5px] whitespace-nowrap">{isLineupOpen ? "بستن ▲" : "باز کردن ▼"}</span>
+                              </button>
+
+                              {isLineupOpen && (
+                                <div className="p-2 space-y-2 border-t border-sky-200 bg-sky-50/30">
+                                  {/* Standings Strip (Twin Summary Hidden in Mode 14 for Strict Engine Isolation) */}
+                                  <div className="rounded border border-sky-200 bg-white px-2 py-1.5 text-[9.5px] space-y-1">
+                                    <div className="flex flex-wrap items-center justify-between gap-1 font-mono" dir="ltr">
+                                      <span>H#{wtpObj.hrk} ({wtpObj.hwl}) {hEl} {wtpObj.hodds}x</span>
+                                      <span>A#{wtpObj.ark} ({wtpObj.awl}) {aEl} {wtpObj.aodds}x</span>
+                                    </div>
+                                    {!isTotalElem12Mode && (
+                                      <div className="flex flex-wrap items-center justify-between gap-1 text-slate-700 font-mono" dir="ltr">
+                                        <span>Team+Arena: {shortCode(tm.pick)} {tm.votes} ({tm.pct}) F30:{tm.f30}</span>
+                                        <span>8-Players: {shortCode(pm.pick)} {pm.votes} ({pm.pct}) F30:{pm.f30}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Mode 14 Isolated View: 12 Dressed Players + 1 Team Entity (13 Entities Per-Person GEO Index & Bipolar Totals) */}
+                                  {isTotalElem12Mode && t12 && (
+                                    <div data-testid={`drawer-total12-${g.n}`} className="rounded border border-indigo-200 bg-white p-2 space-y-2 text-[9.5px]">
+                                      <div className="font-extrabold text-indigo-950 flex flex-wrap items-center justify-between gap-2">
+                                        <span>بردار کل المنت‌ها (۱۲ بازیکن لباس‌پوشیده + ۱ تیم/استادیوم)</span>
+                                        <span className="font-mono text-[8.5px] text-slate-500" dir="ltr">
+                                          EP_12P + EP_Team = EP_Tot → EF_Tot
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-1 font-mono text-[9px]" dir="ltr">
+                                        <div className="bg-sky-50/70 rounded px-1.5 py-1 border border-sky-200 break-words">
+                                          <b>{g.hc} ({t12.h_cnt12}P+TM):</b> 12P[{fmtFawe(t12.h_ep_p12)}] + TM[{fmtFawe(t12.h_ep_tm)}] = EP[{fmtFawe(t12.h_ep_tot)}] → EF[{fmtFawe(t12.h_ef_tot)}] | GEO:{t12.h_gf_tot} ({fmtSigned(t12.h_gff_tot)}) | QTOT:{t12.h_qtot}
+                                        </div>
+                                        <div className="bg-indigo-50/70 rounded px-1.5 py-1 border border-indigo-200 break-words">
+                                          <b>{g.ac} ({t12.a_cnt12}P+TM):</b> 12P[{fmtFawe(t12.a_ep_p12)}] + TM[{fmtFawe(t12.a_ep_tm)}] = EP[{fmtFawe(t12.a_ep_tot)}] → EF[{fmtFawe(t12.a_ef_tot)}] | GEO:{t12.a_gf_tot} ({fmtSigned(t12.a_gff_tot)}) | QTOT:{t12.a_qtot}
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1.5" dir="ltr">
+                                        {[
+                                          {
+                                            code: g.hc,
+                                            lbl: `${g.h} (${g.hc} • HOME • ${t12.h_cnt12}P + 1 Team)`,
+                                            rows: t12.h_p12 ?? [],
+                                            tmEnt: t12.h_tm_ent,
+                                            outs: g.h_out ?? [],
+                                            cnt1: t12HCnt1,
+                                            cnt0: t12HCnt0,
+                                            cnt0011: t12HCnt0011,
+                                            wGff: t12HWarm,
+                                            cGff: t12HCold,
+                                            c0011Gff: Number(t12.h_c0011_gff ?? 0),
+                                            dGff: t12HDelta,
+                                            sGff: t12HSum13,
+                                            cls: "bg-sky-700 text-white",
+                                          },
+                                          {
+                                            code: g.ac,
+                                            lbl: `${g.a} (${g.ac} • AWAY • ${t12.a_cnt12}P + 1 Team)`,
+                                            rows: t12.a_p12 ?? [],
+                                            tmEnt: t12.a_tm_ent,
+                                            outs: g.a_out ?? [],
+                                            cnt1: t12ACnt1,
+                                            cnt0: t12ACnt0,
+                                            cnt0011: t12ACnt0011,
+                                            wGff: t12AWarm,
+                                            cGff: t12ACold,
+                                            c0011Gff: Number(t12.a_c0011_gff ?? 0),
+                                            dGff: t12ADelta,
+                                            sGff: t12ASum13,
+                                            cls: "bg-indigo-700 text-white",
+                                          },
+                                        ].map((s12) => (
+                                          <div key={s12.code} data-testid={`table-t12-${g.n}-${s12.code}`} className="bg-white rounded border border-sky-200 overflow-hidden">
+                                            <div className={`px-2 py-0.5 text-[9px] font-extrabold flex flex-wrap items-center justify-between gap-1 ${s12.cls}`}>
+                                              <span>{s12.lbl}</span>
+                                              <span className="font-mono">FIN [F-A-W-E] • GEO • GF-FIN • Pwr</span>
+                                            </div>
+                                            {s12.rows.length > 0 || s12.tmEnt ? (
+                                              <div className="divide-y divide-slate-100">
+                                                {s12.rows.map((p12, i12) => {
+                                                  const gfCode = String(p12.gf || "0000");
+                                                  const is1xxx = gfCode.startsWith("1");
+                                                  const is0011 = gfCode === "0011";
+                                                  const gffVal = typeof p12.gff === "number" ? p12.gff : calcPlayerGfFin(p12.ef || p12.ep, gfCode);
+                                                  const pwrVal = typeof p12.pwr === "number" ? p12.pwr : 0;
+                                                  return (
+                                                    <div
+                                                      key={`${s12.code}-p-${i12}`}
+                                                      data-testid={`row-t12-ent-${g.n}-${s12.code}-${i12}`}
+                                                      className={`px-1.5 py-0.5 flex items-center justify-between gap-1 text-[8.5px] font-mono tabular-nums ${
+                                                        is1xxx
+                                                          ? "bg-amber-50/90 border-l-2 border-l-amber-500"
+                                                          : is0011
+                                                            ? "bg-cyan-50/80 border-l-2 border-l-cyan-500"
+                                                            : "bg-white"
+                                                      }`}
+                                                    >
+                                                      <div className="min-w-0 truncate font-sans font-bold text-slate-900">
+                                                        <span className="inline-block w-5 text-sky-800 font-mono">#{p12.no}</span>{" "}
+                                                        {p12.fn} <span className="text-slate-400 font-normal">({p12.mpg}m)</span>
+                                                      </div>
+                                                      <div className="shrink-0 flex items-center gap-1">
+                                                        <span className="px-1 rounded bg-slate-50 text-slate-700 border border-slate-200">
+                                                          {p12.ef || p12.ep}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded tracking-wider ${
+                                                            is1xxx
+                                                              ? "bg-amber-200/95 text-amber-950 border border-amber-500 font-extrabold"
+                                                              : is0011
+                                                                ? "bg-cyan-100 text-cyan-950 border border-cyan-400 font-extrabold"
+                                                                : "bg-sky-50 text-sky-800 border border-sky-200 font-medium"
+                                                          }`}
+                                                        >
+                                                          {gfCode}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
+                                                            gffVal < 0
+                                                              ? "bg-teal-100 text-teal-950 border border-teal-400"
+                                                              : "bg-slate-50 text-slate-700 border border-slate-200"
+                                                          }`}
+                                                        >
+                                                          {fmtSigned(gffVal)}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
+                                                            pwrVal >= 0
+                                                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                                              : "bg-rose-50 text-rose-800 border border-rose-200"
+                                                          }`}
+                                                        >
+                                                          {fmtSigned(pwrVal)}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                                {s12.tmEnt && (() => {
+                                                  const tmGf = String(s12.tmEnt.gf || "0000");
+                                                  const tm1xxx = tmGf.startsWith("1");
+                                                  const tm0011 = tmGf === "0011";
+                                                  return (
+                                                    <div
+                                                      data-testid={`row-t12-team-ent-${g.n}-${s12.code}`}
+                                                      className={`px-1.5 py-1 flex items-center justify-between gap-1 text-[8.5px] font-mono tabular-nums border-t border-indigo-200 ${
+                                                        tm1xxx
+                                                          ? "bg-amber-100/80 border-l-2 border-l-amber-600"
+                                                          : tm0011
+                                                            ? "bg-cyan-100/70 border-l-2 border-l-cyan-600"
+                                                            : "bg-indigo-50/60"
+                                                      }`}
+                                                    >
+                                                      <div className="min-w-0 truncate font-sans font-extrabold text-indigo-950">
+                                                        <span className="inline-block px-1 mr-1 rounded bg-indigo-700 text-white font-mono text-[8px]">TM</span>
+                                                        {s12.code} Team + Arena <span className="text-slate-500 font-normal">(ATP: 121 • WTA: 47)</span>
+                                                      </div>
+                                                      <div className="shrink-0 flex items-center gap-1">
+                                                        <span className="px-1 rounded bg-white text-slate-800 border border-slate-300">
+                                                          {s12.tmEnt.ef}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded tracking-wider ${
+                                                            tm1xxx
+                                                              ? "bg-amber-300 text-amber-950 border border-amber-600 font-extrabold"
+                                                              : tm0011
+                                                                ? "bg-cyan-200 text-cyan-950 border border-cyan-500 font-extrabold"
+                                                                : "bg-sky-100 text-sky-900 border border-sky-300 font-bold"
+                                                          }`}
+                                                        >
+                                                          {tmGf}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
+                                                            s12.tmEnt.gff < 0
+                                                              ? "bg-teal-100 text-teal-950 border border-teal-400"
+                                                              : "bg-white text-slate-800 border border-slate-300"
+                                                          }`}
+                                                        >
+                                                          {fmtSigned(s12.tmEnt.gff)}
+                                                        </span>
+                                                        <span
+                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
+                                                            s12.tmEnt.pwr >= 0
+                                                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                                              : "bg-rose-50 text-rose-800 border border-rose-200"
+                                                          }`}
+                                                        >
+                                                          {fmtSigned(s12.tmEnt.pwr)}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })()}
+                                              </div>
+                                            ) : null}
+
+                                            <div
+                                              data-testid={`summary-t12-poles-${g.n}-${s12.code}`}
+                                              className="px-2 py-1 border-t bg-slate-50/90 border-slate-200 flex flex-wrap items-center justify-between gap-1 text-[8.5px]"
+                                              dir="rtl"
+                                            >
+                                              <span className="font-sans font-extrabold text-slate-900">
+                                                قطبیت ۱۳ موجودیت ({s12.code}):
+                                              </span>
+                                              <div className="flex flex-wrap items-center gap-1 font-mono tabular-nums" dir="ltr">
+                                                <span className="px-1 rounded bg-amber-100 text-amber-950 border border-amber-300 font-bold">
+                                                  Σ(1xxx)={fmtSigned(s12.wGff)} ({s12.cnt1}/13)
+                                                </span>
+                                                <span className="px-1 rounded bg-cyan-50 text-cyan-950 border border-cyan-300 font-bold">
+                                                  Σ(0xxx)={fmtSigned(s12.cGff)} ({s12.cnt0}/13)
+                                                </span>
+                                                {s12.cnt0011 > 0 && (
+                                                  <span className="px-1 rounded bg-cyan-100 text-cyan-950 border border-cyan-400 font-bold">
+                                                    0011({s12.cnt0011})={fmtSigned(s12.c0011Gff)}
+                                                  </span>
+                                                )}
+                                                <span className="px-1 rounded bg-indigo-100 text-indigo-950 border border-indigo-300 font-bold">
+                                                  Δ(1−0)={fmtSigned(s12.dGff)}
+                                                </span>
+                                                <span className="px-1 rounded bg-teal-50 text-teal-950 border border-teal-300 font-bold">
+                                                  Σ(13)={fmtSigned(s12.sGff)}
+                                                </span>
+                                              </div>
+                                            </div>
+                                            {s12.outs.length > 0 && (
+                                              <div className="px-1.5 py-0.5 bg-rose-50 border-t border-rose-200 text-[8.5px] text-rose-900 font-sans" dir="rtl">
+                                                <b>غایب مصدوم/محروم (OUT):</b> {s12.outs.join(" ، ")}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* 8-Player Active Lineup & Geomantic Codes (Hidden in Mode 14 for Strict Engine Isolation) */}
+                                  {!isTotalElem12Mode && (hpList.length > 0 || apList.length > 0) && (
+                                    <div className="space-y-1.5" dir="ltr">
+                                      {[
+                                        {
+                                          code: g.hc,
+                                          tName: g.h,
+                                          lbl: `${g.h} (${g.hc} • HOME)`,
+                                          list: hpList,
+                                          outs: g.h_out ?? [],
+                                          sum1: g1.h_sum,
+                                          cnt1: g1.h_cnt,
+                                          sum0: h0Val,
+                                          cnt0: h0Cnt,
+                                          sum0011: h0011Val,
+                                          cnt0011: h0011Cnt,
+                                          sumAll: g1.h_all,
+                                          sumGf: hGfVal,
+                                          sumS3: hS3Val,
+                                          is1xxxWin: g1.win === g.h,
+                                          isCold0Win: cold0Win === g.h,
+                                          isAll8Win: all8Win === g.h,
+                                          isGfWin: gfWin === g.h,
+                                          isS3Win: s3Win === g.h,
+                                          cls: "bg-sky-700 text-white",
+                                        },
+                                        {
+                                          code: g.ac,
+                                          tName: g.a,
+                                          lbl: `${g.a} (${g.ac} • AWAY)`,
+                                          list: apList,
+                                          outs: g.a_out ?? [],
+                                          sum1: g1.a_sum,
+                                          cnt1: g1.a_cnt,
+                                          sum0: a0Val,
+                                          cnt0: a0Cnt,
+                                          sum0011: a0011Val,
+                                          cnt0011: a0011Cnt,
+                                          sumAll: g1.a_all,
+                                          sumGf: aGfVal,
+                                          sumS3: aS3Val,
+                                          is1xxxWin: g1.win === g.a,
+                                          isCold0Win: cold0Win === g.a,
+                                          isAll8Win: all8Win === g.a,
+                                          isGfWin: gfWin === g.a,
+                                          isS3Win: s3Win === g.a,
+                                          cls: "bg-indigo-700 text-white",
+                                        },
+                                      ].map((side) => (
+                                        <div key={side.lbl} className="bg-white rounded border border-sky-200 overflow-hidden">
+                                          <div className={`px-2 py-0.5 text-[9px] font-extrabold flex flex-wrap items-center justify-between gap-1 ${side.cls}`}>
+                                            <span>{side.lbl}</span>
+                                            <span className="font-mono">DEG2•DEG3 • FIN • GEO • GF-FIN • Pwr</span>
+                                          </div>
+                                          <div className="divide-y divide-slate-100">
+                                            {side.list.map((pl) => {
+                                              const gfCode = calcGeoFin(pl.ef, pl.gf);
+                                              const is1xxx = gfCode.startsWith("1");
+                                              const is0011 = gfCode === "0011";
+                                              const plGfVal = calcPlayerGfFin(pl.ef, pl.gf, pl.gf_fin);
+                                              return (
+                                                <div
+                                                  key={pl.pid}
+                                                  data-testid={`row-player-${g.n}-${pl.pid}`}
+                                                  className={`px-1.5 py-0.5 flex items-center justify-between gap-1 text-[9px] font-mono tabular-nums ${
+                                                    is1xxx
+                                                      ? "bg-amber-50/90 border-l-2 border-l-amber-500"
+                                                      : is0011
+                                                        ? "bg-cyan-50/80 border-l-2 border-l-cyan-500"
+                                                        : "bg-white"
+                                                  }`}
+                                                >
+                                                  <div className="min-w-0 truncate font-sans font-bold text-slate-900">
+                                                    <span className="inline-block w-5 text-sky-800 font-mono">#{pl.no}</span>{" "}
+                                                    {pl.fn} <span className="text-slate-400 font-normal">({pl.mpg}m)</span>
+                                                  </div>
+                                                  <div className="shrink-0 flex items-center gap-1 text-[8.5px]">
+                                                    <span className="px-1 rounded bg-sky-50 text-sky-900 border border-sky-200">
+                                                      D2:{pl.d2} D3:{pl.d3}
+                                                    </span>
+                                                    <span className="px-1 rounded bg-slate-50 text-slate-700 border border-slate-200">
+                                                      {pl.ef}
+                                                    </span>
+                                                    <span
+                                                      data-testid={`badge-geofin-${g.n}-${pl.pid}`}
+                                                      className={`px-1 rounded tracking-wider ${
+                                                        is1xxx
+                                                          ? "bg-amber-200/95 text-amber-950 border border-amber-500 font-extrabold"
+                                                          : is0011
+                                                            ? "bg-cyan-100 text-cyan-950 border border-cyan-400 font-extrabold"
+                                                            : "bg-sky-50 text-sky-800 border border-sky-200 font-medium"
+                                                      }`}
+                                                    >
+                                                      {gfCode}
+                                                    </span>
+                                                    <span
+                                                      data-testid={`badge-gffin-${g.n}-${pl.pid}`}
+                                                      className={`px-1 rounded font-extrabold min-w-[32px] text-right ${
+                                                        plGfVal < 0
+                                                          ? "bg-teal-100 text-teal-950 border border-teal-400"
+                                                          : "bg-slate-50 text-slate-700 border border-slate-200"
+                                                      }`}
+                                                    >
+                                                      {fmtSigned(plGfVal)}
+                                                    </span>
+                                                    <span className={`px-1 rounded font-extrabold min-w-[34px] text-right ${pl.pwr >= 0 ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-rose-50 text-rose-800 border border-rose-200"}`}>
+                                                      {pl.pwr >= 0 ? `+${pl.pwr}` : pl.pwr}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                          <div
+                                            data-testid={`summary-1xxx-${g.n}-${side.code}`}
+                                            className="px-2 py-1 border-t bg-slate-50/80 border-slate-200 flex flex-wrap items-center justify-between gap-1 text-[8.5px]"
+                                            dir="rtl"
+                                          >
+                                            <span className="font-sans font-extrabold text-slate-900">
+                                              جمع قطب‌ها ({side.code}):
+                                            </span>
+                                            <div className="flex flex-wrap items-center gap-1 font-mono tabular-nums" dir="ltr">
+                                              <span className="px-1 rounded bg-amber-100 text-amber-950 border border-amber-300 font-bold">
+                                                Σ(1xxx)={fmtSigned(side.sum1)} ({side.cnt1})
+                                              </span>
+                                              <span
+                                                data-testid={`pill-cold0-${g.n}-${side.code}`}
+                                                className="px-1 rounded bg-cyan-50 text-cyan-950 border border-cyan-300 font-bold"
+                                              >
+                                                Σ(0xxx)={fmtSigned(side.sum0)} ({side.cnt0})
+                                              </span>
+                                              {side.cnt0011 > 0 && (
+                                                <span
+                                                  data-testid={`pill-0011-${g.n}-${side.code}`}
+                                                  className="px-1 rounded bg-cyan-100 text-cyan-950 border border-cyan-400 font-bold"
+                                                >
+                                                  0011({side.cnt0011})={fmtSigned(side.sum0011)}
+                                                </span>
+                                              )}
+                                              <span className="px-1 rounded bg-indigo-50 text-indigo-950 border border-indigo-200 font-bold">
+                                                Σ(8)={fmtSigned(side.sumAll)}
+                                              </span>
+                                              <span className="px-1 rounded bg-teal-50 text-teal-950 border border-teal-300 font-bold">
+                                                Σ(GF)={fmtSigned(side.sumGf)}
+                                              </span>
+                                              <span
+                                                data-testid={`pill-s3-${g.n}-${side.code}`}
+                                                className="px-1 rounded bg-sky-100 text-sky-950 border border-sky-300 font-bold"
+                                              >
+                                                Σ(3)={fmtSigned(side.sumS3)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          {side.outs.length > 0 && (
+                                            <div className="px-1.5 py-0.5 bg-rose-50 border-t border-rose-200 text-[8.5px] text-rose-900 font-sans" dir="rtl">
+                                              <b>غایب مصدوم/محروم (OUT):</b> {side.outs.join(" ، ")}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Single-Card Kalshi Order & Combo Controls */}
+                                  <div className="rounded-lg p-2 border border-sky-200 bg-white space-y-1.5">
+                                    <div className="flex items-center justify-between gap-1.5">
+                                      <label className="inline-flex items-center gap-1.5 cursor-pointer text-[10.5px] font-extrabold text-slate-900">
+                                        <input
+                                          type="checkbox"
+                                          checked={cardEnabled}
+                                          onChange={(e) =>
+                                            setKalshiCardEnabled((prev) => ({
+                                              ...prev,
+                                              [g.n]: e.target.checked,
+                                            }))
+                                          }
+                                          className="h-3.5 w-3.5 accent-emerald-600"
+                                        />
+                                        <span>ثبت در سبد روزانه Kalshi ({liveAsk}¢)</span>
+                                      </label>
+                                      <span className="text-[9px] font-mono text-slate-500" dir="ltr">
+                                        {kalshiTicker}
+                                      </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-1.5 items-center text-[10px]" dir="ltr">
+                                      <div className="bg-slate-50 rounded border border-slate-200 px-1.5 py-0.5">
+                                        <span className="text-[8.5px] text-slate-500 block">Stake ($)</span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={250}
+                                          step={0.5}
+                                          value={cardStake}
+                                          onChange={(e) =>
+                                            setKalshiCardStake((prev) => ({
+                                              ...prev,
+                                              [g.n]: Math.max(0.5, Number(e.target.value) || 2),
+                                            }))
+                                          }
+                                          className="w-full font-mono font-extrabold text-xs text-slate-900 bg-transparent outline-none"
+                                        />
+                                      </div>
+
+                                      <div className="bg-slate-50 rounded border border-slate-200 px-1.5 py-0.5">
+                                        <span className="text-[8.5px] text-slate-500 block">Limit (¢)</span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={99}
+                                          value={cardLimit}
+                                          onChange={(e) =>
+                                            setKalshiCardLimit((prev) => ({
+                                              ...prev,
+                                              [g.n]: Math.min(99, Math.max(1, Number(e.target.value) || liveAsk)),
+                                            }))
+                                          }
+                                          className="w-full font-mono font-extrabold text-xs text-slate-900 bg-transparent outline-none"
+                                        />
+                                      </div>
+
+                                      <div className="bg-emerald-50/70 rounded border border-emerald-200 px-1.5 py-0.5 text-center">
+                                        <span className="text-[8.5px] text-slate-600 block">{cardContracts} cnt</span>
+                                        <span className="font-mono font-extrabold text-[10px] text-emerald-800">
+                                          +${estNetWin}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <button
+                                        type="button"
+                                        disabled={kalshiBusy}
+                                        data-testid={`btn-kalshi-card-buy-${g.n}`}
+                                        onClick={async () => {
+                                          setKalshiBusy(true);
+                                          try {
+                                            const singleOrder = {
+                                              gameNo: g.n,
+                                              date: g.d,
+                                              homeTeam: g.h,
+                                              awayTeam: g.a,
+                                              winnerTeam: predTeam,
+                                              ticker: kalshiTicker,
+                                              enabled: true,
+                                              stakeUsd: cardStake,
+                                              limitCents: cardLimit,
+                                              contracts: cardContracts,
+                                            };
+                                            const d = await apiRpcJson("/api/kalshi/execute", {
+                                              method: "POST",
+                                              headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({
+                                                date: g.d,
+                                                orders: [singleOrder],
+                                                mode: kalshiHasKey ? "live" : "dry_run",
+                                              }),
+                                            });
+                                            setKalshiExecReport(d);
+                                            const firstRes = d?.results?.[0];
+                                            const okCard = Boolean(d?.ok) && (!firstRes || !String(firstRes.status ?? "").startsWith("ERROR"));
+                                            setKalshiCardFeedback((prev) => ({
+                                              ...prev,
+                                              [g.n]: {
+                                                ok: okCard,
+                                                msg: firstRes?.message ?? d?.error ?? d?.summary?.message ?? (okCard ? "انجام شد ✓" : "خطا در ارسال"),
+                                              },
+                                            }));
+                                            if (kalshiHasKey && okCard) {
+                                              const stD = await apiRpcJson("/api/kalshi/state");
+                                              if (stD?.ledger) setKalshiLedger(stD.ledger);
+                                              const balD = await apiRpcJson("/api/kalshi/balance", { method: "POST" });
+                                              if (balD?.ok && balD.balanceUsd) setKalshiBalance(balD.balanceUsd);
+                                            }
+                                          } catch (err) {
+                                            setKalshiCardFeedback((prev) => ({
+                                              ...prev,
+                                              [g.n]: { ok: false, msg: (err as Error)?.message ?? "خطا در ارتباط با Kalshi" },
+                                            }));
+                                          } finally {
+                                            setKalshiBusy(false);
+                                          }
+                                        }}
+                                        className="py-1 px-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-[10px] shadow-2xs transition-colors"
+                                      >
+                                        {kalshiBusy
+                                          ? "در حال ارسال..."
+                                          : kalshiHasKey
+                                            ? `خرید تکی YES ($${estCost})`
+                                            : `تست خرید تکی ($${estCost})`}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={toggleThisCardCombo}
+                                        className={`py-1 px-2 rounded font-extrabold text-[10px] border transition-colors ${
+                                          isCardInCombo
+                                            ? "bg-indigo-700 hover:bg-indigo-800 text-white border-indigo-900"
+                                            : "bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border-indigo-300"
+                                        }`}
+                                      >
+                                        {isCardInCombo ? `در کمبو (Leg ${inComboIdx + 1}) ✓` : "افزودن به کمبو +"}
+                                      </button>
+                                    </div>
+
+                                    {kalshiCardFeedback[g.n] && (
+                                      <div
+                                        className={`mt-1 px-2 py-1 rounded border text-[10px] font-bold flex items-center justify-between ${
+                                          kalshiCardFeedback[g.n].ok
+                                            ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                                            : "bg-rose-50 border-rose-300 text-rose-900"
+                                        }`}
+                                      >
+                                        <span>{kalshiCardFeedback[g.n].msg}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setKalshiCardFeedback((prev) => {
+                                              const cp = { ...prev };
+                                              delete cp[g.n];
+                                              return cp;
+                                            })
+                                          }
+                                          className="mr-1 opacity-70 hover:opacity-100"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDateFilter(g.d);
+                                          setOpenManualSection(true);
+                                          setManualOpenGames((prev) => ({ ...prev, [g.n]: true }));
+                                          setTimeout(() => {
+                                            document
+                                              .getElementById(`manual-nba-game-row-${g.n}`)
+                                              ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                          }, 80);
+                                        }}
+                                        className="py-1 px-2 rounded bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-200 font-bold text-[10px] transition-colors"
+                                      >
+                                        جدول فیلتر دستی ↓
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setCardFlipDir((prev) => ({ ...prev, [g.n]: !prev[g.n] }))
+                                        }
+                                        className={`py-1 px-2 rounded font-bold text-[10px] border transition-colors ${
+                                          cardFlipDir[g.n]
+                                            ? "bg-amber-500 text-slate-950 border-amber-600"
+                                            : "bg-white hover:bg-slate-100 text-slate-700 border-slate-300"
+                                        }`}
+                                      >
+                                        {cardFlipDir[g.n] ? "بازگشت به جهت سیستم" : "تغییر جهت دستی"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Collapsible Dropdown 1: Pattern Selector Cards & Season/Monthly Accuracy */}
+        <div className="rounded-lg border border-sky-200 bg-sky-50/50 overflow-hidden">
+          <div
+            onClick={() => setOpenStatsSection((v) => !v)}
+            className="px-4 py-2.5 bg-sky-100/80 hover:bg-sky-100 cursor-pointer flex flex-wrap items-center justify-between gap-2 border-b border-sky-200/80 transition-colors"
+          >
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-sky-950">
+              <span>📊 پترن‌های آماری و جدول دقت فصل‌به‌فصل و ماه‌به‌ماه ({activeDef.titleFa})</span>
+              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono text-[11px]">
+                Win Rate: {patternAcc}% ({patternWins}/{patternCompleted.length})
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenStatsSection((v) => !v);
+              }}
+              className="px-3 py-1 rounded border border-sky-300 bg-white hover:bg-sky-50 text-sky-950 text-xs font-bold shadow-sm"
+            >
+              {openStatsSection ? "بستن جدول آمار ▲" : "باز کردن پترن‌ها و جدول آمار ▼"}
+            </button>
+          </div>
+          {openStatsSection && (
+            <div className="p-4 flex flex-col gap-4 bg-white/80">
+        {/* Pattern Selector Cards */}
+        {engineMode === "manual" || engineMode === "twins" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+            {TWIN_PATTERN_DEFS.map((p) => {
+              const sub = games.filter((g) => matchTwin(g, p.key) && Boolean(g.done && g.aw && g.aw !== "PENDING"));
+              const w = sub.filter((g) => (g.sys_win ?? g.fpw ?? g.h) === g.aw).length;
+              const pct = sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "0.00";
+              const pend = games.filter((g) => matchTwin(g, p.key) && !g.done).length;
+              const active = twinPattern === p.key;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => {
+                    setTwinPattern(p.key);
+                    setPage(1);
+                  }}
+                  className={`text-right p-2.5 rounded-lg border transition-all flex flex-col justify-between gap-2 ${
+                    active
+                      ? "bg-emerald-600 text-white border-emerald-700 shadow-md"
+                      : "bg-white hover:bg-emerald-50 text-slate-800 border-emerald-200"
+                  }`}
+                >
+                  <div>
+                    <div className={`text-[10px] font-mono uppercase ${active ? "text-emerald-100" : "text-slate-500"}`}>
+                      {p.titleEn}
+                    </div>
+                    <div className="font-bold text-xs mt-0.5 leading-snug">{p.titleFa}</div>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1 border-t border-current/15">
+                    <span className="text-base font-extrabold font-mono">{pct}%</span>
+                    <span className={`text-[10px] font-mono ${active ? "text-emerald-100" : "text-slate-500"}`}>
+                      {w}/{sub.length} (+{pend})
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : engineMode === "fusion" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+            {FUSION_PATTERN_DEFS.map((p) => {
+              const sub = games.filter((g) => matchFusion(g, p.key) && Boolean(g.done));
+              const w = sub.filter((g) => (((g.f30 ?? 0) >= 0 ? g.h : g.a) === g.aw)).length;
+              const pct = sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "0.00";
+              const pend = games.filter((g) => matchFusion(g, p.key) && !g.done).length;
+              const active = fusionPattern === p.key;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => {
+                    setFusionPattern(p.key);
+                    setPage(1);
+                  }}
+                  className={`text-right p-2.5 rounded-lg border transition-all flex flex-col justify-between gap-2 ${
+                    active
+                      ? "bg-sky-600 text-white border-sky-700 shadow-md"
+                      : "bg-white hover:bg-sky-50 text-slate-800 border-sky-200"
+                  }`}
+                >
+                  <div>
+                    <div className={`text-[10px] font-mono uppercase ${active ? "text-sky-100" : "text-slate-500"}`}>
+                      {p.titleEn}
+                    </div>
+                    <div className="font-bold text-xs mt-0.5 leading-snug">{p.titleFa}</div>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1 border-t border-current/15">
+                    <span className="text-base font-extrabold font-mono">{pct}%</span>
+                    <span className={`text-[10px] font-mono ${active ? "text-sky-100" : "text-slate-500"}`}>
+                      {w}/{sub.length} (+{pend})
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+            {SINGLE_PATTERN_DEFS.map((p) => {
+              const sub = games.filter((g) => matchSingle(g, p.key) && Boolean(g.done));
+              const w = sub.filter((g) => (p.key === "s1_guard" ? g.a === g.aw : p.key === "all" ? g.st === "WIN" : g.h === g.aw)).length;
+              const pct = sub.length > 0 ? ((100 * w) / sub.length).toFixed(2) : "0.00";
+              const pend = games.filter((g) => matchSingle(g, p.key) && !g.done).length;
+              const active = singlePattern === p.key;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => {
+                    setSinglePattern(p.key);
+                    setPage(1);
+                  }}
+                  className={`text-right p-3 rounded-lg border transition-all flex flex-col justify-between gap-2 ${
+                    active
+                      ? "bg-sky-600 text-white border-sky-700 shadow-md"
+                      : "bg-white hover:bg-sky-50 text-slate-800 border-sky-200"
+                  }`}
+                >
+                  <div>
+                    <div className={`text-[11px] font-mono uppercase ${active ? "text-sky-100" : "text-slate-500"}`}>
+                      {p.titleEn}
+                    </div>
+                    <div className="font-bold text-xs mt-0.5 leading-snug">{p.titleFa}</div>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1 border-t border-current/15">
+                    <span className="text-lg font-extrabold font-mono">{pct}%</span>
+                    <span className={`text-[11px] font-mono ${active ? "text-sky-100" : "text-slate-500"}`}>
+                      {w}/{sub.length} (+{pend} آینده)
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Active Pattern Formula Explanation */}
+        <div className="bg-white border border-sky-200 rounded-md p-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-slate-700 leading-relaxed">
+            <span className="font-bold text-sky-900">فرمول پترن انتخاب‌شده ({activeDef.titleFa}): </span>
+            {activeDef.formulaFa}
+          </div>
+          <div className="text-sm font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded">
+            Win Rate: {patternAcc}% ({patternWins} Wins / {patternCompleted.length - patternWins} Losses)
+          </div>
+        </div>
+
+        {/* Season-by-Season & Monthly Summary Tables */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-sky-200 rounded-md overflow-hidden">
+            <div className="bg-sky-100/70 px-3.5 py-2 text-xs font-bold text-sky-950 flex items-center justify-between">
+              <span>عملکرد به تفکیک هر فصل (Season-by-Season Accuracy)</span>
+              <span className="font-mono text-[11px] text-sky-800">{activeDef.titleEn}</span>
+            </div>
+            <table className="w-full text-xs font-mono text-left border-collapse">
+              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                <tr>
+                  <th className="p-2">Season (فصل)</th>
+                  <th className="p-2">Completed</th>
+                  <th className="p-2 text-emerald-700">Wins (برد)</th>
+                  <th className="p-2 text-rose-600">Losses (خطا)</th>
+                  <th className="p-2 text-amber-700">Upcoming</th>
+                  <th className="p-2 font-bold">Win Rate %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seasonStats.map((st) => (
+                  <tr key={st.season} className="border-b border-slate-100 hover:bg-sky-50/40">
+                    <td className="p-2 font-bold text-slate-800">{st.season}</td>
+                    <td className="p-2">{st.total}</td>
+                    <td className="p-2 text-emerald-700 font-semibold">{st.wins}</td>
+                    <td className="p-2 text-rose-600">{st.losses}</td>
+                    <td className="p-2 text-amber-700">{st.pending}</td>
+                    <td className="p-2 font-extrabold text-sky-900">{st.pct}%</td>
+                  </tr>
+                ))}
+                <tr className="bg-sky-50/70 font-bold text-slate-900">
+                  <td className="p-2">مجموع کل (All 3 Seasons)</td>
+                  <td className="p-2">{patternCompleted.length}</td>
+                  <td className="p-2 text-emerald-700">{patternWins}</td>
+                  <td className="p-2 text-rose-600">{patternCompleted.length - patternWins}</td>
+                  <td className="p-2 text-amber-700">{patternGames.length - patternCompleted.length}</td>
+                  <td className="p-2 text-sky-950 text-sm">{patternAcc}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-white border border-sky-200 rounded-md overflow-hidden flex flex-col">
+            <div className="bg-sky-100/70 px-3.5 py-2 text-xs font-bold text-sky-950 flex items-center justify-between gap-2 flex-wrap">
+              <span>روند تجمعی ماه‌به‌ماه ({monthlyCalendarKind === "shamsi" ? "برج‌های خورشیدی شمسی" : "ماه‌های میلادی"})</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMonthlyCalendarKind("shamsi")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                    monthlyCalendarKind === "shamsi" ? "bg-emerald-600 text-white border-emerald-700" : "bg-white text-slate-700 border-sky-300"
+                  }`}
+                >
+                  خورشیدی شمسی
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonthlyCalendarKind("greg")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                    monthlyCalendarKind === "greg" ? "bg-sky-700 text-white border-sky-800" : "bg-white text-slate-700 border-sky-300"
+                  }`}
+                >
+                  میلادی
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMonthlyTable((v) => !v)}
+                  className="text-[11px] text-sky-800 underline ml-1"
+                >
+                  {showMonthlyTable ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+            {showMonthlyTable && (
+              <div className="max-h-48 overflow-y-auto">
+                <table className="w-full text-[11px] font-mono text-left border-collapse">
+                  <thead className="bg-slate-50 text-slate-600 sticky top-0 border-b border-slate-200">
+                    <tr>
+                      <th className="p-1.5 pl-3">Month</th>
+                      <th className="p-1.5">Month W/N</th>
+                      <th className="p-1.5">Month %</th>
+                      <th className="p-1.5">Cumulative W/N</th>
+                      <th className="p-1.5 font-bold">Cumulative %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyRows.map((m) => (
+                      <tr key={m.ym} className="border-b border-slate-100 hover:bg-sky-50/40">
+                        <td className="p-1.5 pl-3 font-semibold">{m.ym}</td>
+                        <td className="p-1.5">{m.mw}/{m.mn}</td>
+                        <td className="p-1.5 text-slate-600">{m.mPct}%</td>
+                        <td className="p-1.5 font-medium">{m.cumW}/{m.cumN}</td>
+                        <td className="p-1.5 font-bold text-emerald-700">{m.cumPct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+            </div>
+          )}
+        </div>
+
+        {/* Daily Slate Quick Selector */}
+        <div className="bg-white p-3 rounded-md border border-sky-200 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-bold text-sky-950 ml-1">دسته‌بندی بازی‌های روزانه (Daily Slate):</span>
+            {DAILY_QUICK_DATES.map((qd) => (
+              <button
+                key={qd.date}
+                type="button"
+                onClick={() => {
+                  setDateFilter(qd.date);
+                  if (qd.date !== "ALL") setDailyCardDate(qd.date);
+                  if (qd.date !== "ALL") {
+                    if (engineMode === "twins" || engineMode === "manual") setTwinPattern("tall");
+                    else if (engineMode === "fusion") setFusionPattern("fall");
+                    else setSinglePattern("all");
+                  }
+                  setPage(1);
+                }}
+                className={`text-xs px-2.5 py-1 rounded border font-mono transition-colors ${
+                  dateFilter === qd.date
+                    ? "bg-sky-600 text-white border-sky-700 font-bold"
+                    : "bg-slate-50 hover:bg-sky-50 text-slate-700 border-slate-200"
+                }`}
+              >
+                {qd.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-[11px] font-medium text-slate-600">تاریخ دلخواه:</label>
+            <input
+              type="date"
+              value={dateFilter === "ALL" ? "" : dateFilter}
+              onChange={(e) => {
+                const v = e.target.value || "ALL";
+                setDateFilter(v);
+                if (v !== "ALL") setDailyCardDate(v);
+                if (v !== "ALL") {
+                  if (engineMode === "twins" || engineMode === "manual") setTwinPattern("tall");
+                  else if (engineMode === "fusion") setFusionPattern("fall");
+                  else setSinglePattern("all");
+                }
+                setPage(1);
+              }}
+              className="h-8 rounded border border-slate-300 px-2 text-xs font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Interactive Filter Controls */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 bg-white p-3 rounded-md border border-sky-200 items-end">
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-600">فصل (Season)</label>
+              <select
+                value={seasonFilter}
+                data-testid="select-nba-season-filter"
+                onChange={(e) => {
+                  const nextS = e.target.value;
+                  setSeasonFilter(nextS);
+                  setDateFilter("ALL");
+                  if (nextS !== "ALL" && monthFilter !== "ALL" && !patternGames.some((g) => g.s === nextS && g.ym === monthFilter)) {
+                    setMonthFilter("ALL");
+                  }
+                  setFilterAutoNote("");
+                  setPage(1);
+                }}
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-mono"
+              >
+                <option value="ALL">All Seasons (همه فصل‌ها)</option>
+                <option value="2024-25">2024-25 (Oct 2024–Jun 2025)</option>
+                <option value="2025-26">2025-26 (Oct 2025–Jun 2026)</option>
+                <option value="2026-27">2026-27 (Sep 2026–Apr 2027)</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-600">ماه (Year-Month)</label>
+              <select
+                value={monthFilter}
+                data-testid="select-nba-month-filter"
+                onChange={(e) => {
+                  const nextYm = e.target.value;
+                  setMonthFilter(nextYm);
+                  setDateFilter("ALL");
+                  if (nextYm !== "ALL") {
+                    const mGames = patternGames.filter((g) => (seasonFilter === "ALL" || g.s === seasonFilter) && g.ym === nextYm);
+                    const doneCnt = mGames.filter((g) => Boolean(g.done)).length;
+                    const pendCnt = mGames.length - doneCnt;
+                    if (doneCnt === 0 && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                      setStatusFilter("ALL");
+                      setFilterAutoNote(`ماه ${nextYm} مربوط به آینده است و هنوز نتیجه‌ای ثبت نشده است (${pendCnt} بازی در انتظار PENDING).`);
+                    } else if (pendCnt === 0 && statusFilter === "PENDING") {
+                      setStatusFilter("ALL");
+                      setFilterAutoNote(`تمام ${doneCnt} بازی ماه ${nextYm} برگزار شده است؛ وضعیت روی همه نتایج قرار گرفت.`);
+                    } else {
+                      setFilterAutoNote("");
+                    }
+                  } else {
+                    setFilterAutoNote("");
+                  }
+                  setPage(1);
+                }}
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-mono"
+              >
+                <option value="ALL">All Months (همه ماه‌ها)</option>
+                {allMonths.map((ym) => {
+                  const mSub = patternGames.filter((g) => (seasonFilter === "ALL" || g.s === seasonFilter) && g.ym === ym);
+                  const mDone = mSub.filter((g) => Boolean(g.done)).length;
+                  const mPend = mSub.length - mDone;
+                  const suffix =
+                    mDone > 0 && mPend > 0
+                      ? ` (${mDone} انجام‌شده • ${mPend} آینده)`
+                      : mDone > 0
+                        ? ` (${mDone} انجام‌شده)`
+                        : ` (آینده • ${mPend} بازی بدون نتیجه)`;
+                  return (
+                    <option key={ym} value={ym}>
+                      {ym}{suffix}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-600">وضعیت نتیجه (Result Status)</label>
+              <select
+                value={statusFilter}
+                data-testid="select-nba-status-filter"
+                onChange={(e) => {
+                  const nextSt = e.target.value;
+                  setStatusFilter(nextSt);
+                  setOpenSummaryTable(true);
+                  let clearedNote = "";
+                  if (nextSt !== "ALL") {
+                    if (dateFilter !== "ALL") {
+                      const hasOnDay = patternGames.some((g) => g.d === dateFilter && getGameStatus(g) === nextSt);
+                      if (!hasOnDay) {
+                        setDateFilter("ALL");
+                        clearedNote = `فیلتر تک‌روز (${dateFilter}) برداشته شد تا نتایج ${nextSt} نمایش داده شوند.`;
+                      }
+                    }
+                    if ((nextSt === "WIN" || nextSt === "LOSS") && monthFilter !== "ALL") {
+                      const hasDoneInMonth = patternGames.some((g) => g.ym === monthFilter && Boolean(g.done));
+                      if (!hasDoneInMonth) {
+                        const prevM = monthFilter;
+                        setMonthFilter("ALL");
+                        clearedNote = `ماه ${prevM} هنوز برگزار نشده است (آینده)؛ نمایش ${nextSt === "WIN" ? "پیش‌بینی‌های درست" : "خطاها"} در کل ماه‌های انجام‌شده فعال شد.`;
+                      }
+                    } else if (nextSt === "PENDING" && monthFilter !== "ALL") {
+                      const hasPendInMonth = patternGames.some((g) => g.ym === monthFilter && !g.done);
+                      if (!hasPendInMonth) {
+                        const prevM = monthFilter;
+                        setMonthFilter("ALL");
+                        clearedNote = `ماه ${prevM} بازی آینده ندارد؛ نمایش بازی‌های آینده (PENDING) در کل ماه‌ها فعال شد.`;
+                      }
+                    }
+                  }
+                  setFilterAutoNote(clearedNote);
+                  setPage(1);
+                }}
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-mono"
+              >
+                <option value="ALL">All Games ({scopeBeforeStatus.length})</option>
+                <option value="WIN">WIN — پیش‌بینی‌های درست ({scopeStatusCounts.WIN})</option>
+                <option value="LOSS">LOSS — خطاها ({scopeStatusCounts.LOSS})</option>
+                <option value="PENDING">PENDING — بازی‌های آینده ({scopeStatusCounts.PENDING})</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-600">جستجوی نام تیم (Search Team)</label>
+              <Input
+                value={teamQuery}
+                onChange={(e) => {
+                  setTeamQuery(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="e.g. Boston, Cleveland, Lakers, Nuggets..."
+                className="h-9 text-xs font-mono bg-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 h-9 px-2 bg-sky-50 rounded border border-sky-200 text-xs font-mono">
+              <span className="truncate">
+                Showing: <b>{filteredGames.length}</b> games
+                {dateFilter !== "ALL" ? ` (${dateFilter})` : ""}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSeasonFilter("ALL");
+                  setMonthFilter("ALL");
+                  setDateFilter("ALL");
+                  setStatusFilter("ALL");
+                  setTeamQuery("");
+                  setFilterAutoNote("");
+                  setPage(1);
+                }}
+                className="text-sky-700 hover:underline text-[11px] shrink-0"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {filterAutoNote && (
+            <div dir="rtl" className="px-3 py-1.5 rounded border border-amber-300 bg-amber-50 text-amber-950 text-xs font-semibold flex items-center justify-between gap-2">
+              <span>{filterAutoNote}</span>
+              <button type="button" onClick={() => setFilterAutoNote("")} className="text-[11px] text-amber-900 underline">
+                بستن
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Collapsible Dropdown 2: GOLD-FORMULA-PRIORITY Manual Filter (DAY) System — LIGHT BLUE THEME */}
+        <div className="rounded-lg border-2 border-sky-300 bg-sky-50/70 text-slate-900 shadow-sm overflow-hidden" dir="rtl">
+          {/* Collapsible Section Header */}
+          <div
+            onClick={() => setOpenManualSection((v) => !v)}
+            className="bg-sky-200/80 hover:bg-sky-200 px-4 py-3 border-b border-sky-300 cursor-pointer flex flex-wrap items-center justify-between gap-3 transition-colors"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-1 rounded bg-sky-700 text-white font-extrabold text-xs shadow-sm">
+                🎛️ فیلتر دستی (DAY) — همزادیاب دقیق ELE-P • ELE-FINAL • ELE-DYN
+              </span>
+              <span className="text-xs text-sky-950 font-mono font-semibold bg-white/90 px-2.5 py-0.5 rounded border border-sky-300">
+                دیتابیس تاریخی: <b className="text-emerald-700">{histGames.length.toLocaleString()}</b> بازی (۲۰۱۰–۲۰۲۶)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenManualSection((v) => !v);
+              }}
+              className="px-3 py-1 rounded border border-sky-400 bg-white hover:bg-sky-50 text-sky-950 text-xs font-extrabold shadow-sm"
+            >
+              {openManualSection ? "بستن فیلتر دستی ▲" : "باز کردن فیلتر دستی (DAY) ▼"}
+            </button>
+          </div>
+
+          {openManualSection && (
+            <div>
+              {/* Top Toolbar Controls (Light Blue Theme) */}
+              <div className="bg-sky-100/80 px-4 py-2.5 border-b border-sky-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Home vs Away Elemental Perspective Toggle */}
+                  <div className="inline-flex rounded-md border border-sky-300 bg-white p-0.5 text-[11px] shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setManualPersp("home")}
+                      className={`px-2.5 py-1 rounded font-bold transition-colors ${
+                        manualPersp === "home"
+                          ? "bg-sky-600 text-white"
+                          : "text-slate-700 hover:bg-sky-50"
+                      }`}
+                    >
+                      🏠 المنت میزبان (HOME ELE-P/FINAL/DYN)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualPersp("away")}
+                      className={`px-2.5 py-1 rounded font-bold transition-colors ${
+                        manualPersp === "away"
+                          ? "bg-indigo-600 text-white"
+                          : "text-slate-700 hover:bg-indigo-50"
+                      }`}
+                    >
+                      ✈️ المنت میهمان (AWAY ELE-P/FINAL/DYN)
+                    </button>
+                  </div>
+
+                <div className="inline-flex rounded-md border border-sky-300 bg-white p-0.5" title="انتخاب نوع شکل رمل در فیلتر دستی NBA">
+                  <button
+                    type="button"
+                    onClick={() => setManualGeoKind("fin")}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-colors ${
+                      manualGeoKind === "fin" ? "bg-emerald-600 text-white" : "text-slate-700 hover:bg-emerald-50"
+                    }`}
+                  >
+                    GEO-FIN (اصلاح‌شده)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualGeoKind("dyn")}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-colors ${
+                      manualGeoKind === "dyn" ? "bg-sky-700 text-white" : "text-slate-700 hover:bg-sky-50"
+                    }`}
+                  >
+                    GEO-DYN (پویا)
+                  </button>
+                </div>
+
+                  {/* Weekday Filter */}
+                  <select
+                    value={manualDayFilter}
+                    onChange={(e) => {
+                      setManualDayFilter(e.target.value);
+                      setPage(1);
+                    }}
+                    className="h-8 rounded-md border border-sky-300 bg-white px-2.5 text-xs text-sky-950 font-mono font-bold shadow-sm"
+                  >
+                    <option value="ALL">همه روزهای هفته (ALL DAYS)</option>
+                    <option value="MONDAY">MONDAY (دوشنبه)</option>
+                    <option value="TUESDAY">TUESDAY (سه‌شنبه)</option>
+                    <option value="WEDNESDAY">WEDNESDAY (چهارشنبه)</option>
+                    <option value="THURSDAY">THURSDAY (پنج‌شنبه)</option>
+                    <option value="FRIDAY">FRIDAY (جمعه)</option>
+                    <option value="SATURDAY">SATURDAY (شنبه)</option>
+                    <option value="SUNDAY">SUNDAY (یکشنبه)</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Batch Smart / Clear on current page */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMap = { ...manualFilters };
+                      const openMap = { ...manualOpenGames };
+                      pageGames.forEach((g, idx) => {
+                        const t12 = (manualPersp === "home" ? g.h_12 : g.a_12) ?? [];
+                        const tGeoFin = (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "";
+                        const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
+                        const tGeo = manualGeoKind === "dyn" ? tGeoDyn : tGeoFin;
+                        const dPool = getDayPoolBefore(g.day, g.d);
+                        const stepRes = computeAutoFilterState(t12, tGeoFin, dPool, manualPersp, false, "fin");
+                        const geoRes = computeAutoFilterState(t12, tGeo, dPool, manualPersp, true, manualGeoKind);
+                        const f30Val = g.f30 ?? g.vm6 ?? 0;
+                        const stepAgrees = (stepRes.hw >= stepRes.aw) === (f30Val >= 0);
+                        const geoAgrees = (geoRes.hw >= geoRes.aw) === (f30Val >= 0);
+                        const pickGeo =
+                          (stepRes.pct < 60 || (stepAgrees && !geoAgrees && stepRes.pct >= 55))
+                            ? false
+                            : !stepAgrees && geoAgrees && geoRes.pct >= 55
+                              ? true
+                              : geoRes.pct > stepRes.pct ||
+                                (geoRes.pct === stepRes.pct && geoRes.mv > stepRes.mv);
+                        const chosen = pickGeo ? geoRes : stepRes;
+                        nextMap[g.n] = {
+                          ...chosen.state,
+                          modeLabel: `هوشمند خودکار (${pickGeo ? "GEO اول" : "گام‌به‌گام"})`,
+                          stepSummary: stepRes.sumStr,
+                          geoSummary: geoRes.sumStr,
+                        };
+                        if (idx < 3) openMap[g.n] = true;
+                      });
+                      setManualFilters(nextMap);
+                      setManualOpenGames(openMap);
+                    }}
+                    className="px-3 py-1.5 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] transition-colors shadow-sm"
+                  >
+                    ⚡ انتخاب هوشمند خودکار برای همه بازی‌های صفحه
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualFilters({});
+                      try {
+                        localStorage.removeItem(MANUAL_STORAGE_KEY);
+                      } catch {}
+                    }}
+                    className="px-3 py-1.5 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 font-bold text-[11px] transition-colors"
+                  >
+                    پاک‌کردن همه فیلترها
+                  </button>
+                </div>
+              </div>
+
+              {/* Column Equivalence Legend (Light Blue) */}
+              <div className="bg-sky-50 px-4 py-2 border-b border-sky-200 text-[11px] text-slate-700 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-sky-950 font-bold">تطابق دقیق ستون‌ها با شیت محاسبات (Sheet3): </span>
+                  <span className="font-mono text-indigo-800 font-semibold mx-1">PRIM 1..4 = ELE-DYN (P+FIN) [FIRE, AIR, WATER, EARTH]</span> •
+                  <span className="font-mono text-teal-800 font-semibold mx-1">FINAL 1..4 = ELE-FINAL [FIRE, AIR, WATER, EARTH]</span> •
+                  <span className="font-mono text-sky-800 font-semibold mx-1">ELE-P 1..4 = ELE-P [FIRE, AIR, WATER, EARTH]</span> •
+                  <span className="font-mono text-amber-800 font-semibold mx-1">GEO-FIG = CODE-DYN</span>
+                </div>
+                <div className="text-sky-900 font-mono font-semibold">
+                  صفحه {safePage} از {totalPages} ({pageGames.length} بازی در این صفحه)
+                </div>
+              </div>
+
+              {histLoading ? (
+                <div className="p-8 text-center text-xs text-sky-800 bg-white flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> در حال بارگذاری ۲۱٬۴۹۸ بازی تاریخی ۲۰۱۰–۲۰۲۶ برای فیلتر دستی...
+                </div>
+              ) : (
+                <div className="divide-y divide-sky-200">
+                  {pageGames.map((g, gIdx) => {
+                    const isOpen = manualOpenGames[g.n] ?? gIdx === 0;
+                    const targetEl12 =
+                      (manualPersp === "home" ? g.h_12 : g.a_12) ?? [
+                        "0 FIRE", "0 AIR", "0 WATER", "0 EARTH",
+                        "0 FIRE", "0 AIR", "0 WATER", "0 EARTH",
+                        "0 FIRE", "0 AIR", "0 WATER", "0 EARTH",
+                      ];
+                    const targetGeoFin =
+                      (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "0000";
+                    const targetGeoDyn =
+                      (manualPersp === "home"
+                        ? g.h_geo_dyn ?? g.h_geo
+                        : g.a_geo_dyn ?? g.a_geo) ?? "0000";
+                    const targetGeoTab =
+                      (manualPersp === "home" ? g.h_geo_tab : g.a_geo_tab) ?? "0101";
+                    const curState: ManualFilterState = manualFilters[g.n] ?? {
+                      cols: {},
+                      geo: "ALL",
+                      geoTab: "ALL",
+                    };
+                    const rowGeoKind: "fin" | "dyn" = curState.geoKind ?? manualGeoKind;
+                    const targetGeo = rowGeoKind === "dyn" ? targetGeoDyn : targetGeoFin;
+
+                    const dayPool = getDayPoolBefore(g.day, g.d);
+                    const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
+                    const getRowGeo = (r: HistGameRow) =>
+                      manualPersp === "home"
+                        ? rowGeoKind === "dyn"
+                          ? r.hGeoDyn ?? r.hGeo
+                          : r.hGeo
+                        : rowGeoKind === "dyn"
+                          ? r.aGeoDyn ?? r.aGeo
+                          : r.aGeo;
+                    const getRowGeoTab = (r: HistGameRow) =>
+                      manualPersp === "home" ? (r.hGeoTab ?? "") : (r.aGeoTab ?? "");
+
+                    const filteredPool = dayPool.filter((r) => {
+                      const el = getRowEl12(r);
+                      for (let c = 0; c < 12; c++) {
+                        const sel = curState.cols[c];
+                        if (sel && sel !== "ALL" && el[c] !== sel) return false;
+                      }
+                      if (curState.geo && curState.geo !== "ALL" && getRowGeo(r) !== curState.geo) {
+                        return false;
+                      }
+                      if (curState.geoTab && curState.geoTab !== "ALL" && getRowGeoTab(r) !== curState.geoTab) {
+                        return false;
+                      }
+                      return true;
+                    });
+
+                    const liveIdx = computePoolNumIndex(filteredPool);
+                    const ch3Open =
+                      isOpen || manualPersp === "away" || !g.idx3
+                        ? computeThreeChannelIndex(targetEl12, targetGeoFin, targetGeoDyn, dayPool, manualPersp, targetGeoTab)
+                        : null;
+                    const ch3Vh = ch3Open ? ch3Open.votesHome : g.idx3?.vh ?? 0;
+                    const ch3Va = ch3Open ? ch3Open.votesAway : g.idx3?.va ?? 0;
+                    const ch3MinD = ch3Open ? ch3Open.minDelta : g.idx3?.minD ?? 0;
+
+                    let nextBestCol: number | null = null;
+                    let nextBestCnt = -1;
+                    if (isOpen && filteredPool.length > 7) {
+                      for (let c = 0; c < 12; c++) {
+                        if (curState.cols[c] && curState.cols[c] !== "ALL") continue;
+                        const tVal = targetEl12[c];
+                        if (!tVal) continue;
+                        const cnt = filteredPool.filter((r) => getRowEl12(r)[c] === tVal).length;
+                        if (cnt >= 5 && cnt < filteredPool.length && cnt > nextBestCnt) {
+                          nextBestCnt = cnt;
+                          nextBestCol = c;
+                        }
+                      }
+                    }
+
+                    const homeWins = filteredPool.filter((r) => r.mg > 0);
+                    const awayWins = filteredPool.filter((r) => r.mg < 0);
+                    const hw = homeWins.length;
+                    const aw = awayWins.length;
+                    const avgHome =
+                      hw > 0
+                        ? (homeWins.reduce((acc, r) => acc + r.mg, 0) / hw).toFixed(1)
+                        : "0.0";
+                    const avgAway =
+                      aw > 0
+                        ? (awayWins.reduce((acc, r) => acc + Math.abs(r.mg), 0) / aw).toFixed(1)
+                        : "0.0";
+                    const totVotes = Math.max(1, hw + aw);
+                    const majPct = ((Math.max(hw, aw) / totVotes) * 100).toFixed(1);
+                    const majTeam = hw > aw ? g.h : aw > hw ? g.a : "TIE";
+
+                    const updateGameFilter = (updater: (prev: ManualFilterState) => ManualFilterState) => {
+                      setManualFilters((prev) => ({
+                        ...prev,
+                        [g.n]: updater(prev[g.n] ?? { cols: {}, geo: "ALL" }),
+                      }));
+                    };
+
+                    const showAll = Boolean(manualShowAllRows[g.n]);
+                    const visibleHistRows = showAll ? filteredPool : filteredPool.slice(0, 60);
+
+                    return (
+                      <div key={g.n} id={`manual-nba-game-row-${g.n}`} className="bg-white">
+                        {/* Accordion Header Bar (Light Pale-Blue Style) */}
+                        <div
+                          onClick={() =>
+                            setManualOpenGames((prev) => ({ ...prev, [g.n]: !isOpen }))
+                          }
+                          className="px-4 py-2.5 bg-sky-100/75 hover:bg-sky-200/60 cursor-pointer flex flex-wrap items-center justify-between gap-2 border-r-4 border-sky-600 transition-colors"
+                        >
+                          <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs">
+                            <span className="font-extrabold text-sky-950 text-sm">
+                              &gt;&gt;&gt; {g.day} {g.d} &lt;&lt;&lt;
+                            </span>
+                            <span className="text-slate-500 font-bold">#{g.n}</span>
+                            <span className="font-bold text-blue-800">{g.h}</span>
+                            <span className="text-slate-400">vs</span>
+                            <span className="font-bold text-purple-800">{g.a}</span>
+                            <span className="px-2 py-0.5 rounded bg-white text-slate-700 border border-sky-200 text-[11px]">
+                              {getGameStatus(g) === "PENDING" ? "UPCOMING" : `${g.sc}`}
+                            </span>
+                            {getGameStatus(g) === "WIN" ? (
+                              <span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] font-bold">
+                                WIN ✓ ({getGamePredWinner(g)})
+                              </span>
+                            ) : getGameStatus(g) === "LOSS" ? (
+                              <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[11px] font-bold">
+                                LOSS ✗ (Pred: {getGamePredWinner(g)})
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-bold">
+                                PENDING
+                              </span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                activeVip3Of(g)
+                                  ? "bg-amber-500 text-slate-950"
+                                  : activeF1WtpOf(g)
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-slate-200 text-slate-700"
+                              }`}
+                            >
+                              {activeVip3Of(g) ? "ویژه FIRE / VIP ✓" : activeF1WtpOf(g) ? "تایید سیستم جدید ✓" : "خارج از سیگنال"}
+                            </span>
+                            {(() => {
+                              const rw = activeWtpOf(g);
+                              if (!rw?.mel) return null;
+                              return (
+                                <span
+                                  className={`px-2 py-0.5 rounded border font-mono text-[10.5px] font-bold ${
+                                    rw.mel === "FIRE"
+                                      ? "bg-amber-50 text-amber-950 border-amber-300"
+                                      : rw.mel === "AIR"
+                                        ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                                        : rw.mel === "WATER"
+                                          ? "bg-sky-50 text-sky-900 border-sky-300"
+                                          : "bg-rose-50 text-rose-900 border-rose-300"
+                                  }`}
+                                  dir="ltr"
+                                  title={`${oddsFreqMode === "daily" ? "Daily" : "Weekly"} (${rw.mon}) • Log5 Home: ${rw.l5h}% | Fair Odds H ${rw.hodds}x / A ${rw.aodds}x`}
+                                >
+                                  Log5 {oddsFreqMode === "daily" ? "DAY" : "MON"}: {rw.mel} ({rw.hodds}x / {rw.aodds}x)
+                                </span>
+                              );
+                            })()}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 font-mono text-xs" dir="ltr">
+                            <span className="bg-white px-2 py-0.5 rounded border border-sky-200">
+                              <b className="text-emerald-700">
+                                HOME {hw} (+{avgHome})
+                              </b>
+                              <span className="text-slate-400 mx-1">/</span>
+                              <b className="text-rose-700">
+                                AWAY {aw} (-{avgAway})
+                              </b>
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded border text-[11px] font-bold ${
+                                liveIdx.delta > 0
+                                  ? "bg-emerald-50 text-emerald-950 border-emerald-300"
+                                  : liveIdx.delta < 0
+                                    ? "bg-rose-50 text-rose-950 border-rose-300"
+                                    : "bg-slate-50 text-slate-700 border-slate-300"
+                              }`}
+                              title={`H: ${liveIdx.formulaH} = +${liveIdx.idxH} | A: ${liveIdx.formulaA} = -${liveIdx.idxA} | S=${liveIdx.scoreH}:${liveIdx.scoreA}`}
+                            >
+                              Idx: +{liveIdx.idxH} / -{liveIdx.idxA} (Δ {liveIdx.delta > 0 ? `+${liveIdx.delta}` : liveIdx.delta})
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded font-extrabold text-[11px] ${
+                                ch3Vh === 4
+                                  ? "bg-emerald-600 text-white"
+                                  : ch3Vh > ch3Va
+                                    ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                                    : ch3Va === 4
+                                      ? "bg-rose-600 text-white"
+                                      : ch3Va > ch3Vh
+                                        ? "bg-rose-100 text-rose-900 border border-rose-300"
+                                        : "bg-slate-100 text-slate-700 border border-slate-300"
+                              }`}
+                              title={`شکل رملی ۴ خطی روزانه جدول: ${targetGeoTab} (${decodeGeoTabFa(targetGeoTab)})`}
+                            >
+                              4Ch Δ+S: {ch3Vh}-{ch3Va} {ch3Vh > ch3Va ? "H" : ch3Va > ch3Vh ? "A" : "="} • TAB:{targetGeoTab}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                                hw > aw
+                                  ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                                  : aw > hw
+                                    ? "bg-rose-100 text-rose-900 border border-rose-300"
+                                    : "bg-slate-100 text-slate-700 border border-slate-300"
+                              }`}
+                            >
+                              {majTeam} ({majPct}%)
+                            </span>
+                            <span className="text-sky-950 font-extrabold bg-amber-100 border border-amber-300 px-2 py-0.5 rounded">
+                              {filteredPool.length} / {dayPool.length} ردیف
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-white border border-sky-300 text-sky-900 font-bold text-[11px]">
+                              {isOpen ? "بستن ▲" : "باز کردن ▼"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Expanded Manual Filter Body (Light Pale-Blue & Crisp White) */}
+                        {isOpen && (
+                          <div className="p-3.5 bg-sky-50/40 space-y-3 border-t border-sky-200">
+                            {/* Action Buttons Bar (Exact GOLD-FORMULA-PRIORITY Controls + 3 Independent Channels) */}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {/* 1A. Auto GEO-FIN First */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeoFin,
+                                    dayPool,
+                                    manualPersp,
+                                    true,
+                                    "fin"
+                                  );
+                                  setManualGeoKind("fin");
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: res.state,
+                                  }));
+                                }}
+                                className="px-2.5 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                ۲. انتخاب خودکار (GEO-FIN اول)
+                              </button>
+
+                              {/* 1B. Auto GEO-DYN First (Independent Channel 3) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeoDyn,
+                                    dayPool,
+                                    manualPersp,
+                                    true,
+                                    "dyn"
+                                  );
+                                  setManualGeoKind("dyn");
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: res.state,
+                                  }));
+                                }}
+                                className="px-2.5 py-1.5 rounded bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                ۳. انتخاب خودکار (GEO-DYN اول)
+                              </button>
+
+                              {/* 1C. Auto GEO-TAB First (Independent Channel 4: Daily 4-Line Standings Figure) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeoTab,
+                                    dayPool,
+                                    manualPersp,
+                                    true,
+                                    "tab"
+                                  );
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: res.state,
+                                  }));
+                                }}
+                                className="px-2.5 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] transition-colors shadow-sm"
+                                title={decodeGeoTabFa(targetGeoTab)}
+                              >
+                                ۴. انتخاب خودکار (GEO-TAB جدول اول: {targetGeoTab})
+                              </button>
+
+                              {/* 2. Target PRIM (ELE-DYN) */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGameFilter((prev) => ({
+                                    ...prev,
+                                    cols: {
+                                      ...prev.cols,
+                                      0: targetEl12[0],
+                                      1: targetEl12[1],
+                                      2: targetEl12[2],
+                                      3: targetEl12[3],
+                                    },
+                                    modeLabel: "مقادیر PRIM هدف (ELE-DYN)",
+                                  }))
+                                }
+                                className="px-2.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                مقادیر PRIM هدف (ELE-DYN)
+                              </button>
+
+                              {/* 3. Target FINAL (ELE-FINAL) */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGameFilter((prev) => ({
+                                    ...prev,
+                                    cols: {
+                                      ...prev.cols,
+                                      4: targetEl12[4],
+                                      5: targetEl12[5],
+                                      6: targetEl12[6],
+                                      7: targetEl12[7],
+                                    },
+                                    modeLabel: "مقادیر FINAL هدف (ELE-FINAL)",
+                                  }))
+                                }
+                                className="px-2.5 py-1.5 rounded bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                مقادیر FINAL هدف (ELE-FINAL)
+                              </button>
+
+                              {/* 4. Target ELE-P */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGameFilter((prev) => ({
+                                    ...prev,
+                                    cols: {
+                                      ...prev.cols,
+                                      8: targetEl12[8],
+                                      9: targetEl12[9],
+                                      10: targetEl12[10],
+                                      11: targetEl12[11],
+                                    },
+                                    modeLabel: "مقادیر ELE-P هدف",
+                                  }))
+                                }
+                                className="px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                مقادیر ELE-P هدف
+                              </button>
+
+                              {/* 5. Pink Next Best Frequency Button */}
+                              {nextBestCol !== null && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const colKey = MANUAL_COL_META[nextBestCol!].key;
+                                    const tVal = targetEl12[nextBestCol!];
+                                    updateGameFilter((prev) => ({
+                                      ...prev,
+                                      cols: { ...prev.cols, [nextBestCol!]: tVal },
+                                      modeLabel: "گام‌به‌گام دستی",
+                                      pathLog: [
+                                        ...(prev.pathLog ?? []),
+                                        `${colKey}=${tVal} (${nextBestCnt})`,
+                                      ],
+                                    }));
+                                  }}
+                                  className="px-3 py-1.5 rounded bg-pink-600 hover:bg-pink-700 text-white font-extrabold text-[11px] transition-colors shadow-sm"
+                                >
+                                  انتخاب بعدی: {MANUAL_COL_META[nextBestCol].key} ({targetEl12[nextBestCol]}) — تعداد: {nextBestCnt}
+                                </button>
+                              )}
+
+                              {/* 6. Green Full Step-by-Step Highest Frequency (Independent Channel 1) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeoFin,
+                                    dayPool,
+                                    manualPersp,
+                                    false,
+                                    "fin"
+                                  );
+                                  setManualGeoKind("fin");
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: res.state,
+                                  }));
+                                }}
+                                className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] transition-colors shadow-sm"
+                              >
+                                ۱. فیلتر کامل بیشترین تکرار (گام‌به‌گام STEP)
+                              </button>
+
+                              {/* 7. Purple Smart Auto-Select (Best of GEO & STEP) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const stepRes = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeoFin,
+                                    dayPool,
+                                    manualPersp,
+                                    false,
+                                    "fin"
+                                  );
+                                  const geoRes = computeAutoFilterState(
+                                    targetEl12,
+                                    targetGeo,
+                                    dayPool,
+                                    manualPersp,
+                                    true,
+                                    rowGeoKind
+                                  );
+                                  const f30Val = g.f30 ?? g.vm6 ?? 0;
+                                  const stepAgrees = (stepRes.hw >= stepRes.aw) === (f30Val >= 0);
+                                  const geoAgrees = (geoRes.hw >= geoRes.aw) === (f30Val >= 0);
+                                  const pickGeo =
+                                    (stepRes.pct < 60 || (stepAgrees && !geoAgrees && stepRes.pct >= 55))
+                                      ? false
+                                      : !stepAgrees && geoAgrees && geoRes.pct >= 55
+                                        ? true
+                                        : geoRes.pct > stepRes.pct ||
+                                          (geoRes.pct === stepRes.pct && geoRes.mv > stepRes.mv);
+                                  const chosen = pickGeo ? geoRes : stepRes;
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: {
+                                      ...chosen.state,
+                                      modeLabel: `هوشمند خودکار (${pickGeo ? "GEO اول" : "گام‌به‌گام"})`,
+                                      stepSummary: stepRes.sumStr,
+                                      geoSummary: geoRes.sumStr,
+                                    },
+                                  }));
+                                }}
+                                className="px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-[11px] transition-colors shadow-sm"
+                              >
+                                ⚡ انتخاب هوشمند خودکار (بهترینِ GEO و گام‌به‌گام)
+                              </button>
+
+                              {/* 8. Clear Filters */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setManualFilters((prev) => ({
+                                    ...prev,
+                                    [g.n]: { cols: {}, geo: "ALL", geoTab: "ALL" },
+                                  }))
+                                }
+                                className="px-2.5 py-1.5 rounded bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-bold text-[11px] transition-colors"
+                              >
+                                پاک‌کردن فیلترها
+                              </button>
+
+                              {/* 9. Copy for Excel */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const headers = [
+                                    "#", "DAY", "DATE", "HOME", "AWAY", "SCORE",
+                                    ...MANUAL_COL_META.map((m) => m.key),
+                                    "GEO-FIG", "GEO-TAB", "MARGIN",
+                                  ];
+                                  const tRow = [
+                                    "TARGET", g.day, g.d, g.h, g.a, g.sc,
+                                    ...targetEl12,
+                                    targetGeo,
+                                    targetGeoTab,
+                                    g.st === "PENDING" ? `FUSION:${g.f30 ?? 0}` : g.aw,
+                                  ];
+                                  const hRows = filteredPool.map((r, i) => [
+                                    String(i + 1),
+                                    r.day,
+                                    r.d,
+                                    r.h,
+                                    r.a,
+                                    `${r.hp}-${r.ap}`,
+                                    ...getRowEl12(r),
+                                    getRowGeo(r),
+                                    getRowGeoTab(r),
+                                    r.mg > 0 ? `+${r.mg}` : String(r.mg),
+                                  ]);
+                                  const tsv = [headers, tRow, ...hRows]
+                                    .map((row) => row.join("\t"))
+                                    .join("\n");
+                                  navigator.clipboard?.writeText(tsv);
+                                  setCopiedGame(g.n);
+                                  setTimeout(() => setCopiedGame(null), 2000);
+                                }}
+                                className="px-2.5 py-1.5 rounded bg-white hover:bg-sky-50 text-sky-950 border border-sky-300 font-bold text-[11px] transition-colors shadow-sm"
+                              >
+                                {copiedGame === g.n ? "کپی شد! ✓" : "کپی برای Excel"}
+                              </button>
+                            </div>
+
+                            {/* 3-Channel Independent Numerical Index Header Strip (Directly Above 13-Dropdown Table) */}
+                            {ch3Open && (
+                              <div
+                                className="rounded-lg border border-sky-300 bg-white p-2.5 shadow-sm space-y-2"
+                                data-testid={`manual-idx3-header-${g.n}`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 pb-1.5">
+                                  <div className="text-xs font-extrabold text-sky-950">
+                                    سرستون شاخص عددی تقویت‌شده (Δ+S) در ۴ کانال مستقل (هم‌جهتی Δ با مجموع S + کانال ۴ شکل رملی ۴ خطی روزانه جدول GEO-TAB • کلیک روی هر کانال آن را بارگذاری می‌کند)
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+                                    <span
+                                      className={`px-2.5 py-0.5 rounded font-extrabold ${
+                                        ch3Open.votesHome === 4
+                                          ? "bg-emerald-600 text-white"
+                                          : ch3Open.votesHome > ch3Open.votesAway
+                                            ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                                            : ch3Open.votesAway === 4
+                                              ? "bg-rose-600 text-white"
+                                              : ch3Open.votesAway > ch3Open.votesHome
+                                                ? "bg-rose-100 text-rose-900 border border-rose-300"
+                                                : "bg-slate-100 text-slate-700 border border-slate-300"
+                                      }`}
+                                    >
+                                      رأی ۴ کانال مستقل (Δ+S): {ch3Open.votesHome} به {ch3Open.votesAway}{" "}
+                                      {ch3Open.votesHome > ch3Open.votesAway
+                                        ? `به نفع میزبان (${g.h})`
+                                        : ch3Open.votesAway > ch3Open.votesHome
+                                          ? `به نفع میهمان (${g.a})`
+                                          : "مساوی"}
+                                      {ch3Open.votesHome === 4 && (
+                                        <bdi dir="ltr" className="inline-block mr-1">
+                                          (Δmin=+{ch3Open.minDelta})
+                                        </bdi>
+                                      )}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-300 font-bold" dir="ltr">
+                                      Active Pool ({filteredPool.length}r): H +{liveIdx.idxH} ({liveIdx.formulaH}) | A -{liveIdx.idxA} ({liveIdx.formulaA}) ➔ Δ={liveIdx.delta > 0 ? `+${liveIdx.delta}` : liveIdx.delta} • S={liveIdx.scoreH}:{liveIdx.scoreA} (Δ+S={liveIdx.effDelta > 0 ? `+${liveIdx.effDelta}` : liveIdx.effDelta})
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 font-mono text-[11px]">
+                                  {[
+                                    {
+                                      key: "st",
+                                      titleFa: "۱. گام‌به‌گام (STEP مستقل)",
+                                      res: ch3Open.step,
+                                      idx: ch3Open.idxSt,
+                                      gKind: "fin" as const,
+                                    },
+                                    {
+                                      key: "gf",
+                                      titleFa: "۲. اول شکل رمل اصلاح‌شده (GEO-FIN)",
+                                      res: ch3Open.geoFin,
+                                      idx: ch3Open.idxGf,
+                                      gKind: "fin" as const,
+                                    },
+                                    {
+                                      key: "gd",
+                                      titleFa: "۳. اول شکل رمل پویا (GEO-DYN)",
+                                      res: ch3Open.geoDyn,
+                                      idx: ch3Open.idxGd,
+                                      gKind: "dyn" as const,
+                                    },
+                                    {
+                                      key: "gt",
+                                      titleFa: `۴. اول شکل رمل جدول روزانه (GEO-TAB ${targetGeoTab})`,
+                                      res: ch3Open.geoTab,
+                                      idx: ch3Open.idxGt,
+                                      gKind: "fin" as const,
+                                    },
+                                  ].map((ch) => (
+                                    <button
+                                      key={ch.key}
+                                      type="button"
+                                      onClick={() => {
+                                        setManualGeoKind(ch.gKind);
+                                        setManualFilters((prev) => ({
+                                          ...prev,
+                                          [g.n]: ch.res.state,
+                                        }));
+                                      }}
+                                      className={`text-right rounded-lg p-2 border transition-all hover:shadow ${
+                                        ch.idx.effDelta > 0
+                                          ? "bg-emerald-50/75 border-emerald-300 hover:bg-emerald-100/70"
+                                          : ch.idx.effDelta < 0
+                                            ? "bg-rose-50/75 border-rose-300 hover:bg-rose-100/70"
+                                            : "bg-slate-50 border-slate-200 hover:bg-sky-50"
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-1 mb-1">
+                                        <span className="font-sans font-extrabold text-sky-950 text-[10.5px]">
+                                          {ch.titleFa}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 rounded bg-white border border-sky-200 text-[10px] font-bold text-slate-700 whitespace-nowrap" dir="ltr">
+                                          {ch.res.unslicedPool.length}r • {ch.idx.hw}H-{ch.idx.aw}A
+                                          {ch.res.isNatural57 ? " (5-7✓)" : ""}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-1 text-[10px]" dir="ltr">
+                                        <span className="text-emerald-800 font-bold">
+                                          H: {ch.idx.formulaH} = <b>+{ch.idx.idxH}</b>
+                                        </span>
+                                        <span className="text-rose-800 font-bold">
+                                          A: {ch.idx.formulaA} = <b>-{ch.idx.idxA}</b>
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-1 mt-1 pt-1 border-t border-black/5 text-[10px]" dir="ltr">
+                                        <span className="font-extrabold text-slate-800">
+                                          Δ={ch.idx.delta > 0 ? `+${ch.idx.delta}` : ch.idx.delta} • S={ch.idx.scoreH}:{ch.idx.scoreA}
+                                        </span>
+                                        <span
+                                          className={`font-sans font-extrabold px-1.5 py-0.5 rounded ${
+                                            ch.idx.effDelta > 0
+                                              ? "bg-emerald-600 text-white"
+                                              : ch.idx.effDelta < 0
+                                                ? "bg-rose-600 text-white"
+                                                : "bg-slate-300 text-slate-800"
+                                          }`}
+                                        >
+                                          {ch.idx.effDelta > 0 ? "برد Δ+S میزبان" : ch.idx.effDelta < 0 ? "برد Δ+S میهمان" : "تساوی/خنثی"}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Active Filter Path & STEP vs GEO Comparison Banner (Light Blue) */}
+                            {(curState.pathLog?.length || curState.stepSummary) && (
+                              <div className="px-3 py-2 rounded bg-sky-100/80 border border-sky-300 text-[11px] font-mono flex flex-wrap items-center justify-between gap-2 text-slate-900">
+                                <div>
+                                  <span className="text-sky-950 font-extrabold">
+                                    {curState.modeLabel ?? "مسیر فیلتر"}:{" "}
+                                  </span>
+                                  <span className="text-emerald-800 font-bold" dir="ltr">
+                                    {curState.pathLog && curState.pathLog.length > 0
+                                      ? curState.pathLog.join(" ➔ ")
+                                      : "بدون فیلتر (همه بازی‌های روز)"}
+                                  </span>
+                                </div>
+                                {curState.stepSummary && curState.geoSummary && (
+                                  <div className="flex items-center gap-3 text-xs">
+                                    <span className="text-emerald-800 bg-white px-2 py-0.5 rounded border border-emerald-300">
+                                      گام‌به‌گام (STEP): <b>{curState.stepSummary}</b>
+                                    </span>
+                                    <span className="text-sky-900 bg-white px-2 py-0.5 rounded border border-sky-300">
+                                      GEO اول: <b>{curState.geoSummary}</b>
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* 13-Dropdown Filter & Results Table (Light Pale-Blue Theme) */}
+                            <div className="overflow-x-auto border border-sky-300 rounded-md bg-white shadow-sm" dir="ltr">
+                              <table className="w-full text-[11px] font-mono text-center border-collapse">
+                                <thead>
+                                  {/* Group Header Row */}
+                                  <tr className="bg-sky-100 text-sky-950 border-b border-sky-300">
+                                    <th colSpan={5} className="p-1.5 text-left pl-3 text-sky-950 font-extrabold">
+                                      MATCHUP INFO ({manualPersp === "home" ? "HOME ELEMENTAL VIEW" : "AWAY ELEMENTAL VIEW"})
+                                    </th>
+                                    <th colSpan={4} className="p-1.5 bg-indigo-100/90 text-indigo-950 border-x border-sky-300 font-extrabold">
+                                      PRIM 1..4 ≡ ELE-DYN (P+FIN) [Sheet3 P:S]
+                                    </th>
+                                    <th colSpan={4} className="p-1.5 bg-teal-100/90 text-teal-950 border-x border-sky-300 font-extrabold">
+                                      FINAL 1..4 ≡ ELE-FINAL [Sheet3 K:N]
+                                    </th>
+                                    <th colSpan={4} className="p-1.5 bg-sky-200/80 text-sky-950 border-x border-sky-300 font-extrabold">
+                                      ELE-P 1..4 ≡ ELE-P [Sheet3 F:I]
+                                    </th>
+                                    <th className="p-1.5 bg-amber-100/90 text-amber-950 border-x border-sky-300 font-extrabold">
+                                      CODE-DYN
+                                    </th>
+                                    <th className="p-1.5 bg-orange-100/90 text-orange-950 border-x border-sky-300 font-extrabold" title="شکل رملی ۴ خطی روزانه جایگاه دو تیم در جدول (تا شب قبل)">
+                                      GEO-TAB
+                                    </th>
+                                    <th className="p-1.5 text-emerald-900 font-extrabold">RESULT</th>
+                                  </tr>
+
+                                  {/* Column Names + Interactive Dropdowns Row */}
+                                  <tr className="bg-sky-50 text-slate-800 border-b border-sky-300 align-bottom">
+                                    <th className="p-1.5">#</th>
+                                    <th className="p-1.5">DAY</th>
+                                    <th className="p-1.5">DATE</th>
+                                    <th className="p-1.5">HOME vs AWAY</th>
+                                    <th className="p-1.5">SCORE</th>
+
+                                    {MANUAL_COL_META.map((col) => {
+                                      const cIdx = col.idx;
+                                      const selVal = curState.cols[cIdx] ?? "ALL";
+                                      const tVal = targetEl12[cIdx] ?? "";
+                                      const isNext = nextBestCol === cIdx;
+
+                                      const poolForCol = dayPool.filter((r) => {
+                                        const el = getRowEl12(r);
+                                        for (let k = 0; k < 12; k++) {
+                                          if (k === cIdx) continue;
+                                          const s = curState.cols[k];
+                                          if (s && s !== "ALL" && el[k] !== s) return false;
+                                        }
+                                        if (curState.geo && curState.geo !== "ALL" && getRowGeo(r) !== curState.geo) {
+                                          return false;
+                                        }
+                                        if (curState.geoTab && curState.geoTab !== "ALL" && getRowGeoTab(r) !== curState.geoTab) {
+                                          return false;
+                                        }
+                                        return true;
+                                      });
+
+                                      const counts: Record<string, number> = {};
+                                      poolForCol.forEach((r) => {
+                                        const v = getRowEl12(r)[cIdx];
+                                        if (v) counts[v] = (counts[v] ?? 0) + 1;
+                                      });
+                                      if (tVal && !(tVal in counts)) counts[tVal] = 0;
+
+                                      const options = Object.keys(counts).sort((a, b) => {
+                                        const na = parseInt(a.split(" ")[0] || "0", 10);
+                                        const nb = parseInt(b.split(" ")[0] || "0", 10);
+                                        return na - nb;
+                                      });
+
+                                      return (
+                                        <th
+                                          key={col.key}
+                                          className={`p-1 border-x border-sky-200 min-w-[92px] ${
+                                            selVal !== "ALL"
+                                              ? "bg-sky-200/80"
+                                              : isNext
+                                                ? "bg-pink-100/80"
+                                                : ""
+                                          }`}
+                                        >
+                                          {isNext && (
+                                            <div className="text-[9px] font-extrabold text-pink-700 mb-0.5 whitespace-nowrap">
+                                              ← انتخاب بعدی ({nextBestCnt})
+                                            </div>
+                                          )}
+                                          <div className="text-[10px] font-extrabold text-sky-950">
+                                            {col.key}
+                                          </div>
+                                          <div className="text-[9px] text-slate-600 mb-1">
+                                            {col.sub}
+                                          </div>
+                                          <select
+                                            value={selVal}
+                                            onChange={(e) => {
+                                              const v = e.target.value;
+                                              updateGameFilter((prev) => ({
+                                                ...prev,
+                                                cols: { ...prev.cols, [cIdx]: v },
+                                                modeLabel: "فیلتر دستی کاربر",
+                                              }));
+                                            }}
+                                            className={`w-full h-6 rounded px-1 text-[10px] font-mono border ${
+                                              selVal !== "ALL"
+                                                ? "bg-sky-600 text-white font-extrabold border-sky-700"
+                                                : "bg-white text-slate-900 border-sky-300"
+                                            }`}
+                                          >
+                                            <option value="ALL">همه ({poolForCol.length})</option>
+                                            {options.map((opt) => (
+                                              <option key={opt} value={opt}>
+                                                {opt === tVal ? "★ " : ""}
+                                                {opt} ({counts[opt]})
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </th>
+                                      );
+                                    })}
+
+                                    {/* 13th Dropdown: GEO-FIG (CODE-DYN) */}
+                                    {(() => {
+                                      const selGeo = curState.geo ?? "ALL";
+                                      const poolForGeo = dayPool.filter((r) => {
+                                        const el = getRowEl12(r);
+                                        for (let k = 0; k < 12; k++) {
+                                          const s = curState.cols[k];
+                                          if (s && s !== "ALL" && el[k] !== s) return false;
+                                        }
+                                        if (curState.geoTab && curState.geoTab !== "ALL" && getRowGeoTab(r) !== curState.geoTab) {
+                                          return false;
+                                        }
+                                        return true;
+                                      });
+                                      const geoCounts: Record<string, number> = {};
+                                      poolForGeo.forEach((r) => {
+                                        const gv = getRowGeo(r);
+                                        if (gv) geoCounts[gv] = (geoCounts[gv] ?? 0) + 1;
+                                      });
+                                      if (targetGeo && !(targetGeo in geoCounts)) geoCounts[targetGeo] = 0;
+                                      const geoOpts = Object.keys(geoCounts).sort();
+
+                                      return (
+                                        <th
+                                          className={`p-1 border-x border-sky-200 min-w-[86px] ${
+                                            selGeo !== "ALL" ? "bg-sky-200/80" : ""
+                                          }`}
+                                        >
+                                          <div className="text-[10px] font-extrabold text-amber-900">
+                                            GEO-FIG
+                                          </div>
+                                          <div className="text-[9px] text-slate-600 mb-1">
+                                            CODE-DYN
+                                          </div>
+                                          <select
+                                            value={selGeo}
+                                            onChange={(e) => {
+                                              const v = e.target.value;
+                                              updateGameFilter((prev) => ({
+                                                ...prev,
+                                                geo: v,
+                                                modeLabel: "فیلتر دستی کاربر",
+                                              }));
+                                            }}
+                                            className={`w-full h-6 rounded px-1 text-[10px] font-mono border ${
+                                              selGeo !== "ALL"
+                                                ? "bg-sky-600 text-white font-extrabold border-sky-700"
+                                                : "bg-white text-slate-900 border-sky-300"
+                                            }`}
+                                          >
+                                            <option value="ALL">همه ({poolForGeo.length})</option>
+                                            {geoOpts.map((opt) => (
+                                              <option key={opt} value={opt}>
+                                                {opt === targetGeo ? "★ " : ""}
+                                                {opt} ({geoCounts[opt]})
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </th>
+                                      );
+                                    })()}
+
+                                    {/* 14th Dropdown: GEO-TAB (Daily 4-Line Standings Geomantic Figure) */}
+                                    {(() => {
+                                      const selTab = curState.geoTab ?? "ALL";
+                                      const poolForTab = dayPool.filter((r) => {
+                                        const el = getRowEl12(r);
+                                        for (let k = 0; k < 12; k++) {
+                                          const s = curState.cols[k];
+                                          if (s && s !== "ALL" && el[k] !== s) return false;
+                                        }
+                                        if (curState.geo && curState.geo !== "ALL" && getRowGeo(r) !== curState.geo) {
+                                          return false;
+                                        }
+                                        return true;
+                                      });
+                                      const tabCounts: Record<string, number> = {};
+                                      poolForTab.forEach((r) => {
+                                        const tv = getRowGeoTab(r);
+                                        if (tv) tabCounts[tv] = (tabCounts[tv] ?? 0) + 1;
+                                      });
+                                      if (targetGeoTab && !(targetGeoTab in tabCounts)) tabCounts[targetGeoTab] = 0;
+                                      const tabOpts = Object.keys(tabCounts).sort();
+
+                                      return (
+                                        <th
+                                          className={`p-1 border-x border-sky-200 min-w-[92px] ${
+                                            selTab !== "ALL" ? "bg-orange-200/80" : ""
+                                          }`}
+                                          title={decodeGeoTabFa(targetGeoTab)}
+                                        >
+                                          <div className="text-[10px] font-extrabold text-orange-950">
+                                            GEO-TAB
+                                          </div>
+                                          <div className="text-[9px] text-slate-600 mb-1">
+                                            RANK-4L
+                                          </div>
+                                          <select
+                                            value={selTab}
+                                            onChange={(e) => {
+                                              const v = e.target.value;
+                                              updateGameFilter((prev) => ({
+                                                ...prev,
+                                                geoTab: v,
+                                                modeLabel: "فیلتر دستی شکل جدول (GEO-TAB)",
+                                              }));
+                                            }}
+                                            className={`w-full h-6 rounded px-1 text-[10px] font-mono border ${
+                                              selTab !== "ALL"
+                                                ? "bg-orange-600 text-white font-extrabold border-orange-700"
+                                                : "bg-white text-slate-900 border-sky-300"
+                                            }`}
+                                          >
+                                            <option value="ALL">همه ({poolForTab.length})</option>
+                                            {tabOpts.map((opt) => (
+                                              <option key={opt} value={opt}>
+                                                {opt === targetGeoTab ? "★ " : ""}
+                                                {opt} ({tabCounts[opt]})
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </th>
+                                      );
+                                    })()}
+
+                                    <th className="p-1.5 min-w-[90px]">
+                                      <div className="text-[10px] font-extrabold text-sky-950">MARGIN</div>
+                                      <div className="text-[9px] text-slate-600">HOME - AWAY</div>
+                                    </th>
+                                  </tr>
+                                </thead>
+
+                                <tbody>
+                                  {/* ROW 0: TARGET GAME ROW (Light Gold/Amber Highlight) */}
+                                  <tr className="bg-amber-100/90 border-b-2 border-amber-400 text-amber-950 font-bold">
+                                    <td className="p-1.5 text-amber-900 font-extrabold">TARGET</td>
+                                    <td className="p-1.5">{g.day}</td>
+                                    <td className="p-1.5 whitespace-nowrap">{g.d}</td>
+                                    <td className="p-1.5 whitespace-nowrap text-left">
+                                      <span className="text-blue-900 font-extrabold">{g.h}</span> vs{" "}
+                                      <span className="text-purple-900 font-extrabold">{g.a}</span>
+                                    </td>
+                                    <td className="p-1.5 whitespace-nowrap">{g.sc}</td>
+                                    {targetEl12.map((val, ci) => (
+                                      <td
+                                        key={ci}
+                                        className="p-1.5 border-x border-amber-300 text-amber-950 whitespace-nowrap"
+                                      >
+                                        ★ {val}
+                                      </td>
+                                    ))}
+                                    <td className="p-1.5 border-x border-amber-300 text-amber-950 font-extrabold">
+                                      ★ {targetGeo}
+                                    </td>
+                                    <td
+                                      className="p-1.5 border-x border-amber-300 text-orange-950 font-extrabold"
+                                      title={decodeGeoTabFa(targetGeoTab)}
+                                    >
+                                      ★ {targetGeoTab}
+                                    </td>
+                                    <td className="p-1.5 whitespace-nowrap">
+                                      {g.st === "PENDING" ? (
+                                        <span className="text-sky-900 font-extrabold">
+                                          FUSION: {(g.f30 ?? 0) > 0 ? `+${g.f30}` : g.f30 ?? 0}
+                                        </span>
+                                      ) : (
+                                        <span
+                                          className={
+                                            g.aw === g.h ? "text-emerald-800 font-extrabold" : "text-rose-800 font-extrabold"
+                                          }
+                                        >
+                                          WIN: {g.aw}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+
+                                  {/* FILTERED HISTORICAL TWIN ROWS (2010–2026) */}
+                                  {visibleHistRows.map((r, rIdx) => {
+                                    const rEl12 = getRowEl12(r);
+                                    const rGeo = getRowGeo(r);
+                                    const rGeoTab = getRowGeoTab(r);
+                                    return (
+                                      <tr
+                                        key={`${r.d}-${r.h}-${rIdx}`}
+                                        className="border-b border-sky-100 even:bg-sky-50/40 hover:bg-sky-100/60 transition-colors text-slate-800"
+                                      >
+                                        <td className="p-1.5 text-slate-500">{rIdx + 1}</td>
+                                        <td className="p-1.5 text-slate-700">{r.day}</td>
+                                        <td className="p-1.5 whitespace-nowrap text-slate-900 font-medium">
+                                          {r.d}
+                                        </td>
+                                        <td className="p-1.5 whitespace-nowrap text-left">
+                                          <span
+                                            className={
+                                              r.mg > 0
+                                                ? "text-emerald-800 font-bold"
+                                                : "text-slate-700"
+                                            }
+                                          >
+                                            {r.h}
+                                          </span>{" "}
+                                          <span className="text-slate-400">vs</span>{" "}
+                                          <span
+                                            className={
+                                              r.mg < 0
+                                                ? "text-rose-800 font-bold"
+                                                : "text-slate-700"
+                                            }
+                                          >
+                                            {r.a}
+                                          </span>
+                                        </td>
+                                        <td className="p-1.5 whitespace-nowrap text-slate-700">
+                                          {r.hp}-{r.ap}
+                                        </td>
+                                        {rEl12.map((val, ci) => {
+                                          const isMatch = val === targetEl12[ci];
+                                          const isFiltered =
+                                            curState.cols[ci] && curState.cols[ci] !== "ALL";
+                                          return (
+                                            <td
+                                              key={ci}
+                                              className={`p-1.5 border-x border-sky-100 whitespace-nowrap ${
+                                                isFiltered
+                                                  ? "bg-sky-200/80 text-sky-950 font-extrabold"
+                                                  : isMatch
+                                                    ? "bg-emerald-50 text-emerald-900 font-semibold"
+                                                    : "text-slate-600"
+                                              }`}
+                                            >
+                                              {val}
+                                            </td>
+                                          );
+                                        })}
+                                        <td
+                                          className={`p-1.5 border-x border-sky-100 font-bold ${
+                                            curState.geo && curState.geo !== "ALL"
+                                              ? "bg-sky-200/80 text-sky-950"
+                                              : rGeo === targetGeo
+                                                ? "bg-emerald-50 text-emerald-900"
+                                                : "text-slate-600"
+                                          }`}
+                                        >
+                                          {rGeo}
+                                        </td>
+                                        <td
+                                          title={decodeGeoTabFa(rGeoTab)}
+                                          className={`p-1.5 border-x border-sky-100 font-bold ${
+                                            curState.geoTab && curState.geoTab !== "ALL"
+                                              ? "bg-orange-200/80 text-orange-950"
+                                              : rGeoTab === targetGeoTab
+                                                ? "bg-emerald-50 text-emerald-900"
+                                                : "text-slate-600"
+                                          }`}
+                                        >
+                                          {rGeoTab}
+                                        </td>
+                                        <td
+                                          className={`p-1.5 whitespace-nowrap font-bold ${
+                                            r.mg > 0 ? "text-emerald-700" : "text-rose-700"
+                                          }`}
+                                        >
+                                          {r.mg > 0 ? `+${r.mg} (HOME)` : `${r.mg} (AWAY)`}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Show More toggle if > 60 rows */}
+                            {filteredPool.length > 60 && (
+                              <div className="text-center pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setManualShowAllRows((prev) => ({
+                                      ...prev,
+                                      [g.n]: !showAll,
+                                    }))
+                                  }
+                                  className="px-3 py-1 rounded bg-white hover:bg-sky-100 text-sky-900 border border-sky-300 text-xs font-mono font-bold shadow-sm"
+                                >
+                                  {showAll
+                                    ? "نمایش ۶۰ ردیف اول"
+                                    : `نمایش تمام ${filteredPool.length} ردیف همزاد فیلترشده...`}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Collapsible Dropdown 3: Summary Games & Predictions Table */}
+        <div className="rounded-lg border border-sky-200 bg-sky-50/50 overflow-hidden">
+          <div
+            onClick={() => setOpenSummaryTable((v) => !v)}
+            className="px-4 py-2.5 bg-sky-100/80 hover:bg-sky-100 cursor-pointer flex flex-wrap items-center justify-between gap-2 border-b border-sky-200/80 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold text-sky-950">
+              <span>📋 جدول خلاصه کل بازی‌ها و پیش‌بینی‌ها ({filteredGames.length} بازی فیلترشده)</span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpenSummaryTable((v) => !v);
+              }}
+              className="px-3 py-1 rounded border border-sky-300 bg-white hover:bg-sky-50 text-sky-950 text-xs font-bold shadow-sm"
+            >
+              {openSummaryTable ? "بستن جدول خلاصه ▲" : "باز کردن جدول خلاصه کل بازی‌ها ▼"}
+            </button>
+          </div>
+          {openSummaryTable && (
+            <div className="p-3 bg-white">
+        {loading ? (
+          <div className="p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading 2,642 NBA games + 2010–2026 Twins...
+          </div>
+        ) : (
+          <div className="bg-white border border-sky-200 rounded-md overflow-hidden">
+            <div className="overflow-x-auto max-h-[540px]">
+              <table className="w-full text-[11px] font-mono text-left border-collapse">
+                <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200">
+                  {engineMode === "twins" || engineMode === "manual" ? (
+                    <tr>
+                      <th className="p-2">#</th>
+                      <th className="p-2">Date</th>
+                      <th className="p-2">Home Team (میزبان)</th>
+                      <th className="p-2">Away Team (میهمان)</th>
+                      <th className="p-2">Fusion (30)</th>
+                      <th className="p-2">SMART Twins (2010–2026)</th>
+                      <th className="p-2">Formula_5 (Full / LOO)</th>
+                      <th className="p-2">TP1 / TP2 / TP3</th>
+                      <th className="p-2">Twin × Fusion</th>
+                      <th className="p-2">Predicted Winner</th>
+                      <th className="p-2">Actual / Score</th>
+                      <th className="p-2">Status</th>
+                    </tr>
+                  ) : engineMode === "fusion" ? (
+                    <tr>
+                      <th className="p-2">#</th>
+                      <th className="p-2">Date</th>
+                      <th className="p-2">Home Team (میزبان)</th>
+                      <th className="p-2">Away Team (میهمان)</th>
+                      <th className="p-2">5 Methods (A / B / C / D / E)</th>
+                      <th className="p-2">Pure Astro (25)</th>
+                      <th className="p-2">Fusion (30)</th>
+                      <th className="p-2">Fusion Tier</th>
+                      <th className="p-2">Predicted Winner</th>
+                      <th className="p-2">Actual / Score</th>
+                      <th className="p-2">Status</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th className="p-2">#</th>
+                      <th className="p-2">Date</th>
+                      <th className="p-2">Home Team (میزبان)</th>
+                      <th className="p-2">Away Team (میهمان)</th>
+                      <th className="p-2">QULITY-FIN (H vs A)</th>
+                      <th className="p-2">QULITY-DECAN (H vs A)</th>
+                      <th className="p-2">VM6</th>
+                      <th className="p-2">Pattern Tier</th>
+                      <th className="p-2">Predicted Winner</th>
+                      <th className="p-2">Actual / Score</th>
+                      <th className="p-2">Status</th>
+                    </tr>
+                  )}
+                </thead>
+                <tbody>
+                  {pageGames.map((g) => {
+                    const isExp = expandedGame === g.n;
+                    const st = getGameStatus(g);
+                    const pw = getGamePredWinner(g);
+                    const f30 = g.f30 ?? g.vm6;
+                    const a25 = g.a25 ?? 0;
+                    const mv = g.mv ?? [g.vm6, 0, 0, 0, 0];
+                    return (
+                      <Fragment key={g.n}>
+                        <tr
+                          onClick={() => setExpandedGame(isExp ? null : g.n)}
+                          className="border-b border-slate-100 hover:bg-sky-50/70 cursor-pointer transition-colors"
+                        >
+                          <td className="p-2 font-bold text-slate-500">#{g.n}</td>
+                          <td className="p-2 whitespace-nowrap">{g.d}</td>
+                          <td className="p-2 font-semibold text-blue-800">{g.h}</td>
+                          <td className="p-2 text-purple-800">{g.a}</td>
+                          {engineMode === "twins" || engineMode === "manual" ? (
+                            <>
+                              <td className="p-2 font-extrabold text-sky-950 text-xs">
+                                {f30 > 0 ? `+${f30}` : f30}
+                              </td>
+                              <td className="p-2 whitespace-nowrap">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 font-bold text-[10px]">
+                                  [{g.twMode || "STEP"}] {g.twVotes || "4H-3A"} ({g.twPct || "57%"})
+                                </span>
+                              </td>
+                              <td className="p-2 whitespace-nowrap text-[10px]">
+                                <span className="font-bold text-slate-900">{g.vip ? "VIP Dual-88" : g.f1 ? "تلفیق ۱ ✓" : "—"}</span>
+                                <span className="text-slate-400 mx-1">/</span>
+                                <span className="text-sky-700 font-semibold">{g.a1_veto ? "وتو ۸۸ ⛔" : g.s_a1 ? "گارد ۸۸ ✓" : "آزاد"}</span>
+                              </td>
+                              <td className="p-2 whitespace-nowrap text-[10px] font-bold text-amber-800">
+                                {g.tp ? `+${g.tp[0]} / +${g.tp[1]} / +${g.tp[2]} gls` : "—"}
+                              </td>
+                              <td className="p-2 whitespace-nowrap">
+                                {g.twAgree ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold">
+                                    AGREE ✓
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
+                                    SPLIT ⚠
+                                  </span>
+                                )}
+                              </td>
+                            </>
+                          ) : engineMode === "fusion" ? (
+                            <>
+                              <td className="p-2 whitespace-nowrap text-[10px]">
+                                {mv.map((v, idx) => (
+                                  <span
+                                    key={idx}
+                                    className={`inline-block px-1 py-0.5 mr-0.5 rounded ${
+                                      v > 0
+                                        ? "bg-blue-50 text-blue-800 font-bold"
+                                        : v < 0
+                                          ? "bg-purple-50 text-purple-800 font-bold"
+                                          : "bg-slate-100 text-slate-500"
+                                    }`}
+                                  >
+                                    {v > 0 ? `+${v}` : v}
+                                  </span>
+                                ))}
+                              </td>
+                              <td className="p-2 font-semibold text-slate-700">
+                                {a25 > 0 ? `+${a25}` : a25}
+                              </td>
+                              <td className="p-2 font-extrabold text-sky-950 text-xs">
+                                {f30 > 0 ? `+${f30}` : f30}
+                              </td>
+                              <td className="p-2 whitespace-nowrap">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    (g.f30 ?? 0) >= 12
+                                      ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                      : (g.f30 ?? 0) >= 8
+                                        ? "bg-sky-100 text-sky-900 border border-sky-300"
+                                        : Math.abs(g.f30 ?? 0) >= 6
+                                          ? "bg-indigo-50 text-indigo-800 border border-indigo-200"
+                                          : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {(g.f30 ?? 0) >= 12 ? "F30 ≥ +12" : (g.f30 ?? 0) >= 8 ? "F30 ≥ +8" : `F30=${g.f30 ?? 0}`}
+                                </span>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="p-2 whitespace-nowrap text-[10px] font-mono">
+                                88 / {g.deg?.[1] ?? 0} / {g.deg?.[2] ?? 0}
+                              </td>
+                              <td className="p-2 whitespace-nowrap text-[10px] font-mono">
+                                88 / {g.deg?.[3] ?? 0} / {g.deg?.[4] ?? 0}
+                              </td>
+                              <td className="p-2 font-bold text-sky-900">{g.f30 && g.f30 > 0 ? `+${g.f30}` : (g.f30 ?? 0)}</td>
+                              <td className="p-2 whitespace-nowrap">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    g.vip
+                                      ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                      : g.f1
+                                        ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                                        : g.a1_veto
+                                          ? "bg-rose-100 text-rose-900 border border-rose-300"
+                                          : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {g.vip ? "VIP Dual-88" : g.f1 ? "تلفیق ۱ ✓" : g.a1_veto ? "وتوی گارد ۸۸" : "رد فیلتر"}
+                                </span>
+                              </td>
+                            </>
+                          )}
+                          <td className="p-2 font-bold text-slate-900">{pw}</td>
+                          <td className="p-2 whitespace-nowrap text-[10px] text-slate-600">
+                            {st === "PENDING" ? "Scheduled" : g.aw}
+                          </td>
+                          <td className="p-2">
+                            {st === "WIN" ? (
+                              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">WIN ✓</span>
+                            ) : st === "LOSS" ? (
+                              <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold">LOSS ✗</span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">PENDING</span>
+                            )}
+                          </td>
+                        </tr>
+                        {isExp && (
+                          <tr key={`exp-${g.n}`} className="bg-sky-50/90 border-b border-sky-200">
+                            <td colSpan={12} className="p-3.5">
+                              <div className="text-xs font-bold text-sky-950 mb-2">
+                                جزئیات کامل همزادهای المنتی (۲۰۱۰–۲۰۲۶)، ۵ روش تلفیقی و ۹ لایه عنصری بازی #{g.n} ({g.h} vs {g.a} • {g.sc})
+                              </div>
+                              {g.twPeers && g.twPeers.length > 0 && (
+                                <div className="mb-3 p-3 rounded-lg bg-emerald-50/90 border border-emerald-300">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <div className="text-[11px] font-bold text-emerald-950">
+                                      همزادهای استخراج‌شده از ۲۱٬۴۹۸ بازی تاریخی (۲۰۱۰–۲۰۲۶) • روش: {g.twMode} • رأی همزادها: {g.twVotes} ({g.twPct}) → {g.twWin}
+                                    </div>
+                                    <div className="text-[11px] font-mono font-bold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded border border-amber-300">
+                                      Spread Targets: TP1 +{g.tp?.[0]} pts | TP2 +{g.tp?.[1]} pts | TP3 +{g.tp?.[2]} pts
+                                    </div>
+                                  </div>
+                                  <div className="text-[11px] font-mono text-slate-700 mb-2 bg-white px-2.5 py-1 rounded border border-emerald-200">
+                                    <b>Narrowing Path (ELE-P / ELE-FINAL / ELE-DYN):</b> {g.twPath}
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                    {g.twPeers.map((peerStr, pi) => (
+                                      <div key={pi} className="text-[11px] font-mono bg-white px-2.5 py-1 rounded border border-emerald-200 text-slate-800">
+                                        <b className="text-emerald-700">Twin #{pi + 1}:</b> {peerStr}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-[11px]">
+                                <div className="bg-white p-2.5 rounded border border-sky-300">
+                                  <div className="font-bold text-sky-900 mb-1">5-Method Fusion Breakdown (30 Votes)</div>
+                                  <div><b>Method A (3L+NewDEG3+UTC00):</b> {mv[0] > 0 ? `+${mv[0]}` : mv[0]}</div>
+                                  <div><b>Method B (Full+NewDEG3+UTC00):</b> {mv[1] > 0 ? `+${mv[1]}` : mv[1]}</div>
+                                  <div><b>Method C (3L+NewDEG3+Local):</b> {mv[2] > 0 ? `+${mv[2]}` : mv[2]}</div>
+                                  <div><b>Method D (3L+OldDEG3+UTC00):</b> {mv[3] > 0 ? `+${mv[3]}` : mv[3]}</div>
+                                  <div><b>Method E (115+Full+OldDEG3):</b> {mv[4] > 0 ? `+${mv[4]}` : mv[4]}</div>
+                                  <div className="mt-1 pt-1 border-t border-slate-200 font-bold text-emerald-800">
+                                    FUSION_30 = {f30 > 0 ? `+${f30}` : f30} | PURE_ASTRO_25 = {a25 > 0 ? `+${a25}` : a25} ({g.ag5 ?? 0}/5 Agree)
+                                  </div>
+                                </div>
+                                <div className="bg-white p-2.5 rounded border border-sky-200">
+                                  <div className="font-bold text-slate-700 mb-1">درجات سیستم جدید NBA (ATP: DEG1=121 [1° LEO] • WTA: DEG1=47 [17° TAURUS])</div>
+                                  <div><b>میزبان ({g.hc}):</b> DEG1=53 | DEG2={g.deg?.[1]} | DEG3={g.deg?.[2]}</div>
+                                  <div><b>میهمان ({g.ac}):</b> DEG1=53 | DEG2={g.deg?.[3]} | DEG3={g.deg?.[4]}</div>
+                                  <div><b>استادیوم میزبان:</b> {g.venue}</div>
+                                  <div><b>تاریخ شمسی:</b> {g.sh_d} ({g.sh_m})</div>
+                                </div>
+                                <div className="bg-white p-2.5 rounded border border-sky-200">
+                                  <div className="font-bold text-slate-700 mb-1">درجات نگهبان سیستم اول ۸۸ (S_A1 Guard)</div>
+                                  <div><b>میزبان ({g.hc}):</b> DEG1=53 | DEG2={g.deg?.[5]} | DEG3={g.deg?.[7]}</div>
+                                  <div><b>میهمان ({g.ac}):</b> DEG1=53 | DEG2={g.deg?.[6]} | DEG3={g.deg?.[7]}</div>
+                                  <div><b>وضعیت سیستم اول:</b> {g.s_a1 ? "تأیید میزبان ✓" : g.a1_veto ? "وتوی میهمان ⛔" : "آزاد (بدون وتو)"}</div>
+                                </div>
+                                <div className="bg-white p-2.5 rounded border border-sky-200">
+                                  <div className="font-bold text-slate-700 mb-1">شکل رمل دوگانه (GEO-FIN & GEO-DYN)</div>
+                                  <div><b>GEO-FIN میزبان/میهمان:</b> {g.h_geo} vs {g.a_geo}</div>
+                                  <div><b>GEO-DYN میزبان/میهمان:</b> {g.h_geo_dyn} vs {g.a_geo_dyn}</div>
+                                  <div><b>کانال منتخب:</b> {g.chan} | <b>تلفیق ۱:</b> {g.f1 ? "واجد شرایط ✓" : "رد فیلتر"}</div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            <div className="bg-slate-50 px-4 py-2.5 border-t border-slate-200 flex items-center justify-between text-xs font-mono">
+              <span>
+                Page {safePage} of {totalPages} (Click any row to inspect 2010–2026 Twins, 5-Method Fusion & 9 Layers)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
