@@ -1,0 +1,24 @@
+[phases.setup]
+nixPkgs = ["nodejs_22", "pnpm", "python312", "python312Packages.pip", "gcc", "gnumake"]
+
+[phases.install]
+cmds = [
+  "pnpm install --frozen-lockfile --allow-build=esbuild",
+  "python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+  "pnpm run typecheck:libs",
+  "NODE_ENV=production VITE_SKIP_PUBLIC_COPY=1 PORT=8080 BASE_PATH=./ pnpm --filter @workspace/calc-dashboard run build",
+  "pnpm --filter @workspace/api-server run build"
+]
+
+[variables]
+NODE_ENV = "production"
+PORT = "8080"
+TENNIS_SHEETS_WRITE_ENABLED = "false"
+PATH = "/opt/venv/bin:$PATH"
+
+[start]
+cmd = "node --enable-source-maps artifacts/api-server/dist/index.mjs"

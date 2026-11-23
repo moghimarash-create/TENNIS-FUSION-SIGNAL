@@ -4,11 +4,15 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { spawn } from "child_process";
 import net from "net";
+import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+
 function ensureApiServerRunning() {
   const check = () => {
     const sock = new net.Socket();
     sock.setTimeout(1000);
-    sock.once("connect", () => { sock.destroy(); });
+    sock.once("connect", () => {
+      sock.destroy();
+    });
     const startIt = () => {
       sock.destroy();
       const apiDir = path.resolve(import.meta.dirname, "..", "api-server");
@@ -27,30 +31,20 @@ function ensureApiServerRunning() {
   check();
   setInterval(check, 5000).unref();
 }
-ensureApiServerRunning();
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-const rawPort = process.env.PORT;
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
+const isBuildCmd = process.argv.includes("build") || process.env.NODE_ENV === "production";
+if (!isBuildCmd) {
+  ensureApiServerRunning();
 }
 
+const rawPort = process.env.PORT || "8080";
 const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+const basePath = process.env.BASE_PATH || "./";
 
 export default defineConfig({
   base: basePath,
@@ -83,12 +77,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    copyPublicDir: process.env.VITE_SKIP_PUBLIC_COPY !== "1",
   },
   server: {
     port,
     strictPort: true,
     host: "0.0.0.0",
-    allowedHosts: true, watch: { ignored: ["**/public/fusion_nba_master.json"] },
+    allowedHosts: true,
+    watch: { ignored: ["**/public/fusion_*.json"] },
     proxy: {
       "/fusion-rpc": {
         target: "http://127.0.0.1:8080",
@@ -107,6 +103,7 @@ export default defineConfig({
   preview: {
     port,
     host: "0.0.0.0",
-    allowedHosts: true, watch: { ignored: ["**/public/fusion_nba_master.json"] },
+    allowedHosts: true,
+    watch: { ignored: ["**/public/fusion_*.json"] },
   },
 });
