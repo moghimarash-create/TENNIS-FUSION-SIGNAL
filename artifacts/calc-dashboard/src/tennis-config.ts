@@ -144,6 +144,39 @@ export const DEG3_OPTIONS: Record<
   },
 };
 
+export type PowerProfileKey = "c_vol" | "b_pure" | "a_elo";
+
+export const POWER_PROFILE_KEYS: PowerProfileKey[] = ["c_vol", "b_pure", "a_elo"];
+
+export const POWER_PROFILES: Record<
+  PowerProfileKey,
+  {
+    key: PowerProfileKey;
+    shortFa: string;
+    badgeFa: string;
+    formulaEn: string;
+  }
+> = {
+  c_vol: {
+    key: "c_vol",
+    shortFa: "⚡ هیبرید جدول فصل + Pyth (۷۶٫۴٪ • پیشنهادی ★)",
+    badgeFa: "هیبرید جدول فصل + Surface Pyth",
+    formulaEn: "40% Direct_Surface_Elo + 60% NBA-Style_Surface_Games_Pyth(k=3.5, Season_WL, L10) + Standings_Element + Anti-Fame-Trap",
+  },
+  b_pure: {
+    key: "b_pure",
+    shortFa: "🏆 جدول خالص فصل NBA-Style (۷۸٫۰٪ • الماس ۹۱٫۵٪)",
+    badgeFa: "جدول خالص فصل + Surface Pyth",
+    formulaEn: "75% Surface_Games_Pyth(k=3.5) + 15% Season_52w_WL + 10% Last10_Form + Standings_Quartile_Element(FIRE/AIR/WATER/EARTH)",
+  },
+  a_elo: {
+    key: "a_elo",
+    shortFa: "📊 کلاسیک Elo هشت‌ساله (۷۱٫۱٪ • حجم بالا)",
+    badgeFa: "کلاسیک Direct Surface Elo (۸ ساله)",
+    formulaEn: "8-Year Blended Overall + Surface Elo (2018-2026) + Elo-Threshold Element",
+  },
+};
+
 export function normalizeTennisTour(raw?: string | null): TennisTour {
   return String(raw ?? "ATP").trim().toUpperCase() === "WTA" ? "WTA" : "ATP";
 }

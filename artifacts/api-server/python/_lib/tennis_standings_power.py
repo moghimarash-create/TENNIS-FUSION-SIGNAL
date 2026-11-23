@@ -1,0 +1,778 @@
+"""
+Zero-Lookahead Season/52-Week Standings, Surface Games Pythagorean (k=3.5),
+Standings Quartile Elements (FIRE/AIR/WATER/EARTH), Last-10 Form & 3-Way Power Profiles
+(c_vol, b_pure, a_elo) for TENNIS-FUSION-SIGNAL.
+
+100% Birthdate-Free (BIRTHDATE_USED = False) & 100% Zero-Lookahead (r.date < match.date).
+"""
+from __future__ import annotations
+
+import datetime
+from collections import defaultdict
+from typing import Any
+
+
+def log5(pa: float, pb: float) -> float:
+    pa = min(0.99, max(0.01, float(pa)))
+    pb = min(0.99, max(0.01, float(pb)))
+    num = pa * (1.0 - pb)
+    den = num + pb * (1.0 - pa)
+    return num / den if den > 0 else 0.5
+
+
+def pyth_games(gw: float, gl: float, k: float = 3.5, prior_g: float = 55.0, prior_rate: float = 0.49) -> float:
+    w = float(gw) + prior_g * prior_rate
+    l = float(gl) + prior_g * (1.0 - prior_rate)
+    if w <= 0 and l <= 0:
+        return 0.5
+    wk = w ** k
+    lk = l ** k
+    return wk / (wk + lk)
+
+
+def stretch_prob(p01: float, gamma: float) -> float:
+    p01 = min(0.995, max(0.005, float(p01)))
+    a = p01 ** gamma
+    b = (1.0 - p01) ** gamma
+    return a / (a + b)
+
+
+def matchup_elem(l5_pick_pct: float) -> str:
+    if l5_pick_pct >= 64.0:
+        return "FIRE"
+    if l5_pick_pct >= 54.0:
+        return "AIR"
+    if l5_pick_pct >= 45.0:
+        return "WATER"
+    return "EARTH"
+
+
+def dominant_elem_info(vec: list[int] | tuple[int, ...]) -> tuple[str, int, bool]:
+    names = ("FIRE", "AIR", "WATER", "EARTH")
+    mx = max(vec) if vec else 0
+    if mx <= 0:
+        return "—", 0, True
+    winners = [names[i] for i in range(4) if vec[i] == mx]
+    if len(winners) == 1:
+        return winners[0], mx, False
+    return f"TIE({'+'.join(w[0] for w in winners)})", mx, True
+
+
+class TennisStandingsTracker:
+    """Strictly Zero-Lookahead per-tour Standings & Surface Games Pythagorean tracker."""
+
+    def __init__(self, tour: str) -> None:
+        self.tour = tour.upper()
+        # Per-player chronological list of (date_obj, season_str, surface_str, won_bool, g_won, g_lost)
+        self.hist_log: dict[str, list[tuple[datetime.date, str, str, bool, int, int]]] = defaultdict(list)
+        self._cur_date: str | None = None
+        self._day_cache: dict[str, dict[str, Any]] = {}
+        self._rank_map: dict[str, int] = {}
+        self._n_act: int = 0
+
+    def commit_match(self, d_iso: str, season: str, surface: str, w_name: str, l_name: str, w_g: int, l_g: int) -> None:
+        dt = datetime.date.fromisoformat(d_iso)
+        self.hist_log[w_name].append((dt, str(season), str(surface), True, int(w_g), int(l_g)))
+        self.hist_log[l_name].append((dt, str(season), str(surface), False, int(l_g), int(w_g)))
+
+    def begin_date(self, d_iso: str) -> None:
+        if self._cur_date == d_iso:
+            return
+        self._cur_date = d_iso
+        self._day_cache.clear()
+        dt = datetime.date.fromisoformat(d_iso)
+        cut_365 = dt - datetime.timedelta(days=365)
+
+        standings_scores: dict[str, float] = {}
+        for pl, lg in self.hist_log.items():
+            if len(lg) >= 6 and lg[-6][0] >= cut_365:
+                st = self.get_player_snapshot(pl, d_iso)
+                standings_scores[pl] = st["st_sc"]
+
+        s_act = sorted(standings_scores.keys(), key=lambda p: standings_scores[p], reverse=True)
+        self._n_act = len(s_act)
+        self._rank_map = {p: idx + 1 for idx, p in enumerate(s_act)}
+
+    def get_player_snapshot(self, pl: str, d_iso: str) -> dict[str, Any]:
+        if self._cur_date != d_iso:
+            self.begin_date(d_iso)
+        cached = self._day_cache.get(pl)
+        if cached is not None:
+            return cached
+
+        dt = datetime.date.fromisoformat(d_iso)
+        cut_365 = dt - datetime.timedelta(days=365)
+        cut_730 = dt - datetime.timedelta(days=730)
+        cur_s = str(dt.year)
+
+        lg = self.hist_log.get(pl, [])
+        ytd = [x for x in lg if x[1] == cur_s]
+        w365 = [x for x in lg if x[0] >= cut_365]
+        w730 = [x for x in lg if x[0] >= cut_730]
+        l10 = lg[-10:]
+
+        n_ytd = len(ytd)
+        w_ytd = sum(1 for x in ytd if x[3])
+        gw_ytd = sum(x[4] for x in ytd)
+        gl_ytd = sum(x[5] for x in ytd)
+
+        n_365 = len(w365)
+        w_365 = sum(1 for x in w365 if x[3])
+        gw_365 = sum(x[4] for x in w365)
+        gl_365 = sum(x[5] for x in w365)
+
+        p_ytd = (w_ytd + 6.0 * 0.48) / (n_ytd + 6.0)
+        p_365 = (w_365 + 10.0 * 0.47) / (n_365 + 10.0)
+        if n_ytd == 0:
+            a_ytd = 0.0
+        elif n_ytd <= 8:
+            a_ytd = 0.50 * (n_ytd / 8.0)
+        else:
+            a_ytd = min(0.72, 0.55 + 0.17 * min(1.0, (n_ytd - 8.0) / 18.0))
+
+        wl_b = a_ytd * p_ytd + (1.0 - a_ytd) * p_365
+        py_all = (
+            a_ytd * pyth_games(gw_ytd, gl_ytd, 3.5, 55.0, 0.49)
+            + (1.0 - a_ytd) * pyth_games(gw_365, gl_365, 3.5, 80.0, 0.485)
+        )
+
+        sf_map: dict[str, float] = {}
+        for sf in ("Hard", "Clay", "Grass"):
+            s365 = [x for x in w365 if x[2] == sf]
+            s730 = [x for x in w730 if x[2] == sf]
+            ps1 = pyth_games(sum(x[4] for x in s365), sum(x[5] for x in s365), 3.5, 55.0, 0.49)
+            ps2 = pyth_games(sum(x[4] for x in s730), sum(x[5] for x in s730), 3.5, 75.0, 0.49)
+            ws = min(0.65, 0.08 * len(s730))
+            sf_map[sf] = ws * (0.65 * ps1 + 0.35 * ps2) + (1.0 - ws) * py_all
+
+        n10 = len(l10)
+        w10 = sum(1 for x in l10 if x[3])
+        gw10 = sum(x[4] for x in l10)
+        gl10 = sum(x[5] for x in l10)
+        p10_wl = (w10 + 4.0 * 0.48) / (n10 + 4.0)
+        p10_py = pyth_games(gw10, gl10, 3.5, 40.0, 0.49)
+        p10_c = 0.50 * p10_wl + 0.50 * p10_py
+        gdiff10 = round((gw10 - gl10) / max(1, n10), 1)
+        last_w = bool(lg[-1][3]) if lg else False
+
+        st_sc = 0.55 * wl_b + 0.45 * py_all + 0.03 * min(1.0, n_365 / 25.0) * (wl_b - 0.50)
+
+        snap = {
+            "n_ytd": n_ytd,
+            "w_ytd": w_ytd,
+            "l_ytd": n_ytd - w_ytd,
+            "n_365": n_365,
+            "w_365": w_365,
+            "l_365": n_365 - w_365,
+            "wl_b": wl_b,
+            "py_all": py_all,
+            "sf": sf_map,
+            "n10": n10,
+            "w10": w10,
+            "l10": n10 - w10,
+            "p10_c": p10_c,
+            "gdiff10": gdiff10,
+            "last_w": last_w,
+            "st_sc": st_sc,
+        }
+        self._day_cache[pl] = snap
+        return snap
+
+    def get_elem_and_rank(self, pl: str, d_iso: str) -> tuple[str, int, int]:
+        if self._cur_date != d_iso:
+            self.begin_date(d_iso)
+        rk = self._rank_map.get(pl, 0)
+        if rk == 0 or self._n_act == 0:
+            return "EARTH", 999, self._n_act
+        q = (rk - 1) / self._n_act
+        el = "FIRE" if q < 0.25 else ("AIR" if q < 0.50 else ("WATER" if q < 0.75 else "EARTH"))
+        return el, rk, self._n_act
+
+    def compute_match_fields(
+        self,
+        d_iso: str,
+        surface: str,
+        h: str,
+        a: str,
+        elo_wtp: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+        """Returns compact (st_meta, pwr_p) for match h vs a strictly prior to d_iso."""
+        self.begin_date(d_iso)
+        sh = self.get_player_snapshot(h, d_iso)
+        sa = self.get_player_snapshot(a, d_iso)
+        elh, rkh, n_act = self.get_elem_and_rank(h, d_iso)
+        ela, rka, _ = self.get_elem_and_rank(a, d_iso)
+        sf = surface if surface in ("Hard", "Clay", "Grass") else "Hard"
+
+        return build_st_and_profiles_from_snaps(sh, sa, elh, ela, rkh, rka, n_act, sf, elo_wtp)
+
+    def export_live_snapshot(self, ref_date_iso: str) -> dict[str, Any]:
+        """Exports compact latest player standings dictionary for live ESPN sync."""
+        self.begin_date(ref_date_iso)
+        players_out: dict[str, Any] = {}
+        for pl in self.hist_log.keys():
+            s = self.get_player_snapshot(pl, ref_date_iso)
+            el, rk, _ = self.get_elem_and_rank(pl, ref_date_iso)
+            players_out[pl] = {
+                "n_ytd": s["n_ytd"], "w_ytd": s["w_ytd"], "l_ytd": s["l_ytd"],
+                "n_365": s["n_365"], "w_365": s["w_365"], "l_365": s["l_365"],
+                "wl_b": round(s["wl_b"], 4),
+                "sf": {k: round(v, 4) for k, v in s["sf"].items()},
+                "w10": s["w10"], "l10": s["l10"],
+                "p10_c": round(s["p10_c"], 4),
+                "gdiff10": s["gdiff10"],
+                "last_w": s["last_w"],
+                "el": el, "rk": rk,
+            }
+        return {"tour": self.tour, "refDate": ref_date_iso, "nAct": self._n_act, "players": players_out}
+
+
+def build_st_and_profiles_from_snaps(
+    sh: dict[str, Any],
+    sa: dict[str, Any],
+    elh: str,
+    ela: str,
+    rkh: int,
+    rka: int,
+    n_act: int,
+    sf: str,
+    elo_wtp: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    # 1. Pure NBA-Style Table + Surface Games Pyth (b_pure: 75% SurfPyth + 15% Standings W-L + 10% L10)
+    raw_b_h = 0.75 * float(sh["sf"][sf]) + 0.15 * float(sh["wl_b"]) + 0.10 * float(sh["p10_c"])
+    raw_b_a = 0.75 * float(sa["sf"][sf]) + 0.15 * float(sa["wl_b"]) + 0.10 * float(sa["p10_c"])
+    hp_b = 100.0 * stretch_prob(raw_b_h, 1.35)
+    ap_b = 100.0 * stretch_prob(raw_b_a, 1.35)
+    l5_b = 100.0 * log5(hp_b / 100.0, ap_b / 100.0)
+
+    # 2. Calibrated Hybrid c_vol (40% Direct Surface Elo + 60% NBA-Style Surface Games Pyth + Anti-Fame-Trap)
+    raw_c_h = 0.70 * float(sh["sf"][sf]) + 0.20 * float(sh["wl_b"]) + 0.10 * float(sh["p10_c"])
+    raw_c_a = 0.70 * float(sa["sf"][sf]) + 0.20 * float(sa["wl_b"]) + 0.10 * float(sa["p10_c"])
+    pure_l5h = 100.0 * log5(raw_c_h, raw_c_a)
+
+    elo_hpct = float(elo_wtp.get("hpct", 50.0))
+    elo_apct = float(elo_wtp.get("apct", 50.0))
+    elo_l5h = float(elo_wtp.get("l5h", 50.0))
+    elo_hel = str(elo_wtp.get("hel", "AIR"))
+    elo_ael = str(elo_wtp.get("ael", "AIR"))
+
+    hp_c = 0.40 * elo_hpct + 0.60 * (100.0 * stretch_prob(raw_c_h, 1.85))
+    ap_c = 0.40 * elo_apct + 0.60 * (100.0 * stretch_prob(raw_c_a, 1.85))
+    l5_c = 0.40 * elo_l5h + 0.60 * (100.0 * stretch_prob(log5(raw_c_h, raw_c_a), 1.65))
+
+    # Fame-vs-Form Divergence Trap flags (active when picked side lacks Twin UltraLock & lacks deep 0011<=-8):
+    # - Trails in Season/Surface Pyth (<48.5%) OR (trails <52% & L10 deficit >0.06)
+    # - OR Fame Bubble >= 18% (Elo_H2H - Pure_Table_Log5 >= 18%) while coming off a loss vs opponent coming off a win!
+    htrap_c = (
+        (pure_l5h < 48.5)
+        or (pure_l5h < 52.0 and float(sh["p10_c"]) + 0.06 < float(sa["p10_c"]))
+        or ((elo_l5h - pure_l5h) >= 18.0 and (not bool(sh["last_w"])) and bool(sa["last_w"]))
+    )
+    pure_l5a = 100.0 - pure_l5h
+    elo_l5a = 100.0 - elo_l5h
+    atrap_c = (
+        (pure_l5a < 48.5)
+        or (pure_l5a < 52.0 and float(sa["p10_c"]) + 0.06 < float(sh["p10_c"]))
+        or ((elo_l5a - pure_l5a) >= 18.0 and (not bool(sa["last_w"])) and bool(sh["last_w"]))
+    )
+
+    h_wl_str = f"{sh['w_ytd']}-{sh['l_ytd']}" if int(sh["n_ytd"]) > 0 else f"{sh['w_365']}-{sh['l_365']}"
+    a_wl_str = f"{sa['w_ytd']}-{sa['l_ytd']}" if int(sa["n_ytd"]) > 0 else f"{sa['w_365']}-{sa['l_365']}"
+
+    st_meta = {
+        "h_wl": h_wl_str,
+        "a_wl": a_wl_str,
+        "h_rk": int(rkh),
+        "a_rk": int(rka),
+        "n_act": int(n_act),
+        "h_l10": f"{sh['w10']}-{sh['l10']} ({float(sh['gdiff10']):+.1f})",
+        "a_l10": f"{sa['w10']}-{sa['l10']} ({float(sa['gdiff10']):+.1f})",
+        "h_pyth": round(100.0 * float(sh["sf"][sf]), 1),
+        "a_pyth": round(100.0 * float(sa["sf"][sf]), 1),
+    }
+
+    pwr_p = {
+        "c_vol": {
+            "hpct": round(hp_c, 1),
+            "apct": round(ap_c, 1),
+            "l5h": round(l5_c, 1),
+            "hel": elh,
+            "ael": ela,
+            "htrap": int(bool(htrap_c)),
+            "atrap": int(bool(atrap_c)),
+        },
+        "b_pure": {
+            "hpct": round(hp_b, 1),
+            "apct": round(ap_b, 1),
+            "l5h": round(l5_b, 1),
+            "hel": elh,
+            "ael": ela,
+            "htrap": 0,
+            "atrap": 0,
+        },
+        "a_elo": {
+            "hpct": round(elo_hpct, 1),
+            "apct": round(elo_apct, 1),
+            "l5h": round(elo_l5h, 1),
+            "hel": elo_hel,
+            "ael": elo_ael,
+            "htrap": 0,
+            "atrap": 0,
+        },
+    }
+    return st_meta, pwr_p
+
+
+def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[str, dict[str, Any]]:
+    """
+    Fast, exact scalar evaluator for Modes 1..17 under profile_key ('c_vol' | 'b_pure' | 'a_elo').
+    100% identical to client-side TypeScript applyPowerProfileToGame()!
+    """
+    fm = card["fusion_meta"]
+    if profile_key == "a_elo":
+        modes = dict(fm["modes"])
+        m13 = modes["anti_nobet_smart"]
+        m15 = modes["fusion4_elem"]
+        sig17 = bool(m13["sig"] and m15["sig"] and m13["pick"] and m13["pick"] == m15["pick"])
+        modes["mode17"] = {"sig": sig17, "vip": bool(sig17 and m13["vip"]), "pick": m13["pick"] if sig17 else ""}
+        return modes
+
+    pp = card["pwr_p"][profile_key]
+    h, a = card["h"], card["a"]
+    h_l5 = round(float(pp["l5h"]), 1)
+    a_l5 = round(100.0 - h_l5, 1)
+    hpct = round(float(pp["hpct"]), 1)
+    apct = round(float(pp["apct"]), 1)
+    h_el = str(pp["hel"])
+    a_el = str(pp["ael"])
+    htrap = bool(pp.get("htrap", 0))
+    atrap = bool(pp.get("atrap", 0))
+
+    tm = fm["team"]
+    pl = fm["player"]
+    tpk = tm["pick"]
+    ppk = pl["pick"]
+    f30_t = int(tm["f30"])
+    f30_p = int(pl["f30"])
+
+    mel_t = matchup_elem(h_l5 if tpk == h else a_l5)
+    f1_guard_t = bool(card.get("f1_guard", False))
+    nat_t = bool(card.get("is_nat", False))
+    idx3 = card.get("idx3") or {}
+    fav_v4_t = int(idx3.get("vh", 0) if tpk == h else idx3.get("va", 0))
+    min_o4_t = int(idx3.get("minD", 0))
+    t_sig = bool(f1_guard_t and mel_t != "EARTH")
+    t_vip = bool(t_sig and (mel_t == "FIRE" or (nat_t and fav_v4_t == 4 and min_o4_t >= 2)))
+
+    mel_p = matchup_elem(h_l5 if f30_p >= 0 else a_l5)
+    p_sig = bool(pl["sig"] and mel_p != "EARTH")
+    p_vip = bool(p_sig and (pl["vip"] or mel_p == "FIRE"))
+
+    sgn_t = 1 if tpk == h else -1
+    sgn_p = 1 if ppk == h else -1
+    p_supports_t = (ppk == tpk) or (f30_p * sgn_t > 0)
+    t_supports_p = (tpk == ppk) or (f30_t * sgn_p > 0)
+    p_astro_t = (f30_p * sgn_t > 0)
+    t_astro_p = (f30_t * sgn_p > 0)
+
+    is_diamond = bool(t_sig and p_sig and tpk == ppk)
+    is_vip_cross = bool((t_vip and p_supports_t and (not p_vip or tpk == ppk)) or (p_vip and t_supports_p and (not t_vip or tpk == ppk)))
+    is_astro_lock = bool((t_sig and p_astro_t and (not p_sig or tpk == ppk)) or (p_sig and t_astro_p and (not t_sig or tpk == ppk)))
+    is_dual_pillar = bool((t_sig and p_supports_t and (not p_sig or tpk == ppk)) or (p_sig and t_supports_p and (not t_sig or tpk == ppk)))
+    is_vetoed = bool((t_sig or p_sig) and not is_dual_pillar)
+
+    fav_elo = h if h_l5 >= a_l5 else a
+    if is_diamond:
+        base_pick = tpk
+    elif is_vip_cross:
+        base_pick = tpk if (t_vip and p_supports_t) else ppk
+    elif is_dual_pillar:
+        base_pick = tpk if (t_sig and p_supports_t) else ppk
+    elif is_vetoed:
+        base_pick = tpk if t_sig else ppk
+    else:
+        base_pick = tpk if abs(f30_t) > abs(f30_p) else (ppk if abs(f30_p) > abs(f30_t) else fav_elo)
+
+    pk_vip = tpk if (t_vip and p_supports_t) else (ppk if (p_vip and t_supports_p) else base_pick)
+    pk_ast = tpk if (t_sig and p_astro_t) else (ppk if (p_sig and t_astro_p) else base_pick)
+    pk_dp = tpk if (t_sig and p_supports_t) else (ppk if (p_sig and t_supports_p) else base_pick)
+    pk_dia = tpk if is_diamond else base_pick
+
+    g1 = fm["geo1xxx"]
+    h_sum, a_sum = float(g1["h_sum"]), float(g1["a_sum"])
+    h_cnt, a_cnt = int(g1["h_cnt"]), int(g1["a_cnt"])
+    h_0sum, a_0sum = float(g1["h_0xxx"]), float(g1["a_0xxx"])
+    h_0011_sum, a_0011_sum = float(g1["h_0011"]), float(g1["a_0011"])
+    h_gf, a_gf = float(g1["h_gf"]), float(g1["a_gf"])
+    h_s3, a_s3 = float(g1["h_s3"]), float(g1["a_s3"])
+    g1_win = str(g1["win"])
+    cold0_win = str(g1["cold0_win"])
+    c0011_win = str(g1["c0011_win"])
+    all_win = str(g1["all_win"])
+    gf_win = str(g1["gf_win"])
+    triple3_win = str(g1["triple3_win"])
+
+    votes_h3 = int(g1_win == h) + int(all_win == h) + int(gf_win == h)
+    votes_a3 = int(g1_win == a) + int(all_win == a) + int(gf_win == a)
+    maj23_win = h if votes_h3 >= 2 else (a if votes_a3 >= 2 else (gf_win or fav_elo))
+
+    is_m5 = bool(is_dual_pillar and g1_win == pk_dp)
+    is_m6 = bool(is_dual_pillar and g1_win == pk_dp and all_win == pk_dp)
+
+    pk_el = h_el if pk_dp == h else a_el
+    op_el = a_el if pk_dp == h else h_el
+    pk_l5 = h_l5 if pk_dp == h else a_l5
+    earth_ok = not (pk_el == "EARTH" and op_el != "EARTH")
+    pk_1sum = h_sum if pk_dp == h else a_sum
+    pk_1cnt = h_cnt if pk_dp == h else a_cnt
+    both_pos_1xxx = (h_cnt > 0 and a_cnt > 0 and h_sum > 0 and a_sum > 0)
+    neg_anchor_ok = (pk_1cnt >= 1 and pk_1sum < 0)
+    gf_delta = abs(h_gf - a_gf)
+    dl_or_ref = (g1_win == pk_dp and all_win == pk_dp) or (pk_1cnt >= 1 and gf_delta >= 4.0 and maj23_win == pk_dp)
+
+    is_m7 = bool(is_dual_pillar and earth_ok and not both_pos_1xxx and neg_anchor_ok and dl_or_ref)
+    safe_dl_win = pk_dp if (g1_win == pk_dp and all_win == pk_dp and earth_ok) else ""
+    is_m8 = bool(is_m7 or (is_vip_cross and safe_dl_win == pk_vip) or (dl_or_ref and pk_el != "EARTH" and neg_anchor_ok and pk_l5 >= 60.0 and tpk == ppk))
+    pk_m8 = pk_vip if (is_vip_cross and safe_dl_win == pk_vip and not is_m7) else pk_dp
+
+    pos_inv_trig = bool(both_pos_1xxx and abs(h_sum - a_sum) >= 2.0)
+    pos_inv_win = (h if h_sum > a_sum else a) if pos_inv_trig else ""
+    div_ref_ok = bool(g1_win != all_win and gf_delta >= 5.0 and maj23_win in (h, a))
+    if is_m7:
+        is_m9, pk_m9 = True, pk_dp
+    elif is_vip_cross and safe_dl_win == pk_vip:
+        is_m9, pk_m9 = True, pk_vip
+    elif pos_inv_trig and ((pos_inv_win == h and h_l5 >= 55.0) or (pos_inv_win == a and a_l5 >= 55.0)):
+        is_m9, pk_m9 = True, pos_inv_win
+    elif is_dual_pillar and div_ref_ok and maj23_win == pk_dp and earth_ok:
+        is_m9, pk_m9 = True, pk_dp
+    else:
+        is_m9, pk_m9 = False, pk_dp
+
+    pk_m10 = h if h_gf < a_gf else (a if a_gf < h_gf else fav_elo)
+
+    s3_sign_split = (h_s3 < 0 < a_s3) or (a_s3 < 0 < h_s3)
+    s3_split_win = h if (h_s3 < 0 < a_s3) else (a if (a_s3 < 0 < h_s3) else "")
+    pk_m11 = s3_split_win or triple3_win or maj23_win or pk_m10
+    m11_l5 = h_l5 if pk_m11 == h else a_l5
+    m11_el = h_el if pk_m11 == h else a_el
+    m11_0 = h_0sum if pk_m11 == h else a_0sum
+    m11_1cnt = h_cnt if pk_m11 == h else a_cnt
+    if m11_el == "EARTH" and (h_el != "EARTH" or a_el != "EARTH") and m11_l5 < 52.0:
+        pk_m11 = a if pk_m11 == h else h
+        is_m11 = True
+    elif m11_1cnt == 0 and ((pk_m11 == h and a_l5 >= 58.0) or (pk_m11 == a and h_l5 >= 58.0)):
+        pk_m11 = a if pk_m11 == h else h
+        is_m11 = True
+    elif s3_sign_split and m11_l5 >= 54.0:
+        is_m11 = True
+    elif triple3_win and m11_l5 >= 52.0:
+        is_m11 = True
+    elif m11_0 <= -3.0 and cold0_win == pk_m11 and m11_l5 >= 55.0:
+        is_m11 = True
+    else:
+        is_m11 = False
+
+    dual_earth_hold = (h_el == "EARTH" and a_el == "EARTH")
+    cand_m12 = pk_m9 if is_m9 else (pk_m11 if is_m11 else pk_dp)
+    clash_3of3_hold = bool(triple3_win and triple3_win != cand_m12)
+    cand_l5 = h_l5 if cand_m12 == h else a_l5
+    cand_0 = h_0sum if cand_m12 == h else a_0sum
+    bipolar_ok = bool(c0011_win == cand_m12 and is_dual_pillar and cand_l5 >= 58.0)
+
+    if dual_earth_hold:
+        is_m12, m12_code, raw_fb13 = False, "ULTRA_DUAL_EARTH_HOLD", False
+    elif clash_3of3_hold:
+        is_m12, m12_code, raw_fb13 = False, "ULTRA_3OF3_CLASH_HOLD", False
+    elif is_m9 and cand_l5 >= 56.0:
+        is_m12, m12_code, raw_fb13 = True, "ULTRA_M9_CORE", False
+    elif cand_0 <= -4.0 and cold0_win == cand_m12 and is_dual_pillar and cand_l5 >= 58.0:
+        is_m12, m12_code, raw_fb13 = True, "ULTRA_COLD_ANCHOR", False
+    elif bipolar_ok:
+        is_m12, m12_code, raw_fb13 = True, "ULTRA_BIPOLAR_0011", False
+    elif s3_sign_split and s3_split_win == cand_m12 and is_dual_pillar and cand_l5 >= 60.0:
+        is_m12, m12_code, raw_fb13 = True, "ULTRA_S3_SPLIT", False
+    else:
+        is_m12, m12_code, raw_fb13 = False, "M11_RAW", True
+    pk_m12 = cand_m12
+
+    p13 = pk_m12
+    o13 = a if p13 == h else h
+    p13_el = h_el if p13 == h else a_el
+    o13_el = a_el if p13 == h else h_el
+    p13_l5 = h_l5 if p13 == h else a_l5
+    o13_l5 = a_l5 if p13 == h else h_l5
+    is_3of3_p13 = (triple3_win == p13)
+    dp_o13 = (is_dual_pillar and pk_dp == o13)
+
+    if is_m12:
+        is_m13, vip_m13, pk_m13 = True, bool(is_diamond or p13_l5 >= 75.0), p13
+    elif dual_earth_hold or m12_code == "ULTRA_3OF3_CLASH_HOLD":
+        is_m13, vip_m13, pk_m13 = False, False, p13
+    elif is_m11 and pk_m11 == p13 and p13_el != "EARTH" and p13_l5 >= 75.0:
+        is_m13, vip_m13, pk_m13 = True, bool(p13_l5 >= 80.0), p13
+    elif (not is_m11) and o13_el != "EARTH" and (not is_3of3_p13) and ((dp_o13 and o13_l5 >= 52.0) or (raw_fb13 and o13_l5 >= 60.0)):
+        is_m13, vip_m13, pk_m13 = True, False, o13
+    else:
+        is_m13, vip_m13, pk_m13 = False, False, p13
+
+    t12 = fm["total_elem_12"]
+    h_w_gff, a_w_gff = float(t12["h_w_gff"]), float(t12["a_w_gff"])
+    h_c_gff, a_c_gff = float(t12["h_c_gff"]), float(t12["a_c_gff"])
+    h_d_gff, a_d_gff = float(t12["h_d_gff"]), float(t12["a_d_gff"])
+    h_gff_p12, a_gff_p12 = float(t12["h_gff_p12"]), float(t12["a_gff_p12"])
+    h_gff_tot, a_gff_tot = float(t12["h_gff_tot"]), float(t12["a_gff_tot"])
+    h_s_pwr, a_s_pwr = float(t12["h_s_pwr"]), float(t12["a_s_pwr"])
+    h_ef_tot = [int(x) for x in t12["h_ef_tot"]]
+    a_ef_tot = [int(x) for x in t12["a_ef_tot"]]
+
+    h_dom, h_dom_cnt, h_dom_tie = dominant_elem_info(h_ef_tot)
+    a_dom, a_dom_cnt, a_dom_tie = dominant_elem_info(a_ef_tot)
+    h_lead_cnt = sum(1 for i in range(4) if h_ef_tot[i] > a_ef_tot[i])
+    a_lead_cnt = sum(1 for i in range(4) if a_ef_tot[i] > h_ef_tot[i])
+    dual_water = (h_dom == "WATER" and a_dom == "WATER")
+    dom_split = (not h_dom_tie and not a_dom_tie and h_dom != a_dom)
+
+    base_m14_pick = h if h_gff_tot < a_gff_tot else (a if a_gff_tot < h_gff_tot else fav_elo)
+    m14_l5 = h_l5 if base_m14_pick == h else a_l5
+    if not dual_water and ((base_m14_pick == h and h_lead_cnt >= 3) or (base_m14_pick == a and a_lead_cnt >= 3)) and m14_l5 >= 55.0:
+        base_m14_sig, t12_code = True, "TOT12_LEAD_3OF4"
+    elif not dual_water and is_dual_pillar and pk_dp == base_m14_pick and m14_l5 >= 58.0:
+        base_m14_sig, t12_code = True, "TOT12_DUAL_HARMONY"
+    elif not dual_water and ((base_m14_pick == h and h_w_gff < a_w_gff and h_c_gff < a_c_gff) or (base_m14_pick == a and a_w_gff < h_w_gff and a_c_gff < h_c_gff)):
+        base_m14_sig, t12_code = True, "TOT12_BIPOLAR_HARMONY"
+    else:
+        base_m14_sig, t12_code = False, "TOT12_NEUTRAL"
+
+    p14 = base_m14_pick
+    o14 = a if p14 == h else h
+    pl5_14 = h_l5 if p14 == h else a_l5
+    ol5_14 = a_l5 if p14 == h else h_l5
+    p_warm_14 = h_w_gff if p14 == h else a_w_gff
+    p12_fav_opp = (h_gff_p12 < a_gff_p12) if o14 == h else (a_gff_p12 < h_gff_p12)
+    p12_fav_base = (h_gff_p12 < a_gff_p12) if p14 == h else (a_gff_p12 < h_gff_p12)
+    spwr_fav_opp = (h_s_pwr < a_s_pwr) if o14 == h else (a_s_pwr < h_s_pwr)
+    m11_dir_opp = (pk_m11 == o14)
+    m11_fav_opp = (is_m11 and pk_m11 == o14)
+    p_lead_14 = h_lead_cnt if p14 == h else a_lead_cnt
+    o_lead_14 = a_lead_cnt if p14 == h else h_lead_cnt
+
+    has_trap_14 = bool((base_m14_sig and t12_code == "TOT12_BIPOLAR_HARMONY" and pl5_14 < 75.0) or (base_m14_sig and p14 == a and p_warm_14 < 0) or (base_m14_sig and dual_water))
+    sm14_kind = "M14_HOLD_NEUTRAL"
+    if base_m14_sig:
+        if has_trap_14:
+            pk_sm14 = o14
+            if m11_dir_opp and not dual_water:
+                is_sm14, vip_sm14, sm14_kind = True, False, "M14_TRAP_FLIP"
+            else:
+                is_sm14, vip_sm14, sm14_kind = False, False, "M14_VETO_TRAP"
+        else:
+            is_sm14, vip_sm14, pk_sm14, sm14_kind = True, bool(p_lead_14 == 3 or dom_split), p14, "M14_CORE_CLEAN"
+    elif not dual_water and pl5_14 >= 75.0:
+        is_sm14, vip_sm14, pk_sm14, sm14_kind = True, bool(pl5_14 >= 80.0 or p_lead_14 == 3), p14, "M14_DIRECT_RELEASE"
+    elif not dual_water and ((m11_fav_opp and spwr_fav_opp and ol5_14 >= 55.0) or (ol5_14 >= 62.0 and (m11_fav_opp or p12_fav_opp))):
+        is_sm14, vip_sm14, pk_sm14, sm14_kind = True, bool((m11_fav_opp and spwr_fav_opp) or o_lead_14 == 3), o14, "M14_OPPOSITE_FLIP"
+    else:
+        is_sm14, vip_sm14, pk_sm14 = False, False, p14
+
+    h_cat = "TIE" if h_dom_tie else h_dom
+    a_cat = "TIE" if a_dom_tie else a_dom
+    dom_delta = abs(h_dom_cnt - a_dom_cnt)
+    air_delta = abs(h_ef_tot[1] - a_ef_tot[1])
+    h_ef_sum, a_ef_sum = sum(h_ef_tot), sum(a_ef_tot)
+    ef_pick, ef_tier, ef_rule = "", "NEUTRAL", "NEUTRAL"
+    if h_cat == "EARTH" and a_cat == "EARTH" and dom_delta >= 10:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_cnt < a_dom_cnt else a), "STRONG", "EARTH_SAT10_SMALL"
+    elif air_delta >= 8:
+        ef_pick, ef_tier, ef_rule = (h if h_ef_tot[1] < a_ef_tot[1] else a), "STRONG", "AIR_SAT8_SMALL"
+    elif h_cat == "WATER" and a_cat == "WATER" and 1 <= dom_delta <= 3:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_cnt < a_dom_cnt else a), "STRONG", "WATER_1_3_SMALL"
+    elif h_cat == "WATER" and a_cat == "WATER" and dom_delta >= 4:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_cnt > a_dom_cnt else a), "STRONG", "WATER_4_PLUS_LARGE"
+    elif h_dom_tie != a_dom_tie:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_tie else a), "STRONG", "TIE_VS_UNIQ"
+    elif h_cat == "EARTH" and a_cat == "EARTH" and 4 <= dom_delta <= 9:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_cnt > a_dom_cnt else a), "STRONG", "EARTH_4_9_LARGE"
+    elif h_lead_cnt == 3 or a_lead_cnt == 3:
+        ef_pick, ef_tier, ef_rule = (h if h_lead_cnt == 3 else a), "MEDIUM", "LEAD_3OF4"
+    elif h_cat == "EARTH" and a_cat == "EARTH" and 1 <= dom_delta <= 3:
+        ef_pick, ef_tier, ef_rule = (h if h_dom_cnt > a_dom_cnt else a), "MEDIUM", "EARTH_1_3_LARGE"
+    elif h_ef_sum != a_ef_sum:
+        ef_pick, ef_tier, ef_rule = (h if h_ef_sum > a_ef_sum else a), "MEDIUM", "SPLIT_SUM_LARGE"
+
+    sug_pick = pk_sm14
+    sug_l5 = h_l5 if sug_pick == h else a_l5
+    ep_is_h = bool(ef_pick and ef_pick == h)
+    ep_l5 = 0.0 if not ef_pick else (h_l5 if ep_is_h else a_l5)
+    ep_p12_ok = False if not ef_pick else (h_gff_p12 < a_gff_p12 if ep_is_h else a_gff_p12 < h_gff_p12)
+    ep_sum_ok = False if not ef_pick else (h_ef_sum > a_ef_sum if ep_is_h else a_ef_sum > h_ef_sum)
+    ep_m11_dir = bool(ef_pick and pk_m11 == ef_pick)
+    ep_m11_sig = bool(ef_pick and is_m11 and pk_m11 == ef_pick)
+    sug_team_sig = bool(t_sig and tpk == sug_pick)
+    agree_boxes = bool(ef_pick and sug_pick == ef_pick)
+    clash_boxes = bool(ef_pick and sug_pick != ef_pick)
+    sat_trap = ef_rule in ("AIR_SAT8_SMALL", "EARTH_SAT10_SMALL")
+
+    p1_hit = bool(not dual_water and agree_boxes and ep_is_h and ep_m11_dir and (ep_l5 >= 58.0 or (ef_tier == "STRONG" and ep_l5 >= 52.0)))
+    p2_hit = bool(not dual_water and agree_boxes and (is_sm14 or (ef_tier == "STRONG" and (ep_m11_sig or sug_team_sig or (ep_p12_ok and ep_sum_ok and ep_l5 >= 60.0)))))
+    p3_hit = bool(not dual_water and ef_pick and ef_tier == "STRONG" and ep_p12_ok and ep_l5 >= 62.0 and (agree_boxes or not is_sm14))
+    p4_air_trap = bool(clash_boxes and (sug_team_sig or (is_sm14 and sug_l5 >= 75.0)) and sat_trap)
+    p4_hit = bool(not dual_water and clash_boxes and not sat_trap and (sug_team_sig or (is_sm14 and sug_l5 >= 75.0)))
+    is_m15 = bool(p1_hit or p2_hit or p3_hit or p4_hit)
+    pk_m15 = ef_pick if (p1_hit or p2_hit or p3_hit) else sug_pick
+    vip_m15 = bool((int(p1_hit) + int(p2_hit) + int(p3_hit) + int(p4_hit)) >= 2)
+
+    # Mode 16: referee6_ranked
+    b1_h = int(h_w_gff < a_w_gff) + int(h_c_gff < a_c_gff) + int(h_d_gff < a_d_gff) + int(h_gff_tot < a_gff_tot) + int(not dual_water and (h_lead_cnt == 3 or (dom_split and h_dom in ("WATER", "AIR"))))
+    b1_a = int(a_w_gff < h_w_gff) + int(a_c_gff < h_c_gff) + int(a_d_gff < h_d_gff) + int(a_gff_tot < h_gff_tot) + int(not dual_water and (a_lead_cnt == 3 or (dom_split and a_dom in ("WATER", "AIR"))))
+    h_is_b, a_is_b = (p14 == h), (p14 == a)
+    h_pure_l5 = (h_is_b and base_m14_sig and not has_trap_14) or (h_is_b and h_l5 >= 75.0) or ((not h_is_b) and (h_l5 >= 62.0 or (m11_fav_opp and spwr_fav_opp and h_l5 >= 55.0)))
+    a_pure_l5 = (a_is_b and base_m14_sig and not has_trap_14) or (a_is_b and a_l5 >= 75.0) or ((not a_is_b) and (a_l5 >= 62.0 or (m11_fav_opp and spwr_fav_opp and a_l5 >= 55.0)))
+    sm_h = (
+        int(base_m14_sig and h_is_b and not has_trap_14)
+        + int(not dual_water and (h_lead_cnt == 3 or (dom_split and (pk_sm14 == h if is_sm14 else h_dom != "EARTH"))))
+        + int(h_pure_l5)
+        + int(((is_m11 and pk_m11 == h) or p12_fav_opp or (has_trap_14 and pk_m11 == h)) if not h_is_b else (sm14_kind in ("M14_CORE_CLEAN", "M14_DIRECT_RELEASE") and p12_fav_base))
+        + int(is_sm14 and pk_sm14 == h)
+    )
+    sm_a = (
+        int(base_m14_sig and a_is_b and not has_trap_14)
+        + int(not dual_water and (a_lead_cnt == 3 or (dom_split and (pk_sm14 == a if is_sm14 else a_dom != "EARTH"))))
+        + int(a_pure_l5)
+        + int(((is_m11 and pk_m11 == a) or p12_fav_opp or (has_trap_14 and pk_m11 == a)) if not a_is_b else (sm14_kind in ("M14_CORE_CLEAN", "M14_DIRECT_RELEASE") and p12_fav_base))
+        + int(is_sm14 and pk_sm14 == a)
+    )
+    f4_h = int(p1_hit and ef_pick == h) + int(p2_hit and ef_pick == h) + int(p3_hit and ef_pick == h) + int(p4_hit and sug_pick == h)
+    f4_a = int(p1_hit and ef_pick == a) + int(p2_hit and ef_pick == a) + int(p3_hit and ef_pick == a) + int(p4_hit and sug_pick == a)
+    tot_h_ticks = b1_h + sm_h + int(ef_pick == h) + f4_h
+    tot_a_ticks = b1_a + sm_a + int(ef_pick == a) + f4_a
+
+    r82_sat_trap = clash_boxes and sat_trap and not p4_hit
+    r82_weak_clash = bool(is_sm14 and clash_boxes and not p4_hit and not vip_sm14)
+    f4_cnt = int(p1_hit) + int(p2_hit) + int(p3_hit) + int(p4_hit)
+    f4_tick_lead = (tot_h_ticks > tot_a_ticks if pk_m15 == h else tot_a_ticks > tot_h_ticks) if is_m15 else False
+    nobet_f4_trap = bool(not is_sm14 and is_m15 and not f4_tick_lead)
+    opp_sug = a if sug_pick == h else h
+    opp_sug_l5 = h_l5 if opp_sug == h else a_l5
+    b1_pick = h if b1_h > b1_a else (a if b1_a > b1_h else "")
+    rev_m12 = bool(not dual_water and is_m12 and pk_m12 == opp_sug and (opp_sug_l5 < 50.0 or opp_sug_l5 >= 55.0))
+    rev_h_m11 = bool(not dual_water and opp_sug == h and is_m11 and pk_m11 == opp_sug and ef_pick == opp_sug)
+    dir_m12 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m12 and pk_m12 == sug_pick and sug_l5 >= 60.0)
+    dir_m11_b1 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m11 and pk_m11 == sug_pick and b1_pick == sug_pick and sug_l5 >= 65.0)
+
+    pts_h, pts_a, top_hit = 0.0, 0.0, False
+
+    def add_pts(tm_s: str, pts: float) -> None:
+        nonlocal pts_h, pts_a
+        if pts > 0 and tm_s == h:
+            pts_h += pts
+        elif pts > 0 and tm_s == a:
+            pts_a += pts
+
+    if is_m15:
+        solo_p3 = p3_hit and not (p1_hit or p2_hit or p4_hit)
+        if f4_cnt >= 2 and (is_sm14 or f4_tick_lead):
+            add_pts(pk_m15, 10.0); top_hit = True
+        elif (is_sm14 and p4_hit) or ((not is_sm14) and (p1_hit or p2_hit) and f4_tick_lead):
+            add_pts(pk_m15, 8.0); top_hit = True
+        elif (not is_sm14) and p4_hit and f4_tick_lead:
+            add_pts(pk_m15, 7.0); top_hit = True
+        elif solo_p3:
+            add_pts(pk_m15, 1.0)
+        else:
+            add_pts(pk_m15, 1.5)
+    elif p4_air_trap and ef_pick:
+        add_pts(ef_pick, 3.5)
+
+    if is_sm14 and vip_sm14 and not r82_sat_trap:
+        add_pts(pk_sm14, 9.0); top_hit = True
+    elif is_sm14 and not r82_weak_clash and not r82_sat_trap:
+        add_pts(pk_sm14, 7.0); top_hit = True
+    elif rev_m12 or rev_h_m11:
+        add_pts(opp_sug, 7.0); top_hit = True
+    elif not (r82_weak_clash or r82_sat_trap):
+        if dir_m12 or dir_m11_b1:
+            add_pts(sug_pick, 7.0); top_hit = True
+        elif nobet_f4_trap and pk_m15 == sug_pick:
+            add_pts(sug_pick, 1.5)
+        else:
+            add_pts(sug_pick, 5.0 if sug_l5 >= 58.0 else (4.0 if sug_l5 >= 50.0 else 2.5))
+
+    if is_sm14 and not r82_weak_clash and not r82_sat_trap:
+        add_pts(pk_sm14, 6.0); top_hit = True
+    elif rev_m12 or rev_h_m11:
+        add_pts(opp_sug, 5.0)
+    elif not (r82_weak_clash or r82_sat_trap):
+        if dir_m12 or dir_m11_b1:
+            add_pts(sug_pick, 4.5)
+        elif sm_h != sm_a:
+            add_pts(h if sm_h > sm_a else a, 2.0)
+
+    if ef_pick:
+        add_pts(ef_pick, 3.5 if ef_tier == "STRONG" else 2.0)
+    if not dual_water and (h_lead_cnt == 3 or a_lead_cnt == 3):
+        add_pts(h if h_lead_cnt == 3 else a, 1.5)
+    elif dom_split and h_dom_cnt != a_dom_cnt:
+        add_pts(h if h_dom_cnt > a_dom_cnt else a, 1.0)
+    if b1_pick:
+        add_pts(b1_pick, 1.5 if abs(b1_h - b1_a) >= 2 else 1.0)
+
+    delta_pts = round(abs(pts_h - pts_a), 1)
+    pk_m16 = h if pts_h > pts_a else (a if pts_a > pts_h else sug_pick)
+    ef_strong_m16 = bool(ef_pick and ef_tier == "STRONG" and ef_pick == pk_m16)
+    is_m16 = bool((top_hit and delta_pts >= 8.0) or delta_pts >= 5.5 or (delta_pts >= 4.0 and ef_strong_m16))
+    vip_m16 = bool(top_hit and delta_pts >= 18.0)
+
+    # Anti-Fame-vs-Form Divergence Veto when !is_m12 and p0011 > -8.0
+    if (htrap or atrap) and (not is_m12):
+        if is_m13:
+            ish13 = (pk_m13 == h)
+            p0_13 = h_0011_sum if ish13 else a_0011_sum
+            if ((ish13 and htrap) or ((not ish13) and atrap)) and p0_13 > -8.0:
+                is_m13 = False
+                vip_m13 = False
+        if is_m15:
+            ish15 = (pk_m15 == h)
+            p0_15 = h_0011_sum if ish15 else a_0011_sum
+            if ((ish15 and htrap) or ((not ish15) and atrap)) and p0_15 > -8.0:
+                is_m15 = False
+                vip_m15 = False
+
+    sig17 = bool(is_m13 and is_m15 and pk_m13 and pk_m13 == pk_m15)
+    pk_m17 = pk_m13 if sig17 else ""
+    vip_m17 = False
+    if sig17:
+        ish17 = (pk_m17 == h)
+        d_elo = hpct if ish17 else apct
+        opp_el = a_el if ish17 else h_el
+        p0011 = h_0011_sum if ish17 else a_0011_sum
+        p1xxx = h_sum if ish17 else a_sum
+        if (
+            (d_elo >= 75.0 and p0011 < 0 and vip_m13)
+            or (p0011 <= -8.0 and p1xxx < 0 and vip_m13)
+            or (d_elo >= 58.0 and p0011 <= -8.0 and vip_m13)
+            or (d_elo >= 75.0 and opp_el == "EARTH")
+            or (d_elo >= 60.0 and p0011 < 0)
+        ):
+            vip_m17 = True
+
+    return {
+        "dual_pillar":     {"sig": is_dual_pillar, "vip": is_vip_cross, "pick": pk_dp},
+        "vip_cross":       {"sig": is_vip_cross,   "vip": is_diamond,   "pick": pk_vip},
+        "astro_lock":      {"sig": is_astro_lock,  "vip": bool(is_astro_lock and is_vip_cross), "pick": pk_ast},
+        "diamond":         {"sig": is_diamond,     "vip": is_diamond,   "pick": pk_dia},
+        "geo_1xxx_lock":   {"sig": is_m5,          "vip": bool(is_vip_cross and g1_win == pk_vip), "pick": pk_dp},
+        "double_pwr_lock": {"sig": is_m6,          "vip": bool(is_vip_cross and g1_win == pk_vip and all_win == pk_vip), "pick": pk_dp},
+        "earth_neg_lock":  {"sig": is_m7,          "vip": bool(is_m7 and is_vip_cross), "pick": pk_dp},
+        "safe_dl_core":    {"sig": is_m8,          "vip": is_m7,        "pick": pk_m8},
+        "pos_inv_lock":    {"sig": is_m9,          "vip": is_m7,        "pick": pk_m9},
+        "gf_fin_pure":     {"sig": True,           "vip": bool(abs(h_gf - a_gf) >= 10.0), "pick": pk_m10},
+        "tri_gf_routed":   {"sig": is_m11,         "vip": bool(is_m11 and triple3_win == pk_m11), "pick": pk_m11},
+        "tri_gf_ultralock":{"sig": is_m12,         "vip": bool(is_m12 and is_m9), "pick": pk_m12},
+        "anti_nobet_smart":{"sig": is_m13,         "vip": vip_m13,      "pick": pk_m13},
+        "total_elem_12":   {"sig": base_m14_sig,   "vip": bool(base_m14_sig and (h_lead_cnt == 3 or a_lead_cnt == 3)), "pick": base_m14_pick},
+        "smart_elem_14":   {"sig": is_sm14,        "vip": vip_sm14,     "pick": pk_sm14},
+        "fusion4_elem":    {"sig": is_m15,         "vip": vip_m15,      "pick": pk_m15},
+        "referee6_ranked": {"sig": is_m16,         "vip": vip_m16,      "pick": pk_m16},
+        "mode17":          {"sig": sig17,          "vip": vip_m17,      "pick": pk_m17},
+    }

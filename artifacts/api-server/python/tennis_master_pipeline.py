@@ -45,6 +45,7 @@ from _lib.tennis_config import (
     egem,
 )
 from _lib.tennis_venues import resolve_tournament_geo
+from _lib.tennis_standings_power import TennisStandingsTracker, eval_card_modes_for_profile
 import fusion_player_eval as fpe
 
 assert BIRTHDATE_USED is False
@@ -1461,10 +1462,12 @@ def run_pipeline() -> None:
     fus_games: dict[tuple[str, str], list[dict[str, Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in DEG3_OPTS}
     hist_export: dict[tuple[str, str], list[list[Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in (*DEG3_OPTS, "p")}
 
+    live_snapshots: dict[str, Any] = {}
     for tour in ("ATP", "WTA"):
         t_tour = time.time()
         deg1 = ATP_DEG1 if tour == "ATP" else WTA_DEG1
         matches = all_by_tour[tour]
+        st_tracker = TennisStandingsTracker(tour)
 
         # Zero-Lookahead Overall + Surface Elo state (strictly updated AFTER each calendar date!)
         elo_all: dict[str, float] = defaultdict(lambda: 1500.0)
@@ -1483,8 +1486,11 @@ def run_pipeline() -> None:
             by_date[m["d"]].append(m)
 
         game_seq = 0
+        last_d_iso = "2026-11-23"
         for d_iso in sorted(by_date.keys()):
+            last_d_iso = d_iso
             day_matches = by_date[d_iso]
+            st_tracker.begin_date(d_iso)
             d_ctx = fpe.get_date_ctx(d_iso)
             _, wd_up, _, _, _, _, _, ele_date_sum, _ = d_ctx
             y, mo, dy = map(int, d_iso.split("-"))
@@ -1562,10 +1568,12 @@ def run_pipeline() -> None:
                     "mel": matchup_elem(max(l5h, round(100.0 - l5h, 1))),
                 }
 
-                # Queue Elo update for AFTER all matches on d_iso are evaluated!
+                st_meta_cur, pwr_p_cur = st_tracker.compute_match_fields(d_iso, surf, h, a, wtp_base)
+
+                # Queue Elo & Standings update for AFTER all matches on d_iso are evaluated!
                 p_exp_w = 1.0 / (1.0 + (10.0 ** (-(elo_all[w_nm] - elo_all[l_nm]) / 400.0)))
                 p_exp_ws = 1.0 / (1.0 + (10.0 ** (-(elo_surf[(w_nm, surf)] - elo_surf[(l_nm, surf)]) / 400.0)))
-                pending_elo_updates.append((w_nm, l_nm, surf, p_exp_w, p_exp_ws))
+                pending_elo_updates.append((w_nm, l_nm, surf, p_exp_w, p_exp_ws, m["season"], int(m["w_g"]), int(m["l_g"])))
                 season_wl[(m["season"], w_nm)][0] += 1
                 season_wl[(m["season"], l_nm)][1] += 1
 
@@ -1856,6 +1864,8 @@ def run_pipeline() -> None:
                         "twins": res_t_raw["twins"],
                         "wtp": wtp_t,
                         "wtp_day": wtp_t,
+                        "st_meta": st_meta_cur,
+                        "pwr_p": pwr_p_cur,
                     }
                     dash_games[(tour, opt_k)].append(base_card)
 
@@ -1919,7 +1929,7 @@ def run_pipeline() -> None:
                     fus_games[(tour, opt_k)].append(f_card)
 
             # STRICT ZERO-LOOKAHEAD COMMIT AT END OF CALENDAR DAY d_iso
-            for w_nm, l_nm, surf, p_exp_w, p_exp_ws in pending_elo_updates:
+            for w_nm, l_nm, surf, p_exp_w, p_exp_ws, s_yr, wg_v, lg_v in pending_elo_updates:
                 k_all_w = 32.0 / ((cnt_all[w_nm] + 5) ** 0.20)
                 k_all_l = 32.0 / ((cnt_all[l_nm] + 5) ** 0.20)
                 elo_all[w_nm] += k_all_w * (1.0 - p_exp_w)
@@ -1934,6 +1944,8 @@ def run_pipeline() -> None:
                 cnt_surf[(w_nm, surf)] += 1
                 cnt_surf[(l_nm, surf)] += 1
 
+                st_tracker.commit_match(d_iso, s_yr, surf, w_nm, l_nm, wg_v, lg_v)
+
             for opt_k, wd_k, t_row, hist_row in pending_pool_t:
                 pools_t[(opt_k, wd_k)].append(t_row)
                 hist_export[(tour, opt_k)].append(hist_row)
@@ -1941,7 +1953,13 @@ def run_pipeline() -> None:
                 pools_p[wd_k].append(p_row)
                 hist_export[(tour, "p")].append(hist_row)
 
+        live_snapshots[tour] = st_tracker.export_live_snapshot(last_d_iso)
         print(f"[2/4] Completed {tour} (DEG1={deg1}) in {time.time()-t_tour:.1f}s -> 2024-2026 matches={len(fus_games[(tour, 'opt1')])}")
+
+    api_data_dir = os.path.abspath(os.path.join(HERE, "..", "data"))
+    os.makedirs(api_data_dir, exist_ok=True)
+    with open(os.path.join(api_data_dir, "tennis_live_standings_snapshot.json"), "w", encoding="utf-8") as f:
+        json.dump(live_snapshots, f, ensure_ascii=False, separators=(",", ":"))
 
     # Compute comprehensive benchmarks across DEG3 opt1/opt2/opt3 and Modes 1..16
     deg3_bench: dict[str, Any] = {"options": {}, "angle_p": {}}
@@ -2004,50 +2022,56 @@ def run_pipeline() -> None:
             [(bool(g["fusion_meta"]["player"]["sig"]), g["fusion_meta"]["player"]["pick"] == g["aw"]) for g in g_list]
         )
 
-    # 16-Mode Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL x 2024/2025/2026/Total/Last50
+    # 17-Mode x 3-PowerProfile Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL
+    MODE_17_BENCH_LIST = list(MODE_16_LIST) + [("m17", "mode17", "Mode 17: Golden Intersection (Mode 13 ∩ Mode 15)")]
+    by_profile: dict[str, Any] = {}
+    for prof_k in ("c_vol", "b_pure", "a_elo"):
+        by_profile[prof_k] = {}
+        for opt_k in DEG3_OPTS:
+            by_profile[prof_k][opt_k] = {}
+            for tour_scope in ("ATP", "WTA", "ALL"):
+                g_list = (
+                    sorted(fus_games[("ATP", opt_k)] + fus_games[("WTA", opt_k)], key=lambda x: (x["d"], x["n"]))
+                    if tour_scope == "ALL"
+                    else fus_games[(tour_scope, opt_k)]
+                )
+                eval_cache = [(g, eval_card_modes_for_profile(g, prof_k)) for g in g_list]
+                m_stats: dict[str, Any] = {}
+                for idx, (m_id, m_key, m_title) in enumerate(MODE_17_BENCH_LIST, start=1):
+                    yr_map = {}
+                    for yr in ("2024", "2025", "2026"):
+                        yr_map[yr] = calc_stat([
+                            (bool(md[m_key]["sig"]), md[m_key]["pick"] == g["aw"])
+                            for g, md in eval_cache if g["s"] == yr
+                        ])
+                    all_pairs = [
+                        (bool(md[m_key]["sig"]), md[m_key]["pick"] == g["aw"])
+                        for g, md in eval_cache
+                    ]
+                    tot_st = calc_stat(all_pairs)
+                    sig_wins = [w for s, w in all_pairs if s]
+                    l50 = sig_wins[-50:]
+                    l50_w = sum(1 for x in l50 if x)
+                    l50_pct = round(100.0 * l50_w / len(l50), 1) if l50 else 0.0
+                    m_stats[m_key] = {
+                        "modeNum": idx,
+                        "title": m_title,
+                        "2024": yr_map["2024"],
+                        "2025": yr_map["2025"],
+                        "2026": yr_map["2026"],
+                        "total": tot_st,
+                        "last50": {"w": l50_w, "n": len(l50), "pct": l50_pct, "rec": f"{l50_w}/{len(l50)}"},
+                    }
+                by_profile[prof_k][opt_k][tour_scope] = m_stats
+
     fusion_bench: dict[str, Any] = {
         "bestDefaultDeg3": best_opt,
+        "defaultPowerProfile": "c_vol",
         "deg3Bench": deg3_bench,
-        "modesMeta": [{"num": idx + 1, "id": m_id, "key": m_key, "title": m_title} for idx, (m_id, m_key, m_title) in enumerate(MODE_16_LIST)],
-        "byOption": {},
+        "modesMeta": [{"num": idx + 1, "id": m_id, "key": m_key, "title": m_title} for idx, (m_id, m_key, m_title) in enumerate(MODE_17_BENCH_LIST)],
+        "byOption": by_profile["c_vol"],
+        "byProfile": by_profile,
     }
-
-    for opt_k in DEG3_OPTS:
-        fusion_bench["byOption"][opt_k] = {}
-        for tour_scope in ("ATP", "WTA", "ALL"):
-            g_list = (
-                sorted(fus_games[("ATP", opt_k)] + fus_games[("WTA", opt_k)], key=lambda x: (x["d"], x["n"]))
-                if tour_scope == "ALL"
-                else fus_games[(tour_scope, opt_k)]
-            )
-            m_stats: dict[str, Any] = {}
-            for idx, (m_id, m_key, m_title) in enumerate(MODE_16_LIST, start=1):
-                yr_map = {}
-                for yr in ("2024", "2025", "2026"):
-                    sub = [g for g in g_list if g["s"] == yr]
-                    yr_map[yr] = calc_stat([
-                        (bool(g["fusion_meta"]["modes"][m_key]["sig"]), g["fusion_meta"]["modes"][m_key]["pick"] == g["aw"])
-                        for g in sub
-                    ])
-                all_pairs = [
-                    (bool(g["fusion_meta"]["modes"][m_key]["sig"]), g["fusion_meta"]["modes"][m_key]["pick"] == g["aw"])
-                    for g in g_list
-                ]
-                tot_st = calc_stat(all_pairs)
-                sig_wins = [w for s, w in all_pairs if s]
-                l50 = sig_wins[-50:]
-                l50_w = sum(1 for x in l50 if x)
-                l50_pct = round(100.0 * l50_w / len(l50), 1) if l50 else 0.0
-                m_stats[m_key] = {
-                    "modeNum": idx,
-                    "title": m_title,
-                    "2024": yr_map["2024"],
-                    "2025": yr_map["2025"],
-                    "2026": yr_map["2026"],
-                    "total": tot_st,
-                    "last50": {"w": l50_w, "n": len(l50), "pct": l50_pct, "rec": f"{l50_w}/{len(l50)}"},
-                }
-            fusion_bench["byOption"][opt_k][tour_scope] = m_stats
 
     print(f"[3/4] Writing compact JSON packs (best DEG3 default = {best_opt})...")
 

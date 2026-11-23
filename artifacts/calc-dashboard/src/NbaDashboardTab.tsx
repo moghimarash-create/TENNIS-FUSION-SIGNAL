@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, RefreshCw } from "lucide-react";
+import { type PowerProfileKey } from "./tennis-config";
 
 // ---------------------------------------------------------------------------
 // NHL 2010-2027 ELEMENTAL TWINS (DEG1 = 88 FIXED), DUAL-GEO + DECAN & KALSHI
@@ -414,7 +415,33 @@ type NbaGamePred = {
     hodds?: number;
     aodds?: number;
     mel?: string;
+    htrap?: number;
+    atrap?: number;
+    profileKey?: PowerProfileKey;
   };
+  st_meta?: {
+    h_wl: string;
+    a_wl: string;
+    h_rk: number;
+    a_rk: number;
+    n_act: number;
+    h_l10: string;
+    a_l10: string;
+    h_pyth: number;
+    a_pyth: number;
+  };
+  pwr_p?: Record<
+    PowerProfileKey,
+    {
+      hpct: number;
+      apct: number;
+      l5h: number;
+      hel: string;
+      ael: string;
+      htrap?: number;
+      atrap?: number;
+    }
+  >;
   wtp_day?: {
     mon: string;
     htp: number;
@@ -1680,6 +1707,14 @@ function evalSmartAntiNoBet(g: NbaGamePred) {
     }
   }
 
+  const profM13 = g.fusion_meta?.modes?.anti_nobet_smart;
+  if (sig && profM13 && !profM13.sig && wtp.profileKey && wtp.profileKey !== "a_elo") {
+    kind = "HOLD_NEUTRAL";
+    sig = false;
+    vip = false;
+    reasonFa = "توقف ایمنی جدول فصل: واگرایی شهرت تاریخی با فرم واقعی فصل/۱۰ بازی اخیر (مهار تله شهرت)";
+  }
+
   return {
     kind,
     sig,
@@ -1701,6 +1736,721 @@ function evalSmartAntiNoBet(g: NbaGamePred) {
   };
 }
 
+function matchupElemFromPct(l5PickPct: number): string {
+  if (l5PickPct >= 64.0) return "FIRE";
+  if (l5PickPct >= 54.0) return "AIR";
+  if (l5PickPct >= 45.0) return "WATER";
+  return "EARTH";
+}
+
+function dominantElemInfoVec(vec: number[]): [string, number, boolean] {
+  const names = ["FIRE", "AIR", "WATER", "EARTH"];
+  const mx = vec.length > 0 ? Math.max(...vec) : 0;
+  if (mx <= 0) return ["—", 0, true];
+  const winners = names.filter((_, i) => vec[i] === mx);
+  if (winners.length === 1) return [winners[0], mx, false];
+  return [`TIE(${winners.map((w) => w[0]).join("+")})`, mx, true];
+}
+
+export function applyPowerProfileToGame(
+  g: NbaGamePred,
+  profileKey: PowerProfileKey = "c_vol"
+): NbaGamePred {
+  if (profileKey === "a_elo") return g;
+  const pp = g.pwr_p?.[profileKey];
+  const fm = g.fusion_meta;
+  const g1 = fm?.geo1xxx;
+  const t12 = fm?.total_elem_12;
+  if (!pp || !fm || !g1 || !t12) return g;
+
+  const h = g.h;
+  const a = g.a;
+  const hL5 = Math.round(Number(pp.l5h) * 10) / 10;
+  const aL5 = Math.round((100.0 - hL5) * 10) / 10;
+  const hpct = Math.round(Number(pp.hpct) * 10) / 10;
+  const apct = Math.round(Number(pp.apct) * 10) / 10;
+  const hEl = String(pp.hel || "AIR");
+  const aEl = String(pp.ael || "AIR");
+  const htrap = Boolean(pp.htrap);
+  const atrap = Boolean(pp.atrap);
+
+  const tm = fm.team;
+  const pl = fm.player;
+  const tpk = tm.pick;
+  const ppk = pl.pick;
+  const f30T = Number(tm.f30 || 0);
+  const f30P = Number(pl.f30 || 0);
+
+  const melT = matchupElemFromPct(tpk === h ? hL5 : aL5);
+  const f1GuardT = Boolean(g.f1_guard);
+  const natT = Boolean(g.is_nat);
+  const idx3 = g.idx3;
+  const favV4T = Number(tpk === h ? (idx3?.vh ?? 0) : (idx3?.va ?? 0));
+  const minO4T = Number(idx3?.minD ?? 0);
+  const tSig = Boolean(f1GuardT && melT !== "EARTH");
+  const tVip = Boolean(tSig && (melT === "FIRE" || (natT && favV4T === 4 && minO4T >= 2)));
+
+  const melP = matchupElemFromPct(f30P >= 0 ? hL5 : aL5);
+  const pSig = Boolean(pl.sig && melP !== "EARTH");
+  const pVip = Boolean(pSig && (pl.vip || melP === "FIRE"));
+
+  const sgnT = tpk === h ? 1 : -1;
+  const sgnP = ppk === h ? 1 : -1;
+  const pSupportsT = ppk === tpk || f30P * sgnT > 0;
+  const tSupportsP = tpk === ppk || f30T * sgnP > 0;
+  const pAstroT = f30P * sgnT > 0;
+  const tAstroP = f30T * sgnP > 0;
+
+  const isDiamond = Boolean(tSig && pSig && tpk === ppk);
+  const isVipCross = Boolean(
+    (tVip && pSupportsT && (!pVip || tpk === ppk)) ||
+      (pVip && tSupportsP && (!tVip || tpk === ppk))
+  );
+  const isAstroLock = Boolean(
+    (tSig && pAstroT && (!pSig || tpk === ppk)) ||
+      (pSig && tAstroP && (!tSig || tpk === ppk))
+  );
+  const isDualPillar = Boolean(
+    (tSig && pSupportsT && (!pSig || tpk === ppk)) ||
+      (pSig && tSupportsP && (!tSig || tpk === ppk))
+  );
+  const isVetoed = Boolean((tSig || pSig) && !isDualPillar);
+
+  const favElo = hL5 >= aL5 ? h : a;
+  let basePick = favElo;
+  if (isDiamond) {
+    basePick = tpk;
+  } else if (isVipCross) {
+    basePick = tVip && pSupportsT ? tpk : ppk;
+  } else if (isDualPillar) {
+    basePick = tSig && pSupportsT ? tpk : ppk;
+  } else if (isVetoed) {
+    basePick = tSig ? tpk : ppk;
+  } else {
+    basePick =
+      Math.abs(f30T) > Math.abs(f30P)
+        ? tpk
+        : Math.abs(f30P) > Math.abs(f30T)
+          ? ppk
+          : favElo;
+  }
+
+  const pkVip = tVip && pSupportsT ? tpk : pVip && tSupportsP ? ppk : basePick;
+  const pkAst = tSig && pAstroT ? tpk : pSig && tAstroP ? ppk : basePick;
+  const pkDp = tSig && pSupportsT ? tpk : pSig && tSupportsP ? ppk : basePick;
+  const pkDia = isDiamond ? tpk : basePick;
+
+  const hSum = Number(g1.h_sum ?? 0);
+  const aSum = Number(g1.a_sum ?? 0);
+  const hCnt = Number(g1.h_cnt ?? 0);
+  const aCnt = Number(g1.a_cnt ?? 0);
+  const h0Sum = Number(g1.h_0xxx ?? 0);
+  const a0Sum = Number(g1.a_0xxx ?? 0);
+  const h0011Sum = Number(g1.h_0011 ?? 0);
+  const a0011Sum = Number(g1.a_0011 ?? 0);
+  const hGf = Number(g1.h_gf ?? 0);
+  const aGf = Number(g1.a_gf ?? 0);
+  const hS3 = Number(g1.h_s3 ?? 0);
+  const aS3 = Number(g1.a_s3 ?? 0);
+  const g1Win = String(g1.win ?? "");
+  const cold0Win = String(g1.cold0_win ?? "");
+  const c0011Win = String(g1.c0011_win ?? "");
+  const allWin = String(g1.all_win ?? "");
+  const gfWin = String(g1.gf_win ?? "");
+  const triple3Win = String(g1.triple3_win ?? "");
+
+  const votesH3 = Number(g1Win === h) + Number(allWin === h) + Number(gfWin === h);
+  const votesA3 = Number(g1Win === a) + Number(allWin === a) + Number(gfWin === a);
+  const maj23Win = votesH3 >= 2 ? h : votesA3 >= 2 ? a : gfWin || favElo;
+
+  const isM5 = Boolean(isDualPillar && g1Win === pkDp);
+  const isM6 = Boolean(isDualPillar && g1Win === pkDp && allWin === pkDp);
+
+  const pkEl = pkDp === h ? hEl : aEl;
+  const opEl = pkDp === h ? aEl : hEl;
+  const pkL5 = pkDp === h ? hL5 : aL5;
+  const earthOk = !(pkEl === "EARTH" && opEl !== "EARTH");
+  const pk1Sum = pkDp === h ? hSum : aSum;
+  const pk1Cnt = pkDp === h ? hCnt : aCnt;
+  const bothPos1xxx = hCnt > 0 && aCnt > 0 && hSum > 0 && aSum > 0;
+  const negAnchorOk = pk1Cnt >= 1 && pk1Sum < 0;
+  const gfDelta = Math.abs(hGf - aGf);
+  const dlOrRef =
+    (g1Win === pkDp && allWin === pkDp) ||
+    (pk1Cnt >= 1 && gfDelta >= 4.0 && maj23Win === pkDp);
+
+  const isM7 = Boolean(isDualPillar && earthOk && !bothPos1xxx && negAnchorOk && dlOrRef);
+  const safeDlWin = g1Win === pkDp && allWin === pkDp && earthOk ? pkDp : "";
+  const isM8 = Boolean(
+    isM7 ||
+      (isVipCross && safeDlWin === pkVip) ||
+      (dlOrRef && pkEl !== "EARTH" && negAnchorOk && pkL5 >= 60.0 && tpk === ppk)
+  );
+  const pkM8 = isVipCross && safeDlWin === pkVip && !isM7 ? pkVip : pkDp;
+
+  const posInvTrig = Boolean(bothPos1xxx && Math.abs(hSum - aSum) >= 2.0);
+  const posInvWin = posInvTrig ? (hSum > aSum ? h : a) : "";
+  const divRefOk = Boolean(g1Win !== allWin && gfDelta >= 5.0 && (maj23Win === h || maj23Win === a));
+  let isM9 = false;
+  let pkM9 = pkDp;
+  if (isM7) {
+    isM9 = true;
+    pkM9 = pkDp;
+  } else if (isVipCross && safeDlWin === pkVip) {
+    isM9 = true;
+    pkM9 = pkVip;
+  } else if (posInvTrig && ((posInvWin === h && hL5 >= 55.0) || (posInvWin === a && aL5 >= 55.0))) {
+    isM9 = true;
+    pkM9 = posInvWin;
+  } else if (isDualPillar && divRefOk && maj23Win === pkDp && earthOk) {
+    isM9 = true;
+    pkM9 = pkDp;
+  }
+
+  const pkM10 = hGf < aGf ? h : aGf < hGf ? a : favElo;
+
+  const s3SignSplit = (hS3 < 0 && aS3 > 0) || (aS3 < 0 && hS3 > 0);
+  const s3SplitWin = hS3 < 0 && aS3 > 0 ? h : aS3 < 0 && hS3 > 0 ? a : "";
+  let pkM11 = s3SplitWin || triple3Win || maj23Win || pkM10;
+  const m11L5 = pkM11 === h ? hL5 : aL5;
+  const m11El = pkM11 === h ? hEl : aEl;
+  const m11_0 = pkM11 === h ? h0Sum : a0Sum;
+  const m11_1cnt = pkM11 === h ? hCnt : aCnt;
+  let isM11 = false;
+  if (m11El === "EARTH" && (hEl !== "EARTH" || aEl !== "EARTH") && m11L5 < 52.0) {
+    pkM11 = pkM11 === h ? a : h;
+    isM11 = true;
+  } else if (m11_1cnt === 0 && ((pkM11 === h && aL5 >= 58.0) || (pkM11 === a && hL5 >= 58.0))) {
+    pkM11 = pkM11 === h ? a : h;
+    isM11 = true;
+  } else if (s3SignSplit && m11L5 >= 54.0) {
+    isM11 = true;
+  } else if (triple3Win && m11L5 >= 52.0) {
+    isM11 = true;
+  } else if (m11_0 <= -3.0 && cold0Win === pkM11 && m11L5 >= 55.0) {
+    isM11 = true;
+  }
+
+  const dualEarthHold = hEl === "EARTH" && aEl === "EARTH";
+  const candM12 = isM9 ? pkM9 : isM11 ? pkM11 : pkDp;
+  const clash3of3Hold = Boolean(triple3Win && triple3Win !== candM12);
+  const candL5 = candM12 === h ? hL5 : aL5;
+  const cand0 = candM12 === h ? h0Sum : a0Sum;
+  const bipolarOk = Boolean(c0011Win === candM12 && isDualPillar && candL5 >= 58.0);
+
+  let isM12 = false;
+  let m12Code = "M11_RAW";
+  let rawFb13 = true;
+  if (dualEarthHold) {
+    isM12 = false;
+    m12Code = "ULTRA_DUAL_EARTH_HOLD";
+    rawFb13 = false;
+  } else if (clash3of3Hold) {
+    isM12 = false;
+    m12Code = "ULTRA_3OF3_CLASH_HOLD";
+    rawFb13 = false;
+  } else if (isM9 && candL5 >= 56.0) {
+    isM12 = true;
+    m12Code = "ULTRA_M9_CORE";
+    rawFb13 = false;
+  } else if (cand0 <= -4.0 && cold0Win === candM12 && isDualPillar && candL5 >= 58.0) {
+    isM12 = true;
+    m12Code = "ULTRA_COLD_ANCHOR";
+    rawFb13 = false;
+  } else if (bipolarOk) {
+    isM12 = true;
+    m12Code = "ULTRA_BIPOLAR_0011";
+    rawFb13 = false;
+  } else if (s3SignSplit && s3SplitWin === candM12 && isDualPillar && candL5 >= 60.0) {
+    isM12 = true;
+    m12Code = "ULTRA_S3_SPLIT";
+    rawFb13 = false;
+  }
+  const pkM12 = candM12;
+
+  const p13 = pkM12;
+  const o13 = p13 === h ? a : h;
+  const p13El = p13 === h ? hEl : aEl;
+  const o13El = p13 === h ? aEl : hEl;
+  const p13L5 = p13 === h ? hL5 : aL5;
+  const o13L5 = p13 === h ? aL5 : hL5;
+  const is3of3P13 = triple3Win === p13;
+  const dpO13 = isDualPillar && pkDp === o13;
+
+  let isM13 = false;
+  let vipM13 = false;
+  let pkM13 = p13;
+  if (isM12) {
+    isM13 = true;
+    vipM13 = Boolean(isDiamond || p13L5 >= 75.0);
+    pkM13 = p13;
+  } else if (dualEarthHold || m12Code === "ULTRA_3OF3_CLASH_HOLD") {
+    isM13 = false;
+    vipM13 = false;
+    pkM13 = p13;
+  } else if (isM11 && pkM11 === p13 && p13El !== "EARTH" && p13L5 >= 75.0) {
+    isM13 = true;
+    vipM13 = p13L5 >= 80.0;
+    pkM13 = p13;
+  } else if (
+    !isM11 &&
+    o13El !== "EARTH" &&
+    !is3of3P13 &&
+    ((dpO13 && o13L5 >= 52.0) || (rawFb13 && o13L5 >= 60.0))
+  ) {
+    isM13 = true;
+    vipM13 = false;
+    pkM13 = o13;
+  }
+
+  const hWGff = Number(t12.h_w_gff ?? 0);
+  const aWGff = Number(t12.a_w_gff ?? 0);
+  const hCGff = Number(t12.h_c_gff ?? 0);
+  const aCGff = Number(t12.a_c_gff ?? 0);
+  const hDGff = Number(t12.h_d_gff ?? 0);
+  const aDGff = Number(t12.a_d_gff ?? 0);
+  const hGffP12 = Number(t12.h_gff_p12 ?? 0);
+  const aGffP12 = Number(t12.a_gff_p12 ?? 0);
+  const hGffTot = Number(t12.h_gff_tot ?? 0);
+  const aGffTot = Number(t12.a_gff_tot ?? 0);
+  const hSPwr = Number(t12.h_s_pwr ?? 0);
+  const aSPwr = Number(t12.a_s_pwr ?? 0);
+  const hEfTot = (t12.h_ef_tot ?? [0, 0, 0, 0]).map((x) => Number(x));
+  const aEfTot = (t12.a_ef_tot ?? [0, 0, 0, 0]).map((x) => Number(x));
+
+  const [hDom, hDomCnt, hDomTie] = dominantElemInfoVec(hEfTot);
+  const [aDom, aDomCnt, aDomTie] = dominantElemInfoVec(aEfTot);
+  const hLeadCnt = [0, 1, 2, 3].filter((i) => hEfTot[i] > aEfTot[i]).length;
+  const aLeadCnt = [0, 1, 2, 3].filter((i) => aEfTot[i] > hEfTot[i]).length;
+  const dualWater = hDom === "WATER" && aDom === "WATER";
+  const domSplit = !hDomTie && !aDomTie && hDom !== aDom;
+
+  const baseM14Pick = hGffTot < aGffTot ? h : aGffTot < hGffTot ? a : favElo;
+  const m14L5 = baseM14Pick === h ? hL5 : aL5;
+  let baseM14Sig = false;
+  let t12Code = "TOT12_NEUTRAL";
+  if (
+    !dualWater &&
+    ((baseM14Pick === h && hLeadCnt >= 3) || (baseM14Pick === a && aLeadCnt >= 3)) &&
+    m14L5 >= 55.0
+  ) {
+    baseM14Sig = true;
+    t12Code = "TOT12_LEAD_3OF4";
+  } else if (!dualWater && isDualPillar && pkDp === baseM14Pick && m14L5 >= 58.0) {
+    baseM14Sig = true;
+    t12Code = "TOT12_DUAL_HARMONY";
+  } else if (
+    !dualWater &&
+    ((baseM14Pick === h && hWGff < aWGff && hCGff < aCGff) ||
+      (baseM14Pick === a && aWGff < hWGff && aCGff < hCGff))
+  ) {
+    baseM14Sig = true;
+    t12Code = "TOT12_BIPOLAR_HARMONY";
+  }
+
+  const p14 = baseM14Pick;
+  const o14 = p14 === h ? a : h;
+  const pl5_14 = p14 === h ? hL5 : aL5;
+  const ol5_14 = p14 === h ? aL5 : hL5;
+  const pWarm14 = p14 === h ? hWGff : aWGff;
+  const p12FavOpp = o14 === h ? hGffP12 < aGffP12 : aGffP12 < hGffP12;
+  const p12FavBase = p14 === h ? hGffP12 < aGffP12 : aGffP12 < hGffP12;
+  const spwrFavOpp = o14 === h ? hSPwr < aSPwr : aSPwr < hSPwr;
+  const m11DirOpp = pkM11 === o14;
+  const m11FavOpp = isM11 && pkM11 === o14;
+  const pLead14 = p14 === h ? hLeadCnt : aLeadCnt;
+  const oLead14 = p14 === h ? aLeadCnt : hLeadCnt;
+
+  const hasTrap14 = Boolean(
+    (baseM14Sig && t12Code === "TOT12_BIPOLAR_HARMONY" && pl5_14 < 75.0) ||
+      (baseM14Sig && p14 === a && pWarm14 < 0) ||
+      (baseM14Sig && dualWater)
+  );
+  let sm14Kind = "M14_HOLD_NEUTRAL";
+  let isSm14 = false;
+  let vipSm14 = false;
+  let pkSm14 = p14;
+  if (baseM14Sig) {
+    if (hasTrap14) {
+      pkSm14 = o14;
+      if (m11DirOpp && !dualWater) {
+        isSm14 = true;
+        vipSm14 = false;
+        sm14Kind = "M14_TRAP_FLIP";
+      } else {
+        isSm14 = false;
+        vipSm14 = false;
+        sm14Kind = "M14_VETO_TRAP";
+      }
+    } else {
+      isSm14 = true;
+      vipSm14 = Boolean(pLead14 === 3 || domSplit);
+      pkSm14 = p14;
+      sm14Kind = "M14_CORE_CLEAN";
+    }
+  } else if (!dualWater && pl5_14 >= 75.0) {
+    isSm14 = true;
+    vipSm14 = Boolean(pl5_14 >= 80.0 || pLead14 === 3);
+    pkSm14 = p14;
+    sm14Kind = "M14_DIRECT_RELEASE";
+  } else if (
+    !dualWater &&
+    ((m11FavOpp && spwrFavOpp && ol5_14 >= 55.0) ||
+      (ol5_14 >= 62.0 && (m11FavOpp || p12FavOpp)))
+  ) {
+    isSm14 = true;
+    vipSm14 = Boolean((m11FavOpp && spwrFavOpp) || oLead14 === 3);
+    pkSm14 = o14;
+    sm14Kind = "M14_OPPOSITE_FLIP";
+  }
+
+  const hCat = hDomTie ? "TIE" : hDom;
+  const aCat = aDomTie ? "TIE" : aDom;
+  const domDelta = Math.abs(hDomCnt - aDomCnt);
+  const airDelta = Math.abs(hEfTot[1] - aEfTot[1]);
+  const hEfSum = hEfTot[0] + hEfTot[1] + hEfTot[2] + hEfTot[3];
+  const aEfSum = aEfTot[0] + aEfTot[1] + aEfTot[2] + aEfTot[3];
+  let efPick = "";
+  let efTier = "NEUTRAL";
+  let efRule = "NEUTRAL";
+  if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 10) {
+    efPick = hDomCnt < aDomCnt ? h : a;
+    efTier = "STRONG";
+    efRule = "EARTH_SAT10_SMALL";
+  } else if (airDelta >= 8) {
+    efPick = hEfTot[1] < aEfTot[1] ? h : a;
+    efTier = "STRONG";
+    efRule = "AIR_SAT8_SMALL";
+  } else if (hCat === "WATER" && aCat === "WATER" && domDelta >= 1 && domDelta <= 3) {
+    efPick = hDomCnt < aDomCnt ? h : a;
+    efTier = "STRONG";
+    efRule = "WATER_1_3_SMALL";
+  } else if (hCat === "WATER" && aCat === "WATER" && domDelta >= 4) {
+    efPick = hDomCnt > aDomCnt ? h : a;
+    efTier = "STRONG";
+    efRule = "WATER_4_PLUS_LARGE";
+  } else if (hDomTie !== aDomTie) {
+    efPick = hDomTie ? h : a;
+    efTier = "STRONG";
+    efRule = "TIE_VS_UNIQ";
+  } else if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 4 && domDelta <= 9) {
+    efPick = hDomCnt > aDomCnt ? h : a;
+    efTier = "STRONG";
+    efRule = "EARTH_4_9_LARGE";
+  } else if (hLeadCnt === 3 || aLeadCnt === 3) {
+    efPick = hLeadCnt === 3 ? h : a;
+    efTier = "MEDIUM";
+    efRule = "LEAD_3OF4";
+  } else if (hCat === "EARTH" && aCat === "EARTH" && domDelta >= 1 && domDelta <= 3) {
+    efPick = hDomCnt > aDomCnt ? h : a;
+    efTier = "MEDIUM";
+    efRule = "EARTH_1_3_LARGE";
+  } else if (hEfSum !== aEfSum) {
+    efPick = hEfSum > aEfSum ? h : a;
+    efTier = "MEDIUM";
+    efRule = "SPLIT_SUM_LARGE";
+  }
+
+  const sugPick = pkSm14;
+  const sugL5 = sugPick === h ? hL5 : aL5;
+  const epIsH = Boolean(efPick && efPick === h);
+  const epL5 = !efPick ? 0.0 : epIsH ? hL5 : aL5;
+  const epP12Ok = !efPick ? false : epIsH ? hGffP12 < aGffP12 : aGffP12 < hGffP12;
+  const epSumOk = !efPick ? false : epIsH ? hEfSum > aEfSum : aEfSum > hEfSum;
+  const epM11Dir = Boolean(efPick && pkM11 === efPick);
+  const epM11Sig = Boolean(efPick && isM11 && pkM11 === efPick);
+  const sugTeamSig = Boolean(tSig && tpk === sugPick);
+  const agreeBoxes = Boolean(efPick && sugPick === efPick);
+  const clashBoxes = Boolean(efPick && sugPick !== efPick);
+  const satTrap = efRule === "AIR_SAT8_SMALL" || efRule === "EARTH_SAT10_SMALL";
+
+  const p1Hit = Boolean(
+    !dualWater &&
+      agreeBoxes &&
+      epIsH &&
+      epM11Dir &&
+      (epL5 >= 58.0 || (efTier === "STRONG" && epL5 >= 52.0))
+  );
+  const p2Hit = Boolean(
+    !dualWater &&
+      agreeBoxes &&
+      (isSm14 ||
+        (efTier === "STRONG" &&
+          (epM11Sig || sugTeamSig || (epP12Ok && epSumOk && epL5 >= 60.0))))
+  );
+  const p3Hit = Boolean(
+    !dualWater &&
+      efPick &&
+      efTier === "STRONG" &&
+      epP12Ok &&
+      epL5 >= 62.0 &&
+      (agreeBoxes || !isSm14)
+  );
+  const p4AirTrap = Boolean(
+    clashBoxes && (sugTeamSig || (isSm14 && sugL5 >= 75.0)) && satTrap
+  );
+  const p4Hit = Boolean(
+    !dualWater && clashBoxes && !satTrap && (sugTeamSig || (isSm14 && sugL5 >= 75.0))
+  );
+  let isM15 = Boolean(p1Hit || p2Hit || p3Hit || p4Hit);
+  const pkM15 = p1Hit || p2Hit || p3Hit ? efPick : sugPick;
+  let vipM15 = Number(p1Hit) + Number(p2Hit) + Number(p3Hit) + Number(p4Hit) >= 2;
+
+  const b1H =
+    Number(hWGff < aWGff) +
+    Number(hCGff < aCGff) +
+    Number(hDGff < aDGff) +
+    Number(hGffTot < aGffTot) +
+    Number(!dualWater && (hLeadCnt === 3 || (domSplit && (hDom === "WATER" || hDom === "AIR"))));
+  const b1A =
+    Number(aWGff < hWGff) +
+    Number(aCGff < hCGff) +
+    Number(aDGff < hDGff) +
+    Number(aGffTot < hGffTot) +
+    Number(!dualWater && (aLeadCnt === 3 || (domSplit && (aDom === "WATER" || aDom === "AIR"))));
+  const hIsB = p14 === h;
+  const aIsB = p14 === a;
+  const hPureL5 =
+    (hIsB && baseM14Sig && !hasTrap14) ||
+    (hIsB && hL5 >= 75.0) ||
+    (!hIsB && (hL5 >= 62.0 || (m11FavOpp && spwrFavOpp && hL5 >= 55.0)));
+  const aPureL5 =
+    (aIsB && baseM14Sig && !hasTrap14) ||
+    (aIsB && aL5 >= 75.0) ||
+    (!aIsB && (aL5 >= 62.0 || (m11FavOpp && spwrFavOpp && aL5 >= 55.0)));
+  const smH =
+    Number(baseM14Sig && hIsB && !hasTrap14) +
+    Number(!dualWater && (hLeadCnt === 3 || (domSplit && (isSm14 ? pkSm14 === h : hDom !== "EARTH")))) +
+    Number(hPureL5) +
+    Number(
+      !hIsB
+        ? (isM11 && pkM11 === h) || p12FavOpp || (hasTrap14 && pkM11 === h)
+        : (sm14Kind === "M14_CORE_CLEAN" || sm14Kind === "M14_DIRECT_RELEASE") && p12FavBase
+    ) +
+    Number(isSm14 && pkSm14 === h);
+  const smA =
+    Number(baseM14Sig && aIsB && !hasTrap14) +
+    Number(!dualWater && (aLeadCnt === 3 || (domSplit && (isSm14 ? pkSm14 === a : aDom !== "EARTH")))) +
+    Number(aPureL5) +
+    Number(
+      !aIsB
+        ? (isM11 && pkM11 === a) || p12FavOpp || (hasTrap14 && pkM11 === a)
+        : (sm14Kind === "M14_CORE_CLEAN" || sm14Kind === "M14_DIRECT_RELEASE") && p12FavBase
+    ) +
+    Number(isSm14 && pkSm14 === a);
+  const f4H =
+    Number(p1Hit && efPick === h) +
+    Number(p2Hit && efPick === h) +
+    Number(p3Hit && efPick === h) +
+    Number(p4Hit && sugPick === h);
+  const f4A =
+    Number(p1Hit && efPick === a) +
+    Number(p2Hit && efPick === a) +
+    Number(p3Hit && efPick === a) +
+    Number(p4Hit && sugPick === a);
+  const totHTicks = b1H + smH + Number(efPick === h) + f4H;
+  const totATicks = b1A + smA + Number(efPick === a) + f4A;
+
+  const r82SatTrap = clashBoxes && satTrap && !p4Hit;
+  const r82WeakClash = Boolean(isSm14 && clashBoxes && !p4Hit && !vipSm14);
+  const f4Cnt = Number(p1Hit) + Number(p2Hit) + Number(p3Hit) + Number(p4Hit);
+  const f4TickLead = isM15 ? (pkM15 === h ? totHTicks > totATicks : totATicks > totHTicks) : false;
+  const nobetF4Trap = Boolean(!isSm14 && isM15 && !f4TickLead);
+  const oppSug = sugPick === h ? a : h;
+  const oppSugL5 = oppSug === h ? hL5 : aL5;
+  const b1Pick = b1H > b1A ? h : b1A > b1H ? a : "";
+  const revM12 = Boolean(!dualWater && isM12 && pkM12 === oppSug && (oppSugL5 < 50.0 || oppSugL5 >= 55.0));
+  const revHM11 = Boolean(!dualWater && oppSug === h && isM11 && pkM11 === oppSug && efPick === oppSug);
+  const dirM12 = Boolean(!dualWater && !isSm14 && !p4AirTrap && isM12 && pkM12 === sugPick && sugL5 >= 60.0);
+  const dirM11B1 = Boolean(
+    !dualWater && !isSm14 && !p4AirTrap && isM11 && pkM11 === sugPick && b1Pick === sugPick && sugL5 >= 65.0
+  );
+
+  let ptsH = 0.0;
+  let ptsA = 0.0;
+  let topHit = false;
+  const addPts = (tmS: string, pts: number) => {
+    if (pts > 0 && tmS === h) ptsH += pts;
+    else if (pts > 0 && tmS === a) ptsA += pts;
+  };
+
+  if (isM15) {
+    const soloP3 = p3Hit && !(p1Hit || p2Hit || p4Hit);
+    if (f4Cnt >= 2 && (isSm14 || f4TickLead)) {
+      addPts(pkM15, 10.0);
+      topHit = true;
+    } else if ((isSm14 && p4Hit) || (!isSm14 && (p1Hit || p2Hit) && f4TickLead)) {
+      addPts(pkM15, 8.0);
+      topHit = true;
+    } else if (!isSm14 && p4Hit && f4TickLead) {
+      addPts(pkM15, 7.0);
+      topHit = true;
+    } else if (soloP3) {
+      addPts(pkM15, 1.0);
+    } else {
+      addPts(pkM15, 1.5);
+    }
+  } else if (p4AirTrap && efPick) {
+    addPts(efPick, 3.5);
+  }
+
+  if (isSm14 && vipSm14 && !r82SatTrap) {
+    addPts(pkSm14, 9.0);
+    topHit = true;
+  } else if (isSm14 && !r82WeakClash && !r82SatTrap) {
+    addPts(pkSm14, 7.0);
+    topHit = true;
+  } else if (revM12 || revHM11) {
+    addPts(oppSug, 7.0);
+    topHit = true;
+  } else if (!(r82WeakClash || r82SatTrap)) {
+    if (dirM12 || dirM11B1) {
+      addPts(sugPick, 7.0);
+      topHit = true;
+    } else if (nobetF4Trap && pkM15 === sugPick) {
+      addPts(sugPick, 1.5);
+    } else {
+      addPts(sugPick, sugL5 >= 58.0 ? 5.0 : sugL5 >= 50.0 ? 4.0 : 2.5);
+    }
+  }
+
+  if (isSm14 && !r82WeakClash && !r82SatTrap) {
+    addPts(pkSm14, 6.0);
+    topHit = true;
+  } else if (revM12 || revHM11) {
+    addPts(oppSug, 5.0);
+  } else if (!(r82WeakClash || r82SatTrap)) {
+    if (dirM12 || dirM11B1) {
+      addPts(sugPick, 4.5);
+    } else if (smH !== smA) {
+      addPts(smH > smA ? h : a, 2.0);
+    }
+  }
+
+  if (efPick) addPts(efPick, efTier === "STRONG" ? 3.5 : 2.0);
+  if (!dualWater && (hLeadCnt === 3 || aLeadCnt === 3)) {
+    addPts(hLeadCnt === 3 ? h : a, 1.5);
+  } else if (domSplit && hDomCnt !== aDomCnt) {
+    addPts(hDomCnt > aDomCnt ? h : a, 1.0);
+  }
+  if (b1Pick) addPts(b1Pick, Math.abs(b1H - b1A) >= 2 ? 1.5 : 1.0);
+
+  const deltaPts = Math.round(Math.abs(ptsH - ptsA) * 10) / 10;
+  const pkM16 = ptsH > ptsA ? h : ptsA > ptsH ? a : sugPick;
+  const efStrongM16 = Boolean(efPick && efTier === "STRONG" && efPick === pkM16);
+  const isM16 = Boolean(
+    (topHit && deltaPts >= 8.0) || deltaPts >= 5.5 || (deltaPts >= 4.0 && efStrongM16)
+  );
+  const vipM16 = Boolean(topHit && deltaPts >= 18.0);
+
+  if ((htrap || atrap) && !isM12) {
+    if (isM13) {
+      const ish13 = pkM13 === h;
+      const p0_13 = ish13 ? h0011Sum : a0011Sum;
+      if (((ish13 && htrap) || (!ish13 && atrap)) && p0_13 > -8.0) {
+        isM13 = false;
+        vipM13 = false;
+      }
+    }
+    if (isM15) {
+      const ish15 = pkM15 === h;
+      const p0_15 = ish15 ? h0011Sum : a0011Sum;
+      if (((ish15 && htrap) || (!ish15 && atrap)) && p0_15 > -8.0) {
+        isM15 = false;
+        vipM15 = false;
+      }
+    }
+  }
+
+  const sig17 = Boolean(isM13 && isM15 && pkM13 && pkM13 === pkM15);
+  const pkM17 = sig17 ? pkM13 : "";
+  let vipM17 = false;
+  if (sig17) {
+    const ish17 = pkM17 === h;
+    const dElo = ish17 ? hpct : apct;
+    const oppEl = ish17 ? aEl : hEl;
+    const p0011 = ish17 ? h0011Sum : a0011Sum;
+    const p1xxx = ish17 ? hSum : aSum;
+    if (
+      (dElo >= 75.0 && p0011 < 0 && vipM13) ||
+      (p0011 <= -8.0 && p1xxx < 0 && vipM13) ||
+      (dElo >= 58.0 && p0011 <= -8.0 && vipM13) ||
+      (dElo >= 75.0 && oppEl === "EARTH") ||
+      (dElo >= 60.0 && p0011 < 0)
+    ) {
+      vipM17 = true;
+    }
+  }
+
+  const nextModes: Record<string, { sig: boolean; vip: boolean; pick: string }> = {
+    ...fm.modes,
+    dual_pillar: { sig: isDualPillar, vip: isVipCross, pick: pkDp },
+    vip_cross: { sig: isVipCross, vip: isDiamond, pick: pkVip },
+    astro_lock: { sig: isAstroLock, vip: Boolean(isAstroLock && isVipCross), pick: pkAst },
+    diamond: { sig: isDiamond, vip: isDiamond, pick: pkDia },
+    geo_1xxx_lock: { sig: isM5, vip: Boolean(isVipCross && g1Win === pkVip), pick: pkDp },
+    double_pwr_lock: {
+      sig: isM6,
+      vip: Boolean(isVipCross && g1Win === pkVip && allWin === pkVip),
+      pick: pkDp,
+    },
+    earth_neg_lock: { sig: isM7, vip: Boolean(isM7 && isVipCross), pick: pkDp },
+    safe_dl_core: { sig: isM8, vip: isM7, pick: pkM8 },
+    pos_inv_lock: { sig: isM9, vip: isM7, pick: pkM9 },
+    gf_fin_pure: { sig: true, vip: Math.abs(hGf - aGf) >= 10.0, pick: pkM10 },
+    tri_gf_routed: { sig: isM11, vip: Boolean(isM11 && triple3Win === pkM11), pick: pkM11 },
+    tri_gf_ultralock: { sig: isM12, vip: Boolean(isM12 && isM9), pick: pkM12 },
+    anti_nobet_smart: { sig: isM13, vip: vipM13, pick: pkM13 },
+    total_elem_12: {
+      sig: baseM14Sig,
+      vip: Boolean(baseM14Sig && (hLeadCnt === 3 || aLeadCnt === 3)),
+      pick: baseM14Pick,
+    },
+    smart_elem_14: { sig: isSm14, vip: vipSm14, pick: pkSm14 },
+    fusion4_elem: { sig: isM15, vip: vipM15, pick: pkM15 },
+    referee6_ranked: { sig: isM16, vip: vipM16, pick: pkM16 },
+    mode17: { sig: sig17, vip: vipM17, pick: pkM17 },
+  };
+
+  const pHome01 = Math.min(0.99, Math.max(0.01, hL5 / 100));
+  const hodds = Math.round((1 / pHome01) * 100) / 100;
+  const aodds = Math.round((1 / (1 - pHome01)) * 100) / 100;
+  const sysPick = g.sys_win || h;
+  const mel = matchupElemFromPct(sysPick === h ? hL5 : aL5);
+
+  return {
+    ...g,
+    wtp: {
+      ...(g.wtp ?? { mon: "", htp: 0, atp: 0, dtp: 0, hrk: 99, ark: 99, hwl: "", awl: "" }),
+      hpct,
+      apct,
+      l5h: hL5,
+      hel: hEl,
+      ael: aEl,
+      mel,
+      hodds,
+      aodds,
+      htrap: htrap ? 1 : 0,
+      atrap: atrap ? 1 : 0,
+      profileKey,
+    },
+    fusion_meta: {
+      ...fm,
+      vetoed: isVetoed,
+      modes: nextModes,
+      team: { ...tm, sig: tSig, vip: tVip },
+      player: { ...pl, sig: pSig, vip: pVip },
+      geo1xxx: {
+        ...g1,
+        m12_route: {
+          ...(g1.m12_route ?? { code: "", reason_fa: "", flipped: false }),
+          code: m12Code,
+        },
+      },
+    },
+  };
+}
+
 export type Mode17Tier = "black_diamond" | "pure_astro" | "daily_gold" | "standard" | "none";
 export type Mode17FilterKey = "all17" | "gold_plus" | "sniper_top" | "all_slate";
 
@@ -1708,6 +2458,13 @@ export function evalMode17Gold(g: NbaGamePred) {
   const fm = g.fusion_meta;
   const inOverlap = fm?.in_auth_overlap !== false;
   const wtp: any = g.wtp ?? {};
+  const profKey: PowerProfileKey = (wtp.profileKey as PowerProfileKey) || "a_elo";
+  const pwrTag =
+    profKey === "c_vol"
+      ? "قدرت هیبرید فصل+Pyth"
+      : profKey === "b_pure"
+        ? "قدرت جدول خالص فصل"
+        : "Direct Surface Elo";
   const g1 = fm?.geo1xxx;
 
   const rawM13 = fm?.modes?.anti_nobet_smart;
@@ -1734,7 +2491,6 @@ export function evalMode17Gold(g: NbaGamePred) {
     : (m13Sig && m13Pick) || (m15Sig && m15Pick) || g.sys_win || g.h;
   const isHomePick = pick === g.h;
 
-  // CRITICAL: Strictly use Direct Surface Elo % (wtp.hpct / wtp.apct), NOT stretched Log5!
   const rawDirectElo = Number(isHomePick ? (wtp.hpct ?? 50) : (wtp.apct ?? 50));
   const directElo = Math.round(rawDirectElo * 10) / 10;
   const pickElem = String(isHomePick ? (wtp.hel ?? "AIR") : (wtp.ael ?? "AIR"));
@@ -1752,65 +2508,80 @@ export function evalMode17Gold(g: NbaGamePred) {
   let maxBuyCents = 0;
 
   if (!agreed) {
+    const trapNames = [wtp.htrap ? getTeam3Code(g.h) : "", wtp.atrap ? getTeam3Code(g.a) : ""]
+      .filter(Boolean)
+      .join(" / ");
+    const trapSuffix =
+      profKey === "c_vol" && trapNames
+        ? ` • 🛡️ مهار تله شهرت/افت فرم فصل (${trapNames})`
+        : "";
     if (m13Sig && m15Sig && m13Pick !== m15Pick) {
-      reasonFa = `تضاد جهت دو موتور: حالت ۱۳ روی ${getTeam3Code(m13Pick)} و حالت ۱۵ روی ${getTeam3Code(m15Pick)} حکم داده است (ورود ممنوع)`;
+      reasonFa = `تضاد جهت دو موتور: حالت ۱۳ روی ${getTeam3Code(m13Pick)} و حالت ۱۵ روی ${getTeam3Code(m15Pick)} حکم داده است (ورود ممنوع)${trapSuffix}`;
     } else if (m13Sig && !m15Sig) {
-      reasonFa = `حالت ۱۳ (${getTeam3Code(m13Pick)}) فعال است اما حالت ۱۵ (تلفیق ۴ پترن المنت) سیگنال تایید نداده است`;
+      reasonFa = `حالت ۱۳ (${getTeam3Code(m13Pick)}) فعال است اما حالت ۱۵ (تلفیق ۴ پترن المنت) سیگنال تایید نداده است${trapSuffix}`;
     } else if (!m13Sig && m15Sig) {
-      reasonFa = `حالت ۱۵ (${getTeam3Code(m15Pick)}) فعال است اما حالت ۱۳ (ضد NO-BET هوشمند) سیگنال تایید نداده است`;
+      reasonFa = `حالت ۱۵ (${getTeam3Code(m15Pick)}) فعال است اما حالت ۱۳ (ضد NO-BET هوشمند) سیگنال تایید نداده است${trapSuffix}`;
     } else {
-      reasonFa = "هر دو موتور حالت ۱۳ و حالت ۱۵ در این مسابقه خارج از سیگنال هستند";
+      reasonFa = `هر دو موتور حالت ۱۳ و حالت ۱۵ در این مسابقه خارج از سیگنال هستند${trapSuffix}`;
     }
   } else if (directElo >= 75.0 && pick0011 < 0 && m13Vip) {
     tier = "black_diamond";
     tierRank = 4;
-    badgeFa = "🖤 الماس سیاه • ۸۶٫۲٪";
-    lockTitleFa = "سطح ۱ سوپر-الماس (الماس سیاه • ۸۶٫۲٪): توافق ۱۳∩۱۵ + DirectElo≥75% + کد 0011<0 + M13 VIP";
-    reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} • تایید مستقیم M13 VIP`;
-    calWinPct = 86.2;
-    maxBuyCents = 82;
+    const bdPctTxt = profKey === "b_pure" ? "۹۱٫۴٪" : profKey === "c_vol" ? "۹۰٫۱٪" : "۸۵٫۰٪";
+    badgeFa = `🖤 الماس سیاه • ${bdPctTxt}`;
+    lockTitleFa = `سطح ۱ سوپر-الماس (الماس سیاه • ${bdPctTxt}): توافق ۱۳∩۱۵ + ${pwrTag}≥75% + کد 0011<0 + M13 VIP`;
+    reasonFa = `${pwrTag}=${directElo.toFixed(1)}% • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} • تایید مستقیم M13 VIP`;
+    calWinPct = profKey === "b_pure" ? 91.4 : profKey === "c_vol" ? 90.1 : 85.0;
+    maxBuyCents = profKey === "a_elo" ? 82 : 86;
   } else if (
     (pick0011 <= -8.0 && pick1xxx < 0 && m13Vip) ||
     (directElo >= 58.0 && pick0011 <= -8.0 && m13Vip)
   ) {
     tier = "pure_astro";
     tierRank = 3;
-    badgeFa = "⚡ نجومی خالص • ۸۱٫۴٪";
+    const paPctTxt = profKey === "b_pure" ? "۸۸٫۴٪" : profKey === "c_vol" ? "۹۱٫۹٪" : "۸۰٫۵٪";
+    badgeFa = `⚡ نجومی خالص • ${paPctTxt}`;
     if (pick1xxx < 0 && directElo < 58.0) {
-      lockTitleFa = "سطح ۲ تک‌تیرانداز (نجومی خالص • ۸۱٫۴٪): توافق ۱۳∩۱۵ + کد سرد 0011≤-8 + Σ(1xxx)<0 + M13 VIP";
+      lockTitleFa = `سطح ۲ تک‌تیرانداز (نجومی خالص • ${paPctTxt}): توافق ۱۳∩۱۵ + کد سرد 0011≤-8 + Σ(1xxx)<0 + M13 VIP`;
     } else if (pick1xxx < 0) {
-      lockTitleFa = "سطح ۲ تک‌تیرانداز (نجومی خالص + شکارچی • ۸۱٫۴٪–۸۴٫۸٪): 0011≤-8 + Σ(1xxx)<0 + DirectElo≥58% + M13 VIP";
+      lockTitleFa = `سطح ۲ تک‌تیرانداز (نجومی خالص + شکارچی • ${paPctTxt}): 0011≤-8 + Σ(1xxx)<0 + ${pwrTag}≥58% + M13 VIP`;
     } else {
-      lockTitleFa = "سطح ۲ تک‌تیرانداز (شکارچی ضریب نجومی • ۸۴٫۸٪): توافق ۱۳∩۱۵ + DirectElo≥58% + کد سرد 0011≤-8 + M13 VIP";
+      lockTitleFa = `سطح ۲ تک‌تیرانداز (شکارچی ضریب نجومی • ${paPctTxt}): توافق ۱۳∩۱۵ + ${pwrTag}≥58% + کد سرد 0011≤-8 + M13 VIP`;
     }
-    reasonFa = `کد سرد قوی 0011=${fmtVal(pick0011)} • قطب گرم Σ(1xxx)=${fmtVal(pick1xxx)} • DirectElo=${directElo.toFixed(1)}% • M13 VIP`;
-    calWinPct = directElo >= 58.0 ? 84.8 : 81.4;
-    maxBuyCents = 79;
+    reasonFa = `کد سرد قوی 0011=${fmtVal(pick0011)} • قطب گرم Σ(1xxx)=${fmtVal(pick1xxx)} • ${pwrTag}=${directElo.toFixed(1)}% • M13 VIP`;
+    calWinPct = profKey === "b_pure" ? 88.4 : profKey === "c_vol" ? 91.9 : 80.5;
+    maxBuyCents = profKey === "a_elo" ? 79 : 84;
   } else if (
     (directElo >= 75.0 && oppElem === "EARTH") ||
     (directElo >= 60.0 && pick0011 < 0)
   ) {
     tier = "daily_gold";
     tierRank = 2;
-    badgeFa = "🥇 طلایی روزانه • ۸۰٪–۸۳٪";
+    badgeFa =
+      profKey === "b_pure"
+        ? "🥇 طلایی روزانه • ۷۸٪–۸۸٪"
+        : profKey === "c_vol"
+          ? "🥇 طلایی روزانه • ۷۳٪–۹۱٪"
+          : "🥇 طلایی روزانه • ۷۱٪–۸۰٪";
     if (directElo >= 75.0 && oppElem === "EARTH") {
-      lockTitleFa = "سطح ۳ طلایی روزانه (۸۳٫۰٪): توافق ۱۳∩۱۵ + DirectElo≥75% + حریف در تله عنصر EARTH";
-      reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% (≥75%) • عنصر حریف=${oppElem} (تله خاک)${pick0011 < 0 ? ` • 0011=${fmtVal(pick0011)}` : ""}`;
-      calWinPct = 83.0;
+      lockTitleFa = `سطح ۳ طلایی روزانه: توافق ۱۳∩۱۵ + ${pwrTag}≥75% + حریف در تله عنصر EARTH`;
+      reasonFa = `${pwrTag}=${directElo.toFixed(1)}% (≥75%) • عنصر حریف=${oppElem} (تله خاک)${pick0011 < 0 ? ` • 0011=${fmtVal(pick0011)}` : ""}`;
+      calWinPct = profKey === "a_elo" ? 80.5 : 88.0;
     } else {
-      lockTitleFa = "سطح ۳ طلایی روزانه (۷۹٫۴٪): توافق ۱۳∩۱۵ + DirectElo≥60% + تک‌کد سرد فعال 0011<0";
-      reasonFa = `Direct Surface Elo=${directElo.toFixed(1)}% (≥60%) • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} (<0)`;
-      calWinPct = 79.4;
+      lockTitleFa = `سطح ۳ طلایی روزانه: توافق ۱۳∩۱۵ + ${pwrTag}≥60% + تک‌کد سرد فعال 0011<0`;
+      reasonFa = `${pwrTag}=${directElo.toFixed(1)}% (≥60%) • تک‌کد لنگر سرد 0011=${fmtVal(pick0011)} (<0)`;
+      calWinPct = profKey === "b_pure" ? 78.4 : profKey === "c_vol" ? 73.1 : 71.1;
     }
     maxBuyCents = 76;
   } else {
     tier = "standard";
     tierRank = 1;
-    badgeFa = "✅ استاندارد طلایی • ۷۱٫۱٪";
-    lockTitleFa = "سطح ۴ استاندارد طلایی (۷۱٫۱٪): توافق هم‌جهت حالت ۱۳ (ضد NO-BET) ∩ حالت ۱۵ (تلفیق ۴ پترن)";
-    reasonFa = `هم‌جهتی کامل Pick_13 === Pick_15 روی ${getTeam3Code(pick)} • Direct Surface Elo=${directElo.toFixed(1)}%`;
-    calWinPct = 71.1;
-    maxBuyCents = 68;
+    const stdPctTxt = profKey === "b_pure" ? "۷۷٫۹٪" : profKey === "c_vol" ? "۷۶٫۴٪" : "۷۱٫۱٪";
+    badgeFa = `✅ استاندارد طلایی • ${stdPctTxt}`;
+    lockTitleFa = `سطح ۴ استاندارد طلایی (${stdPctTxt}): توافق هم‌جهت حالت ۱۳ (ضد NO-BET) ∩ حالت ۱۵ (تلفیق ۴ پترن)`;
+    reasonFa = `هم‌جهتی کامل Pick_13 === Pick_15 روی ${getTeam3Code(pick)} • ${pwrTag}=${directElo.toFixed(1)}%`;
+    calWinPct = profKey === "b_pure" ? 75.7 : profKey === "c_vol" ? 73.4 : 65.5;
+    maxBuyCents = profKey === "a_elo" ? 68 : 72;
   }
 
   const vip = tier === "black_diamond" || tier === "pure_astro" || tier === "daily_gold";
@@ -1849,12 +2620,16 @@ export type ModeBenchSummary = {
   last50: { w: number; n: number; pct: number; rec: string };
 };
 
-export function computeMode17BenchStats(gamesList: NbaGamePred[]): ModeBenchSummary {
+export function computeMode17BenchStats(
+  gamesList: NbaGamePred[],
+  profileKey: PowerProfileKey = "c_vol"
+): ModeBenchSummary {
   const sorted = [...gamesList].sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n));
   const activeDone: { s: string; won: boolean }[] = [];
   for (const g of sorted) {
     if (!g.done || !g.aw || g.aw === "PENDING") continue;
-    const r = evalMode17Gold(g);
+    const pg = applyPowerProfileToGame(g, profileKey);
+    const r = evalMode17Gold(pg);
     if (!r.sig) continue;
     activeDone.push({ s: String(g.s || g.d?.slice(0, 4) || ""), won: r.pick === g.aw });
   }
@@ -1880,11 +2655,13 @@ export default function NbaDashboardTab({
   twinDbKind = "team",
   tour = "ATP",
   deg3Opt = "opt3",
+  powerProfile = "c_vol",
 }: {
   fusionMode?: FusionModeKey;
   twinDbKind?: TwinDbKind;
   tour?: "ATP" | "WTA" | "ALL";
   deg3Opt?: "opt1" | "opt2" | "opt3";
+  powerProfile?: PowerProfileKey;
 }) {
   const [rawGames, setRawGames] = useState<NbaGamePred[]>([]);
   const [mode17TierFilter, setMode17TierFilter] = useState<Mode17FilterKey>("all17");
@@ -1956,14 +2733,19 @@ export default function NbaDashboardTab({
     fusionMode === "astro_lock" ||
     fusionMode === "diamond";
   const games = useMemo(() => {
-    return rawGames.map((g) => {
+    return rawGames.map((rawG) => {
+      const g = applyPowerProfileToGame(rawG, powerProfile);
       const m =
         fusionMode === "mode17"
           ? evalMode17Gold(g)
           : fusionMode === "anti_nobet_smart"
-            ? evalSmartAntiNoBet(g)
+            ? powerProfile === "a_elo"
+              ? evalSmartAntiNoBet(g)
+              : g.fusion_meta?.modes?.anti_nobet_smart
             : fusionMode === "total_elem_12"
-              ? evalSmartMode14(g)
+              ? powerProfile === "a_elo"
+                ? evalSmartMode14(g)
+                : g.fusion_meta?.modes?.smart_elem_14
               : fusionMode === "fusion4_elem"
                 ? g.fusion_meta?.modes?.fusion4_elem
                 : fusionMode === "referee6_ranked"
@@ -2006,7 +2788,7 @@ export default function NbaDashboardTab({
         fst: done && sig ? hit : undefined,
       } as NbaGamePred;
     });
-  }, [rawGames, fusionMode, isPure2EngineMode]);
+  }, [rawGames, fusionMode, isPure2EngineMode, powerProfile]);
   const [histGames, setHistGames] = useState<HistGameRow[]>([]);
   const [histLoading, setHistLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -2115,7 +2897,7 @@ export default function NbaDashboardTab({
   const [showMonthlyTable, setShowMonthlyTable] = useState<boolean>(true);
   const [page, setPage] = useState<number>(1);
   const PAGE_SIZE = 30;
-  const MASTER_DATA_VERSION = "v68";
+  const MASTER_DATA_VERSION = "v69";
 
   const buildFusionShardUrls = (t: string, opt: string, bust?: number) => {
     const tours = t === "ALL" ? ["atp", "wta"] : [t.toLowerCase()];
@@ -2138,7 +2920,7 @@ export default function NbaDashboardTab({
             didAutoPickDateRef.current = true;
             let bestDate = merged[merged.length - 1].d;
             for (let idx = merged.length - 1; idx >= 0; idx--) {
-              if (evalMode17Gold(merged[idx]).sig) {
+              if (evalMode17Gold(applyPowerProfileToGame(merged[idx], powerProfile)).sig) {
                 bestDate = merged[idx].d;
                 break;
               }
@@ -5800,17 +6582,47 @@ export default function NbaDashboardTab({
 
                       const hDirectElo = Math.round(Number(wtpAct.hpct ?? wtpWk.hpct ?? 50) * 10) / 10;
                       const aDirectElo = Math.round(Number(wtpAct.apct ?? wtpWk.apct ?? 50) * 10) / 10;
+                      const stMeta = g.st_meta;
+                      const profKeyRow: PowerProfileKey =
+                        ((wtpAct as any)?.profileKey as PowerProfileKey) || powerProfile || "c_vol";
+                      const hTrapFlag = Boolean((wtpAct as any)?.htrap);
+                      const aTrapFlag = Boolean((wtpAct as any)?.atrap);
+                      const hRkTxt = stMeta?.h_rk && stMeta.h_rk < 900 ? `#${stMeta.h_rk}` : "";
+                      const aRkTxt = stMeta?.a_rk && stMeta.a_rk < 900 ? `#${stMeta.a_rk}` : "";
+                      const hL10Short = stMeta?.h_l10 ? stMeta.h_l10.split(" ")[0] : "";
+                      const aL10Short = stMeta?.a_l10 ? stMeta.a_l10.split(" ")[0] : "";
+                      const hStandingsSub = stMeta
+                        ? `فصل ${stMeta.h_wl}${hRkTxt ? ` (${hRkTxt})` : ""} • L10:${hL10Short}`
+                        : "";
+                      const aStandingsSub = stMeta
+                        ? `فصل ${stMeta.a_wl}${aRkTxt ? ` (${aRkTxt})` : ""} • L10:${aL10Short}`
+                        : "";
+                      const rowStandingsTitle =
+                        profKeyRow === "c_vol"
+                          ? "جدول فصل و قدرت زمین (هیبرید + Pyth)"
+                          : profKeyRow === "b_pure"
+                            ? "جدول خالص فصل (NBA-Style Pyth)"
+                            : "قدرت پایه کلاسیک (8y Elo + جدول فصل)";
                       const rowStandings: CheckRow = {
                         key: "standings",
                         testId: `row-standings-${g.n}`,
-                        stepTitle: "قدرت پایه و زمین (Surface Elo %)",
-                        stepSub: hEl === "EARTH" && aEl === "EARTH" ? "تله دو EARTH" : isMode17 ? "Direct Surface Elo % واقعی" : undefined,
-                        hText: hEl === "EARTH" ? "تله EARTH" : hEl,
-                        hSub: isMode17 ? `Elo:${hDirectElo}% (L5:${hL5}%)` : `${hL5}%`,
-                        hTick: hEl === "EARTH" ? "trap" : "pass",
-                        aText: aEl === "EARTH" ? "تله EARTH" : aEl,
-                        aSub: isMode17 ? `Elo:${aDirectElo}% (L5:${aL5}%)` : `${aL5}%`,
-                        aTick: aEl === "EARTH" ? "trap" : "pass",
+                        stepTitle: rowStandingsTitle,
+                        stepSub:
+                          hEl === "EARTH" && aEl === "EARTH"
+                            ? "تله دو EARTH"
+                            : (hTrapFlag || aTrapFlag) && profKeyRow === "c_vol"
+                              ? "هشدار واگرایی شهرت/فرم فصل"
+                              : stMeta?.n_act
+                                ? `جدول زنده (${stMeta.n_act} بازیکن فعال)`
+                                : isMode17
+                                  ? "Direct Surface Power %"
+                                  : undefined,
+                        hText: `${hEl === "EARTH" ? "تله EARTH" : hEl}${hRkTxt ? ` ${hRkTxt}` : ""}${hTrapFlag && profKeyRow === "c_vol" ? " ⚠️" : ""}`,
+                        hSub: `${hDirectElo}% (L5:${hL5}%)${hStandingsSub ? ` • ${hStandingsSub}` : ""}`,
+                        hTick: hEl === "EARTH" || (hTrapFlag && profKeyRow === "c_vol") ? "trap" : "pass",
+                        aText: `${aEl === "EARTH" ? "تله EARTH" : aEl}${aRkTxt ? ` ${aRkTxt}` : ""}${aTrapFlag && profKeyRow === "c_vol" ? " ⚠️" : ""}`,
+                        aSub: `${aDirectElo}% (L5:${aL5}%)${aStandingsSub ? ` • ${aStandingsSub}` : ""}`,
+                        aTick: aEl === "EARTH" || (aTrapFlag && profKeyRow === "c_vol") ? "trap" : "pass",
                       };
 
                       const rowTeamOnly: CheckRow = {

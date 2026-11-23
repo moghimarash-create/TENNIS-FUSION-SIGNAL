@@ -10,9 +10,16 @@ import glob
 import json
 import os
 import re
+import sys
 import unicodedata
 import urllib.request
 from datetime import datetime, timedelta, timezone
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+from _lib.tennis_standings_power import build_st_and_profiles_from_snaps
 
 
 def clean_name(raw: str) -> str:
@@ -151,6 +158,35 @@ def main() -> None:
             except Exception:
                 continue
 
+    snap_candidates = [
+        os.path.abspath(os.path.join(here, "..", "data", "tennis_live_standings_snapshot.json")),
+        os.path.abspath(os.path.join(here, "..", "..", "..", "data", "tennis_live_standings_snapshot.json")),
+        "/home/runner/workspace/artifacts/api-server/data/tennis_live_standings_snapshot.json",
+    ]
+    live_snap: dict = {}
+    for sp in snap_candidates:
+        if os.path.isfile(sp):
+            try:
+                live_snap = json.load(open(sp, "r", encoding="utf-8"))
+                break
+            except Exception:
+                pass
+
+    default_pl_snap = {
+        "n_ytd": 0, "w_ytd": 0, "l_ytd": 0,
+        "n_365": 0, "w_365": 0, "l_365": 0,
+        "wl_b": 0.47,
+        "sf": {"Hard": 0.49, "Clay": 0.49, "Grass": 0.49},
+        "w10": 0, "l10": 0, "p10_c": 0.485, "gdiff10": 0.0,
+        "last_w": False, "el": "EARTH", "rk": 999,
+    }
+    canon_snap_idx: dict[str, dict[str, dict]] = {"ATP": {}, "WTA": {}}
+    for tr_k in ("ATP", "WTA"):
+        pls = (live_snap.get(tr_k) or {}).get("players") or {}
+        for pname, pval in pls.items():
+            ck = " ".join(sorted(clean_name(pname).lower().replace("-", " ").split()))
+            canon_snap_idx[tr_k][ck] = pval
+
     updated_scores = 0
     total_done = 0
     pack_files = sorted(glob.glob(os.path.join(pub_dir, "fusion_*_opt*.json")) + glob.glob(os.path.join(pub_dir, "tennis_dashbord_*_opt*.json")))
@@ -159,10 +195,28 @@ def main() -> None:
         games = doc.get("games") or []
         changed = False
         for g in games:
+            tour = str(g.get("tour") or "ATP").upper()
+            h_ck = " ".join(sorted(clean_name(str(g.get("h") or "")).lower().replace("-", " ").split()))
+            a_ck = " ".join(sorted(clean_name(str(g.get("a") or "")).lower().replace("-", " ").split()))
+            if live_snap and g.get("wtp") and (not g.get("st_meta") or not g.get("pwr_p")):
+                tr_doc = live_snap.get(tour) or {}
+                pls_map = tr_doc.get("players") or {}
+                sh = pls_map.get(g.get("h")) or canon_snap_idx.get(tour, {}).get(h_ck) or default_pl_snap
+                sa = pls_map.get(g.get("a")) or canon_snap_idx.get(tour, {}).get(a_ck) or default_pl_snap
+                sf_raw = str(g.get("surface") or "Hard")
+                sf = sf_raw if sf_raw in ("Hard", "Clay", "Grass") else "Hard"
+                st_m, pwr_m = build_st_and_profiles_from_snaps(
+                    sh, sa,
+                    str(sh.get("el") or "EARTH"), str(sa.get("el") or "EARTH"),
+                    int(sh.get("rk") or 999), int(sa.get("rk") or 999),
+                    int(tr_doc.get("nAct") or 120),
+                    sf,
+                    g["wtp"],
+                )
+                g["st_meta"] = st_m
+                g["pwr_p"] = pwr_m
+                changed = True
             if str(g.get("d") or "") in date_set:
-                tour = str(g.get("tour") or "ATP").upper()
-                h_ck = " ".join(sorted(clean_name(str(g.get("h") or "")).lower().replace("-", " ").split()))
-                a_ck = " ".join(sorted(clean_name(str(g.get("a") or "")).lower().replace("-", " ").split()))
                 hit = finals_by_tour.get(tour, {}).get((h_ck, a_ck))
                 if hit:
                     w_ck, wg, lg, sc_s = hit

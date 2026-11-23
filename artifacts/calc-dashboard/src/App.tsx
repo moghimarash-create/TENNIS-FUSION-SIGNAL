@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, type ErrorInfo, type ReactNode } from "react";
+import { Component, useState, useEffect, useMemo, type ErrorInfo, type ReactNode } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,8 +12,11 @@ import NbaDashboardTab, {
 } from "./NbaDashboardTab";
 import {
   DEG3_OPTIONS,
+  POWER_PROFILES,
+  POWER_PROFILE_KEYS,
   TENNIS_TOURS,
   type Deg3OptionKey,
+  type PowerProfileKey,
   type TennisTourScope,
 } from "./tennis-config";
 
@@ -173,6 +176,14 @@ function Home() {
     return "opt3";
   });
 
+  const [powerProfile, setPowerProfile] = useState<PowerProfileKey>(() => {
+    try {
+      const s = window.localStorage.getItem("tennis_fusion_pwr_v1");
+      if (s === "c_vol" || s === "b_pure" || s === "a_elo") return s;
+    } catch {}
+    return "c_vol";
+  });
+
   const [fusionMode, setFusionMode] = useState<FusionModeKey>(() => {
     try {
       const s = window.localStorage.getItem("tennis_fusion_mode_v3") as FusionModeKey | null;
@@ -184,7 +195,7 @@ function Home() {
   const [twinDbKind, setTwinDbKind] = useState<TwinDbKind>("team");
   const [openBench, setOpenBench] = useState<boolean>(false);
   const [benchData, setBenchData] = useState<any | null>(null);
-  const [dynMode17Bench, setDynMode17Bench] = useState<Record<TennisTourScope, ModeBenchSummary> | null>(null);
+  const [shardGamesCache, setShardGamesCache] = useState<{ atp: any[]; wta: any[] } | null>(null);
 
   useEffect(() => {
     fetch("/fusion_modes_benchmark.json")
@@ -216,17 +227,22 @@ function Home() {
         if (cancelled) return;
         const atpGames = atpDocs.flatMap((d: any) => d?.games ?? []);
         const wtaGames = wtaDocs.flatMap((d: any) => d?.games ?? []);
-        setDynMode17Bench({
-          ATP: computeMode17BenchStats(atpGames),
-          WTA: computeMode17BenchStats(wtaGames),
-          ALL: computeMode17BenchStats([...atpGames, ...wtaGames]),
-        });
+        setShardGamesCache({ atp: atpGames, wta: wtaGames });
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [deg3Opt]);
+
+  const dynMode17Bench = useMemo<Record<TennisTourScope, ModeBenchSummary> | null>(() => {
+    if (!shardGamesCache) return null;
+    return {
+      ATP: computeMode17BenchStats(shardGamesCache.atp, powerProfile),
+      WTA: computeMode17BenchStats(shardGamesCache.wta, powerProfile),
+      ALL: computeMode17BenchStats([...shardGamesCache.atp, ...shardGamesCache.wta], powerProfile),
+    };
+  }, [shardGamesCache, powerProfile]);
 
   const switchTour = (t: TennisTourScope) => {
     setActiveTour(t);
@@ -242,6 +258,13 @@ function Home() {
     } catch {}
   };
 
+  const switchPowerProfile = (p: PowerProfileKey) => {
+    setPowerProfile(p);
+    try {
+      window.localStorage.setItem("tennis_fusion_pwr_v1", p);
+    } catch {}
+  };
+
   const switchFusion = (m: FusionModeKey) => {
     setFusionMode(m);
     try {
@@ -249,9 +272,20 @@ function Home() {
     } catch {}
   };
 
+  const m17PctTag =
+    powerProfile === "b_pure" ? "۷۷٫۹٪" : powerProfile === "c_vol" ? "۷۶٫۴٪" : "۷۱٫۱٪";
+  const getModeShortFa = (mk: FusionModeKey) =>
+    mk === "mode17"
+      ? `★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ${m17PctTag}) [پیشنهادی]`
+      : FUSION_MODES[mk].shortFa;
+
   const cur = FUSION_MODES[fusionMode];
+  const baseBenchForProfile =
+    benchData?.byProfile?.[powerProfile]?.[deg3Opt]?.[activeTour] ??
+    benchData?.byOption?.[deg3Opt]?.[activeTour] ??
+    {};
   const activeModesBench: Record<string, any> = {
-    ...(benchData?.byOption?.[deg3Opt]?.[activeTour] ?? {}),
+    ...baseBenchForProfile,
     ...(dynMode17Bench ? { mode17: dynMode17Bench[activeTour] } : {}),
   };
   const curBench = activeModesBench[cur.benchKey];
@@ -269,10 +303,10 @@ function Home() {
                 className="text-lg md:text-xl font-extrabold tracking-tight text-slate-900"
                 data-testid="text-dashboard-title"
               >
-                داشبورد تلفیقی ۲ باکسی تنیس (TENNIS-FUSION-SIGNAL • ۱۷ حالت × ۳ آپشن DEG3 • ۲۰۲۴–۲۰۲۶)
+                داشبورد تلفیقی ۲ باکسی تنیس (TENNIS-FUSION-SIGNAL • ۱۷ حالت × ۳ پایه قدرت فصل • ۲۰۲۴–۲۰۲۶)
               </h1>
               <p className="text-slate-600 text-xs leading-snug">
-                باکس ۱: چک‌لیست تیک‌دار شاخص‌های هر دو بازیکن • باکس ۲: حکم نهایی، قفل استفاده‌شده و نتیجه مسابقه در زیر هر کارت (بدون تاریخ تولد • متصل به KXATPMATCH / KXWTAMATCH)
+                باکس ۱: چک‌لیست تیک‌دار شاخص‌ها + جدول فصل و Surface Pyth هر دو بازیکن • باکس ۲: حکم نهایی، قفل استفاده‌شده و نتیجه مسابقه در زیر هر کارت (بدون تاریخ تولد • متصل به KXATPMATCH / KXWTAMATCH)
               </p>
             </div>
           </div>
@@ -283,7 +317,7 @@ function Home() {
           </div>
         </header>
 
-        {/* Top Bar 1: Tour Switcher (ATP / WTA / ALL) + 3-Option DEG3 Switcher */}
+        {/* Top Bar 1: Tour Switcher (ATP / WTA / ALL) + 3-Option DEG3 Switcher + 3-Way Base Power Switcher */}
         <div
           dir="rtl"
           className="mb-3 rounded-xl border-2 border-emerald-300 bg-emerald-50/80 p-2.5 shadow-2xs space-y-2"
@@ -364,6 +398,38 @@ function Home() {
               {DEG3_OPTIONS[deg3Opt].formulaEn}
             </span>
           </div>
+
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-emerald-200/70"
+            data-testid="bar-fusion-power-profile"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="px-2 py-1 rounded bg-indigo-900 text-white text-[11px] font-extrabold">
+                موتور قدرت و جدول پایه:
+              </span>
+              {POWER_PROFILE_KEYS.map((pk) => {
+                const isAct = powerProfile === pk;
+                return (
+                  <button
+                    key={pk}
+                    type="button"
+                    data-testid={`btn-fusion-pwr-${pk}`}
+                    onClick={() => switchPowerProfile(pk)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all ${
+                      isAct
+                        ? "bg-indigo-700 text-white shadow-2xs ring-1 ring-indigo-950"
+                        : "bg-white text-slate-900 hover:bg-indigo-50 border border-indigo-200"
+                    }`}
+                  >
+                    {POWER_PROFILES[pk].shortFa}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="font-mono text-[10.5px] text-indigo-950 bg-white/90 px-2 py-0.5 rounded border border-indigo-200" dir="ltr">
+              {POWER_PROFILES[powerProfile].formulaEn}
+            </span>
+          </div>
         </div>
 
         {/* Top Bar 2: Clean Single-Row 17-Mode Fusion Selector + Collapsible 2024/2025/2026 Benchmark Table */}
@@ -385,7 +451,7 @@ function Home() {
               >
                 {SELECT_MODE_KEYS.map((mk) => (
                   <option key={mk} value={mk}>
-                    {fusionMode === mk ? `✓ ${FUSION_MODES[mk].shortFa}` : FUSION_MODES[mk].shortFa}
+                    {fusionMode === mk ? `✓ ${getModeShortFa(mk)}` : getModeShortFa(mk)}
                   </option>
                 ))}
               </select>
@@ -417,7 +483,7 @@ function Home() {
             <div className="bg-white rounded-lg border border-sky-200 p-3 space-y-3 overflow-x-auto">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-sky-100">
                 <span className="text-xs font-extrabold text-sky-950">
-                  مقایسه بدون آینده‌نگری ۱۷ حالت تلفیقی (`{activeTour}` • `{DEG3_OPTIONS[deg3Opt].code}`):
+                  مقایسه بدون آینده‌نگری ۱۷ حالت تلفیقی (`{activeTour}` • `{DEG3_OPTIONS[deg3Opt].code}` • `{POWER_PROFILES[powerProfile].badgeFa}`):
                 </span>
 
                 <div className="inline-flex items-center rounded-lg border border-sky-300 bg-sky-50/70 p-0.5 text-[11px] font-bold">
@@ -483,7 +549,7 @@ function Home() {
                         }`}
                       >
                         <td className="py-1.5 px-2.5 font-sans font-extrabold text-sky-950">
-                          <div>{isCur ? "✓ " : ""}{m.shortFa}</div>
+                          <div>{isCur ? "✓ " : ""}{getModeShortFa(mk)}</div>
                           {isM17 && dynMode17Bench && (
                             <div className="text-[10.5px] font-mono text-amber-900 mt-0.5" dir="ltr">
                               {`ATP: ${dynMode17Bench.ATP.total.pct}% (${dynMode17Bench.ATP.total.rec}) • WTA: ${dynMode17Bench.WTA.total.pct}% (${dynMode17Bench.WTA.total.rec})`}
@@ -504,7 +570,13 @@ function Home() {
           )}
         </div>
 
-        <NbaDashboardTab fusionMode={fusionMode} twinDbKind={twinDbKind} tour={activeTour} deg3Opt={deg3Opt} />
+        <NbaDashboardTab
+          fusionMode={fusionMode}
+          twinDbKind={twinDbKind}
+          tour={activeTour}
+          deg3Opt={deg3Opt}
+          powerProfile={powerProfile}
+        />
 
         <footer className="mt-8 pt-4 border-t border-border/50 text-center">
           <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest">
@@ -554,6 +626,7 @@ class AppErrorBoundary extends Component<
                 try {
                   window.localStorage.removeItem("tennis_fusion_tour_v2");
                   window.localStorage.removeItem("tennis_fusion_deg3_v2");
+                  window.localStorage.removeItem("tennis_fusion_pwr_v1");
                   window.localStorage.removeItem("tennis_fusion_mode_v2");
                   window.localStorage.removeItem("tennis_fusion_mode_v3");
                 } catch {}
