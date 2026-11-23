@@ -164,6 +164,14 @@ type NbaGamePred = {
   a_geo_tab?: string;
   hc?: string;
   ac?: string;
+  tour?: string;
+  tourney?: string;
+  city?: string;
+  surface?: string;
+  rnd?: string;
+  h_ioc?: string;
+  a_ioc?: string;
+  deg1?: number;
   hp?: number;
   ap?: number;
   done?: boolean;
@@ -561,8 +569,8 @@ const MANUAL_COL_META: { idx: number; key: string; group: string; sub: string }[
 function decodeGeoTabFa(code: string): string {
   if (!code || code.length < 4) return "شکل رمل جدول روزانه";
   const tierFa = (b1: string, b2: string) =>
-    b1 === "1" ? "۱۰ تیم اول (#1-10)" : b2 === "1" ? "میانه جدول (#11-20)" : "۱۰ تیم آخر (#21-30)";
-  return `میزبان: ${tierFa(code[0], code[1])} | میهمان: ${tierFa(code[2], code[3])}`;
+    b1 === "1" ? "سید برتر" : b2 === "1" ? "میانه رنکینگ" : "پایین‌تر";
+  return `بازیکن ۱: ${tierFa(code[0], code[1])} | بازیکن ۲: ${tierFa(code[2], code[3])}`;
 }
 
 function computeAutoFilterState(
@@ -778,33 +786,33 @@ const TWIN_PATTERN_DEFS: {
   },
   {
     key: "twF1Wtp",
-    titleFa: "سیگنال‌های نهایی موتور جدید فعال (حالت پیش‌فرض ۱۲: ۹۱٫۸٪ برون‌نمونه • ۹۳٫۸٪ فصل جاری)",
-    titleEn: "Active Fusion Engine — Qualified Final Signals",
-    formulaFa: "تمام سیگنال‌های نهایی تاییدشده توسط موتور تلفیقی انتخاب‌شده در نوار بالا (شامل ۱xxx، Σ8، GF-FIN، Σ3 و قوانین ضدحذف)",
+    titleFa: "سیگنال‌های نهایی موتور تلفیقی تنیس (ATP / WTA)",
+    titleEn: "Active Tennis Fusion Engine — Qualified Final Signals",
+    formulaFa: "تمام سیگنال‌های نهایی تاییدشده توسط موتور تلفیقی انتخاب‌شده در نوار بالا (شامل ۱xxx، ΣAll، GF-FIN، Σ3 و قوانین ضدحذف)",
   },
   {
     key: "twF1Guard",
-    titleFa: "نگهبان ۴ تله درونی و خستگی B2B بدون فیلتر جدول هفتگی (۷۷٫۴٪ فصل جاری)",
-    titleEn: "NBA Internal Trap Guard & B2B Fatigue Only",
-    formulaFa: "حذف ۴ تله ثابت درونی و برنامه‌ای NBA (میهمان ضعیف، مخالفت شاخص ۳ کاناله، خستگی Back-to-Back تیم منتخب، و برش CAP7 بدون پشتوانه ۳/۳ شاخص) بدون اعمال فیلتر جدول هفتگی",
+    titleFa: "نگهبان تله‌های درونی بدون فیلتر قدرت پایه هفتگی",
+    titleEn: "Tennis Internal Trap Guard Only",
+    formulaFa: "حذف تله‌های درونی و مخالفت شاخص ۳ کاناله بدون اعمال فیلتر قدرت پایه هفتگی",
   },
   {
     key: "twF1Idx",
-    titleFa: "تلفیق پایه همزاد + شاخص عددی پایه بدون نگهبان تله (Idx هم‌جهت)",
-    titleEn: "NBA Base Combo + Numerical Index Filter",
-    formulaFa: "واجد شرایط همزاد ۵ تا ۷ ردیف (DEG1=53 • ≥۷۱٪) هم‌جهت با Fusion 30 به شرط هم‌جهت بودن شاخص عددی استخر (واحد ۴ امتیازی بسکتبال با سقف ۵ واحد برای حذف بردهای پرت)",
+    titleFa: "تلفیق پایه همزاد + شاخص عددی پایه (Idx هم‌جهت)",
+    titleEn: "Tennis Base Twin + Numerical Index Filter",
+    formulaFa: "واجد شرایط همزاد ۵ تا ۷ ردیف هم‌جهت با Fusion 30 به شرط هم‌جهت بودن شاخص عددی استخر تاریخی تنیس",
   },
   {
     key: "twF1Union",
-    titleFa: "اتحاد سیستم نهایی NBA + نجات شاخص ۳ کاناله (اجماع ۳/۳ + جدول هفتگی)",
-    titleEn: "NBA Final System UNION 3-Channel Index Rescue",
-    formulaFa: "اتحاد سیستم نهایی NBA با بازی‌های دارای اجماع ۳ از ۳ شاخص عددی مستقل (STEP + GEO-FIN + GEO-DYN با Δmin≥1) بدون تله درونی و با تایید جدول هفتگی (ΔTP > -8)",
+    titleFa: "اتحاد سیستم نهایی تنیس + نجات شاخص ۳ کاناله (اجماع ۳/۳)",
+    titleEn: "Tennis Final System UNION 3-Channel Index Rescue",
+    formulaFa: "اتحاد سیستم نهایی تنیس با مسابقات دارای اجماع ۳ از ۳ شاخص عددی مستقل (STEP + GEO-FIN + GEO-DYN)",
   },
   {
     key: "tall",
-    titleFa: "۶. کل بازی‌های مسیر‌یابی‌شده با موتور جدید (بدون حذف بازی)",
-    titleEn: "All Routed NBA Games Under Active Engine (Zero-Drop)",
-    formulaFa: "نمایش برد و باخت تمام بازی‌های NBA بر اساس منتخب مستقیم یا مسیر برنده ضدحذف موتور تلفیقی فعال (۱xxx • Σ8 • GF-FIN • Σ3)",
+    titleFa: "۶. کل مسابقات مسیر‌یابی‌شده با موتور فعال (بدون حذف مسابقه)",
+    titleEn: "All Routed Tennis Matches Under Active Engine (Zero-Drop)",
+    formulaFa: "نمایش برد و باخت تمام مسابقات تنیس بر اساس منتخب مستقیم یا مسیر برنده ضدحذف موتور تلفیقی فعال (۱xxx • ΣAll • GF-FIN • Σ3)",
   },
 ];
 
@@ -824,11 +832,21 @@ const DAILY_QUICK_DATES = [
 
 const KALSHI_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+function getPlayerLastName(playerName: string): string {
+  const clean = (playerName || "").replace(/\s*\(EL:.*$/, "").trim();
+  if (!clean) return "";
+  const parts = clean.split(/\s+/);
+  return parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
+}
+
 function getTeam3Code(teamName: string): string {
-  const clean = teamName.replace(/\s*\(EL:.*$/, "").trim();
-  const mapped = NBA_TEAM_KALSHI_MAP[clean.toLowerCase()];
-  if (mapped) return mapped;
-  return clean.slice(0, 3).toUpperCase();
+  const clean = (teamName || "").replace(/\s*\(EL:.*$/, "").trim();
+  if (!clean) return "";
+  const last = getPlayerLastName(clean);
+  const alpha = last.normalize("NFKD").replace(/[^A-Za-z]/g, "");
+  if (alpha.length >= 3) return alpha.slice(0, 3).toUpperCase();
+  const fullAlpha = clean.normalize("NFKD").replace(/[^A-Za-z]/g, "");
+  return (fullAlpha || clean).slice(0, 3).toUpperCase();
 }
 
 function buildKalshiNbaTicker(
@@ -1096,8 +1114,8 @@ function evalSmartMode14(g: NbaGamePred) {
   let vip = false;
   let pick = p;
   let reasonFa = dualWaterTrap
-    ? `توقف ایمنی المنت غالب: تله دوقلوی آب (هر دو تیم WATER: ${hDomInfo.maxCnt} و ${aDomInfo.maxCnt})`
-    : "توقف خنثی: خارج از آستانه مستقیم (Log5≥75%) یا شرایط تیم عکس";
+    ? `توقف ایمنی المنت غالب: تله دوقلوی آب (هر دو بازیکن WATER: ${hDomInfo.maxCnt} و ${aDomInfo.maxCnt})`
+    : "توقف خنثی: خارج از آستانه مستقیم (Surface Elo≥75%) یا شرایط بازیکن مقابل";
 
   if (m14Sig) {
     if (hasActiveTrap) {
@@ -1108,20 +1126,20 @@ function evalSmartMode14(g: NbaGamePred) {
         sig = true;
         vip = false;
         reasonFa = trapBipolarWeak
-          ? `تشخیص تله دوقطبی روی بازنده (Log5=${pl5.toFixed(1)}%<75%) + تایید موتور ۳ عددی → چرخش برد به تیم عکس (${o})`
-          : `تشخیص تله میهمان Warm<0 روی بازنده + تایید موتور ۳ عددی → چرخش برد به تیم عکس (${o})`;
+          ? `تشخیص تله دوقطبی روی سمت بازنده (Elo=${pl5.toFixed(1)}%<75%) + تایید موتور ۳ عددی → چرخش برد به بازیکن مقابل (${o})`
+          : `تشخیص تله Warm<0 روی سمت بازنده + تایید موتور ۳ عددی → چرخش برد به بازیکن مقابل (${o})`;
       } else if (trapDualWater) {
         kind = "M14_VETO_TRAP";
         sig = false;
-        reasonFa = `مهار تله المنت غالب (۲×WATER: ${pDomInfo.maxCnt} برابر ${oDomInfo.maxCnt}) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+        reasonFa = `مهار تله المنت غالب (۲×WATER: ${pDomInfo.maxCnt} برابر ${oDomInfo.maxCnt}) • حذف سمت تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
       } else if (trapBipolarWeak) {
         kind = "M14_VETO_TRAP";
         sig = false;
-        reasonFa = `مهار تله دوقطبی زیر ۷۵٪ (Log5=${pl5.toFixed(1)}%) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+        reasonFa = `مهار تله دوقطبی زیر ۷۵٪ (Elo=${pl5.toFixed(1)}%) • حذف سمت تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
       } else {
         kind = "M14_VETO_TRAP";
         sig = false;
-        reasonFa = `مهار تله میهمان Warm<0 (${pWarm.toFixed(1)}) • حذف تیم تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
+        reasonFa = `مهار تله Warm<0 (${pWarm.toFixed(1)}) • حذف سمت تله و چرخش مسیر جایگزین به ${o} (بدون بت)`;
       }
     } else {
       kind = "M14_CORE_CLEAN";
@@ -1150,11 +1168,11 @@ function evalSmartMode14(g: NbaGamePred) {
     vip = Boolean((m11FavOpp && spwrFavOpp) || oLeadCnt === 3);
     pick = o;
     if (m11FavOpp && spwrFavOpp) {
-      reasonFa = `چرخش طلایی به تیم عکس (قانون ۲A): قفل ۱۱ + توان ۱۳ موجودیت + Log5=${ol5.toFixed(1)}% (${oDomInfo.dom}:${oDomInfo.maxCnt})`;
+      reasonFa = `چرخش طلایی به بازیکن مقابل (قانون ۲A): قفل ۱۱ + توان کل + Surface Elo=${ol5.toFixed(1)}% (${oDomInfo.dom}:${oDomInfo.maxCnt})`;
     } else if (m11FavOpp) {
-      reasonFa = `چرخش به تیم عکس (قانون ۲B): قفل حالت ۱۱ سمت تیم عکس + Log5=${ol5.toFixed(1)}%`;
+      reasonFa = `چرخش به بازیکن مقابل (قانون ۲B): قفل حالت ۱۱ سمت بازیکن مقابل + Surface Elo=${ol5.toFixed(1)}%`;
     } else {
-      reasonFa = `چرخش به تیم عکس (قانون ۲B): برتری ۱۲ بازیکن خالص (12P GF-FIN) + Log5=${ol5.toFixed(1)}%`;
+      reasonFa = `چرخش به بازیکن مقابل (قانون ۲B): برتری بُعد فردی (GF-FIN) + Surface Elo=${ol5.toFixed(1)}%`;
     }
   }
 
@@ -1491,7 +1509,7 @@ function evalSmartMode14(g: NbaGamePred) {
       ? `رتبه ۱ الماسی ۶ باکس (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): اجماع سنگین باکس‌های رتبه بالا به سود ${getTeam3Code(refPick)}`
       : refTier === "STRONG_SIGNAL"
         ? isOppositeWin
-          ? `رتبه ۲ سیگنال قوی معکوس ⇄ (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): چرخش وزنی ۶ باکس به تیم معکوس ${getTeam3Code(refPick)}`
+          ? `رتبه ۲ سیگنال قوی معکوس ⇄ (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): چرخش وزنی ۶ باکس به بازیکن مقابل ${getTeam3Code(refPick)}`
           : `رتبه ۲ سیگنال قوی ۶ باکس (${winPts} برابر ${losePts} امتیاز • Δ=${deltaPts}): برتری قاطع باکس‌های رتبه ۱ تا ۳ به سود ${getTeam3Code(refPick)}`
         : refTier === "RANKED_CONSENSUS"
           ? isOppositeWin
@@ -1630,7 +1648,7 @@ function evalSmartAntiNoBet(g: NbaGamePred) {
     kind = "HOLD_DUAL_EARTH";
     sig = false;
     pick = p;
-    reasonFa = "توقف ایمنی: تقابل پرنوسان دو تیم EARTH (ورود ممنوع)";
+    reasonFa = "توقف ایمنی: تقابل پرنوسان دو بازیکن EARTH (ورود ممنوع)";
   } else if (code === "ULTRA_3OF3_CLASH_HOLD") {
     kind = "HOLD_3OF3_CLASH";
     sig = false;
@@ -1646,18 +1664,18 @@ function evalSmartAntiNoBet(g: NbaGamePred) {
     kind = "HOLD_3OF3_CLASH";
     sig = false;
     pick = p;
-    reasonFa = "سپر ایمنی ۳/۳: اجماع هر ۳ عدد با تیم پایه است (منع چرخش عکس)";
+    reasonFa = "سپر ایمنی ۳/۳: اجماع هر ۳ عدد با بازیکن پایه است (منع چرخش به بازیکن مقابل)";
   } else if (!m11Sig && oel !== "EARTH" && !is3of3P && ((dpO && ol5 >= 52.0) || (rawFb && ol5 >= 60.0))) {
     kind = "OPPOSITE_FLIP";
     sig = true;
     vip = false;
     pick = o;
     if (dpO && ol5 >= 52.0) {
-      reasonFa = `چرخش به تیم عکس (گروه ۲): تایید همزاد دو-ستونی خلاف مسیر خام (${ol5.toFixed(1)}%)`;
+      reasonFa = `چرخش به بازیکن مقابل (گروه ۲): تایید همزاد دو-ستونی خلاف مسیر خام (${ol5.toFixed(1)}%)`;
     } else if (coldO) {
-      reasonFa = `چرخش به تیم عکس (گروه ۲): قطب سرد ۰xxx منفی + برتری جدول (${ol5.toFixed(1)}%)`;
+      reasonFa = `چرخش به بازیکن مقابل (گروه ۲): قطب سرد ۰xxx منفی + برتری قدرت پایه (${ol5.toFixed(1)}%)`;
     } else {
-      reasonFa = `چرخش به تیم عکس (گروه ۲): رد مسیر خام ضعیف به سود تیم قوی جدول (${ol5.toFixed(1)}%)`;
+      reasonFa = `چرخش به بازیکن مقابل (گروه ۲): رد مسیر خام ضعیف به سود بازیکن قوی‌تر (${ol5.toFixed(1)}%)`;
     }
   }
 
@@ -2088,7 +2106,7 @@ export default function NbaDashboardTab({
       try {
         sessionStorage.setItem(
           "nba_sync_toast_v1",
-          "بروزرسانی زنده نتایج واقعی بازی‌های NBA از ESPN انجام شد و کارت‌ها با آخرین نتایج واقعی آپدیت شدند ✓"
+          "بروزرسانی زنده نتایج واقعی مسابقات تنیس (ATP / WTA) از ESPN انجام شد ✓"
         );
       } catch {}
       const d = await apiRpcJson("/api/nba/sync", {
@@ -2189,20 +2207,11 @@ export default function NbaDashboardTab({
             if (dm?.markets) setKalshiMarkets((prev) => ({ ...prev, ...dm.markets }));
           }
         } catch {}
-        const diffNotes = Array.isArray(d.lineupDiffs) && d.lineupDiffs.length > 0
-          ? " • تغییرات لیست ۸ نفره: " +
-            d.lineupDiffs
-              .map(
-                (x: any) =>
-                  `${x.matchup} (${(x.removed ?? []).join("، ") || "—"} ← ${(x.added ?? []).join("، ") || "—"})`
-              )
-              .join(" | ")
-          : " • لیست ۸ نفره تمام بازی‌ها با آخرین گزارش مصدومان ESPN تطابق کامل دارد";
         setSyncMsg(
-          `بروزرسانی زنده مصدومان ESPN و بازمحاسبه لیست ۸ نفره انجام شد (${d.totalBlockedPlayers ?? 0} غایب/مصدوم بررسی شد • ${d.checkedGames ?? 0} بازی پیش‌رو بازمحاسبه شد • تغییر ترکیب: ${d.changedLineups ?? 0} بازی • دقت فصل جاری حالت ۱۲: ${d.s2627?.pct ?? 96.9}% [${d.s2627?.w ?? 31}/${d.s2627?.n ?? 32}])${diffNotes}`
+          `بروزرسانی جدول و نتایج زنده تنیس (ATP / WTA) از ESPN انجام شد (${d.updatedGames ?? 0} مسابقه آپدیت شد)`
         );
       } else {
-        setSyncMsg(d?.error ?? "خطا در بروزرسانی زنده مصدومان و لیست ۸ نفره");
+        setSyncMsg(d?.error ?? "خطا در بروزرسانی جدول مسابقات تنیس");
       }
     } catch (e) {
       setSyncMsg((e as Error).message);
@@ -2322,7 +2331,11 @@ export default function NbaDashboardTab({
     if (dateFilter !== "ALL" && g.d !== dateFilter) return false;
     if (teamQuery.trim() !== "") {
       const q = teamQuery.trim().toLowerCase();
-      if (!g.h.toLowerCase().includes(q) && !g.a.toLowerCase().includes(q)) return false;
+      const hay = [g.h, g.a, g.hc, g.ac, g.city, g.tourney, g.venue, g.surface, g.h_ioc, g.a_ioc]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
     }
     return true;
   });
@@ -2378,21 +2391,7 @@ export default function NbaDashboardTab({
               className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-xs"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${syncBusy ? "animate-spin" : ""}`} />
-              {syncBusy ? "در حال دریافت نتایج واقعی..." : "بروزرسانی زنده نتایج بازی‌های NBA"}
-            </button>
-            <button
-              type="button"
-              disabled={rosterSyncBusy}
-              onClick={runLiveRosterSync}
-              data-testid="button-nba-roster-sync-top"
-              className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-xs"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${rosterSyncBusy ? "animate-spin" : ""}`} />
-              {rosterSyncBusy
-                ? "در حال بررسی مصدومان ESPN..."
-                : fusionMode === "total_elem_12"
-                  ? "بروزرسانی مصدومان و لیست ۱۲ نفره (ESPN)"
-                  : "بروزرسانی مصدومان و لیست ۸ نفره (ESPN)"}
+              {syncBusy ? "در حال دریافت نتایج واقعی تنیس..." : "بروزرسانی زنده مسابقات ATP / WTA (ESPN)"}
             </button>
             <button
               type="button"
@@ -2405,7 +2404,7 @@ export default function NbaDashboardTab({
               data-testid="button-nba-kalshi-refresh"
               className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-white border border-sky-300 text-sky-950 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors shadow-2xs"
             >
-              بروزرسانی قیمت‌های Kalshi NBA
+              بروزرسانی قیمت‌های Kalshi تنیس (KXATPMATCH / KXWTAMATCH)
             </button>
           </div>
 
@@ -2447,10 +2446,10 @@ export default function NbaDashboardTab({
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-1 rounded-md bg-sky-700 text-white font-extrabold text-xs shadow-2xs">
-                کارت‌های تصمیم‌گیری ۲ باکسی بازی‌های روز NBA
+                کارت‌های تصمیم‌گیری ۲ باکسی مسابقات روز تنیس (ATP / WTA)
               </span>
               <span className="px-2.5 py-0.5 rounded bg-white text-sky-950 border border-sky-300 text-xs font-extrabold font-mono">
-                {activeDailyDate} • {gamesOnDailyDate.length} کارت بازی
+                {activeDailyDate} • {gamesOnDailyDate.length} مسابقه تنیس
               </span>
             </div>
             <button
@@ -2640,20 +2639,7 @@ export default function NbaDashboardTab({
                       <option value="pending">فقط در انتظار برگزاری (PENDING)</option>
                     </select>
 
-                    <button
-                      type="button"
-                      disabled={rosterSyncBusy}
-                      onClick={runLiveRosterSync}
-                      data-testid="button-nba-roster-sync"
-                      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-2xs transition-colors"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${rosterSyncBusy ? "animate-spin" : ""}`} />
-                      {rosterSyncBusy
-                        ? "بررسی مصدومان..."
-                        : fusionMode === "total_elem_12"
-                          ? "آپدیت لیست ۱۲ نفره"
-                          : "آپدیت لیست ۸ نفره"}
-                    </button>
+
 
                     <button
                       type="button"
@@ -2663,7 +2649,7 @@ export default function NbaDashboardTab({
                       className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-2xs transition-colors"
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${syncBusy ? "animate-spin" : ""}`} />
-                      {syncBusy ? "دریافت نتایج..." : "آپدیت نتایج بازی‌ها"}
+                      {syncBusy ? "دریافت نتایج..." : "آپدیت نتایج مسابقات"}
                     </button>
 
                     <button
@@ -2689,7 +2675,7 @@ export default function NbaDashboardTab({
                         data-testid="select-nba-daily-card-mode"
                         className="h-8 rounded border border-sky-300 bg-sky-50 px-2 text-xs font-bold text-sky-950"
                       >
-                        <option value="nhl_best">سیستم نهایی NBA (پیش‌فرض موتور تلفیقی)</option>
+                        <option value="nhl_best">سیستم نهایی تنیس (پیش‌فرض موتور تلفیقی)</option>
                         <option value="nhl_vip3">فقط سطح ویژه VIP</option>
                         <option value="step">کانال ۱ دستی: گام‌به‌گام (STEP)</option>
                         <option value="geo">کانال ۲ دستی: شکل رمل اصلاحی (GEO-FIN)</option>
@@ -2892,7 +2878,7 @@ export default function NbaDashboardTab({
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-400 font-mono font-extrabold">
-                              باکس هوشمند ۱۴: {sm14Active.length} فعال ({sm14CoreCnt} سالم + {sm14DirCnt} مستقیم + {sm14OppCnt} تیم عکس){sm14VetoCnt > 0 ? ` • ${sm14VetoCnt} مهار خطا` : ""}
+                              باکس هوشمند ۱۴: {sm14Active.length} فعال ({sm14CoreCnt} سالم + {sm14DirCnt} مستقیم + {sm14OppCnt} بازیکن مقابل){sm14VetoCnt > 0 ? ` • ${sm14VetoCnt} مهار خطا` : ""}
                             </span>
                           )}
                           {elemDone.length > 0 ? (
@@ -3045,11 +3031,7 @@ export default function NbaDashboardTab({
                       { key: "dom" as CardBoxKey, label: "المنت غالب [F-A-W-E]", show: fusionMode === "total_elem_12" },
                       { key: "elem" as CardBoxKey, label: "برنده المنت (فالوآپ)", show: fusionMode === "total_elem_12" },
                       { key: "fusion4" as CardBoxKey, label: "تلفیق ۴ پترن", show: fusionMode === "total_elem_12" },
-                      {
-                        key: "lineup" as CardBoxKey,
-                        label: fusionMode === "total_elem_12" ? "جزئیات ۱۲ بازیکن" : "جزئیات ۸ بازیکن",
-                        show: true,
-                      },
+
                     ] as const
                   )
                     .filter((item) => item.show)
@@ -4054,7 +4036,7 @@ export default function NbaDashboardTab({
                         <div className="p-3 space-y-2.5 bg-indigo-50/30 border-t border-indigo-200/80">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 border border-emerald-400 text-[11px] font-extrabold">
-                              استراتزی کمبو: {fusionMode === "tri_gf_ultralock" ? "حالت ۱۲ (ابرقفل ۳ عددی)" : fusionMode === "anti_nobet_smart" ? "حالت ۱۳ (ضد NO-BET هوشمند)" : fusionMode === "total_elem_12" ? "حالت ۱۴ (المنت کل ۱۲P+تیم)" : fusionMode === "tri_gf_routed" ? "حالت ۱۱ (۳ عددی مستقل)" : fusionMode === "earth_neg_lock" ? "حالت ۷ (خالص منفی)" : "حالت ۹ (قفل ایمن)"} • کل قفل ایمن: {safePoolOrders.length} بازی
+                              استراتزی کمبو: {fusionMode === "tri_gf_ultralock" ? "حالت ۱۲ (ابرقفل ۳ عددی)" : fusionMode === "anti_nobet_smart" ? "حالت ۱۳ (ضد NO-BET هوشمند)" : fusionMode === "total_elem_12" ? "حالت ۱۴ (المنت کل بازیکن+کورت)" : fusionMode === "tri_gf_routed" ? "حالت ۱۱ (۳ عددی مستقل)" : fusionMode === "earth_neg_lock" ? "حالت ۷ (خالص منفی)" : "حالت ۹ (قفل ایمن)"} • کل قفل ایمن: {safePoolOrders.length} مسابقه
                             </span>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <button
@@ -4505,7 +4487,7 @@ export default function NbaDashboardTab({
                               : (g.f30 ?? 0) >= 0;
                       const homeFav = cardFlipDir[g.n] ? !baseHomeFav : baseHomeFav;
                       const predTeam = homeFav ? g.h : g.a;
-                      const predRole = homeFav ? "برد میزبان" : "برد میهمان";
+                      const predRole = homeFav ? "برد بازیکن ۱" : "برد بازیکن ۲";
 
                       const trapNoNat3 = Boolean(g.trap_tag);
                       const trapEven6 = false;
@@ -5196,7 +5178,7 @@ export default function NbaDashboardTab({
                       const rowAll8: CheckRow = {
                         key: "all8",
                         testId: `row-geoall8-${g.n}`,
-                        stepTitle: "مجموع ۸ بازیکن Σ(8)",
+                        stepTitle: "مجموع ۶ بُعد فردی Σ(All)",
                         hText: fmtSigned(g1.h_all),
                         hTick: all8Win === g.h ? "pass" : "none",
                         aText: fmtSigned(g1.a_all),
@@ -5247,7 +5229,7 @@ export default function NbaDashboardTab({
                       const rowTwinCombined: CheckRow = {
                         key: "twin",
                         testId: `row-twin-${g.n}`,
-                        stepTitle: "موتور تلفیقی همزاد",
+                        stepTitle: "موتور تلفیقی همزاد (T × P)",
                         stepSub: dpMode?.sig ? "تایید دو-ستونی" : twinActiveWinner ? "تایید VIP تک‌موتور" : "بدون سیگنال همزاد",
                         hText: twinActiveWinner === g.h ? (dpMode?.sig ? "تایید T+P" : "VIP تک‌موتور") : "—",
                         hSub: `${tm.pick === g.h ? "T✓" : "T—"} • ${pm.pick === g.h ? "P✓" : "P—"}`,
@@ -5260,7 +5242,7 @@ export default function NbaDashboardTab({
                       const rowStandings: CheckRow = {
                         key: "standings",
                         testId: `row-standings-${g.n}`,
-                        stepTitle: "عنصر جدول (Log5)",
+                        stepTitle: "قدرت پایه و زمین (Surface Elo %)",
                         stepSub: hEl === "EARTH" && aEl === "EARTH" ? "تله دو EARTH" : undefined,
                         hText: hEl === "EARTH" ? "تله EARTH" : hEl,
                         hSub: `${hL5}%`,
@@ -5273,7 +5255,7 @@ export default function NbaDashboardTab({
                       const rowTeamOnly: CheckRow = {
                         key: "team_eng",
                         testId: `row-team-eng-${g.n}`,
-                        stepTitle: "موتور تیم+استادیوم (T)",
+                        stepTitle: "زاویه مکان و تورنمنت (شهر / تورنمنت • T)",
                         hText: tm.pick === g.h ? `${tm.pct} (${tm.votes})` : "—",
                         hSub: tm.pick === g.h ? `F30:${tm.f30 >= 0 ? `+${tm.f30}` : tm.f30}` : undefined,
                         hTick: tm.pick === g.h && tm.sig ? "pass" : "none",
@@ -5285,7 +5267,7 @@ export default function NbaDashboardTab({
                       const rowPlayerOnly: CheckRow = {
                         key: "player_eng",
                         testId: `row-player-eng-${g.n}`,
-                        stepTitle: "موتور ۸ بازیکن (P)",
+                        stepTitle: "زاویه زمین و کد کشور (Surface + IOC • P)",
                         hText: pm.pick === g.h ? `${pm.pct} (${pm.votes})` : "—",
                         hSub: pm.pick === g.h ? `F30:${pm.f30 >= 0 ? `+${pm.f30}` : pm.f30}` : undefined,
                         hTick: pm.pick === g.h && pm.sig ? "pass" : "none",
@@ -5344,7 +5326,7 @@ export default function NbaDashboardTab({
                         key: "t12_warm",
                         testId: `row-t12-warm-${g.n}`,
                         stepTitle: "قطب گرم Σ(1xxx) المنت کل",
-                        stepSub: "جمع GF-FIN شکل‌های ۱xxx (از ۱۳)",
+                        stepSub: "جمع GF-FIN شکل‌های ۱xxx بردار کل",
                         hText: t12 ? fmtSigned(t12HWarm) : "—",
                         hSub: t12 ? `${t12HCnt1}/13 • Pwr:${fmtSigned(Number(t12.h_w_pwr ?? 0))}` : undefined,
                         hTick: t12WarmWin === g.h ? "pass" : "none",
@@ -5357,7 +5339,7 @@ export default function NbaDashboardTab({
                         key: "t12_cold",
                         testId: `row-t12-cold-${g.n}`,
                         stepTitle: "قطب سرد Σ(0xxx) المنت کل",
-                        stepSub: "جمع GF-FIN شکل‌های ۰xxx (از ۱۳)",
+                        stepSub: "جمع GF-FIN شکل‌های ۰xxx بردار کل",
                         hText: t12 ? fmtSigned(t12HCold) : "—",
                         hSub: t12
                           ? `${t12HCnt0}/13${t12HCnt0011 > 0 ? ` • 0011:${t12HCnt0011}` : ""} • Pwr:${fmtSigned(Number(t12.h_c_pwr ?? 0))}`
@@ -5391,8 +5373,8 @@ export default function NbaDashboardTab({
                       const rowT12Sum: CheckRow = {
                         key: "t12_sum",
                         testId: `row-t12-sum-${g.n}`,
-                        stepTitle: "جمع المنت کل (۱۲ بازیکن + تیم)",
-                        stepSub: "GF-FIN بردار کل + Σ13",
+                        stepTitle: "جمع المنت کل (بازیکن + تورنمنت/کورت)",
+                        stepSub: "GF-FIN بردار کل + Σ",
                         hText: t12 ? fmtSigned(t12.h_gff_tot) : "—",
                         hSub: t12 ? `${t12.h_gf_tot} • Σ13:${fmtSigned(t12HSum13)}` : undefined,
                         hTick: t12GffWin === g.h ? "pass" : "none",
@@ -5457,7 +5439,7 @@ export default function NbaDashboardTab({
                         key: "sm14_lock",
                         testId: `row-sm14-lock-${g.n}`,
                         stepTitle: "سلامت قفل پایه و ۳ تله خطا",
-                        stepSub: "رد ۲×WATER، دوقطبی<75% و میهمان Warm<0",
+                        stepSub: "رد ۲×WATER، دوقطبی<75% و Warm<0",
                         hText: sm14.m14Sig && hIsSm14Base
                           ? sm14.trapDualWater
                             ? "تله ۲×WATER"
@@ -5485,7 +5467,7 @@ export default function NbaDashboardTab({
                             : sm14.trapBipolarWeak
                               ? "تله دوقطبی"
                               : sm14.trapAwayNegWarm
-                                ? "تله میهمان Warm<0"
+                                ? "تله Warm<0"
                                 : "قفل سالم"
                           : aIsSm14Base
                             ? "بدون قفل"
@@ -5542,7 +5524,7 @@ export default function NbaDashboardTab({
                       const sm14Row3Log5: CheckRow = {
                         key: "sm14_log5",
                         testId: `row-sm14-log5-${g.n}`,
-                        stepTitle: "احتمال برد جدول (Log5 خالص)",
+                        stepTitle: "قدرت پایه و زمین (Surface Elo %)",
                         stepSub: "مستقیم ≥75% | عکس ≥62% (طلایی ≥55%)",
                         hText: `${hL5}%`,
                         hSub: hL5 >= 75 ? "آستانه مستقیم" : hL5 >= 62 ? "آستانه عکس" : "زیر آستانه",
@@ -5558,8 +5540,8 @@ export default function NbaDashboardTab({
                       const sm14Row4Opp: CheckRow = {
                         key: "sm14_opp",
                         testId: `row-sm14-opp-${g.n}`,
-                        stepTitle: "تایید چرخش به تیم عکس",
-                        stepSub: "۱۲ بازیکن خالص / قفل ۱۱ / توان ۱۳",
+                        stepTitle: "تایید چرخش به بازیکن مقابل",
+                        stepSub: "بُعد فردی / قفل ۱۱ / توان کل",
                         hText: !hIsSm14Base
                           ? hM11Team && sm14.spwrFavOpp
                             ? "طلایی M11+Pwr"
@@ -5568,12 +5550,12 @@ export default function NbaDashboardTab({
                               : sm14.hasActiveTrap && hM11Dir
                                 ? "مسیر ۱۱ ضدتله"
                                 : sm14.p12FavOpp
-                                  ? "برتری ۱۲ بازیکن"
+                                  ? "برتری بُعد فردی"
                                   : "بدون تایید"
                           : sm14.p12FavBase
-                            ? "هم‌جهت ۱۲P"
-                            : "واگرا با ۱۲P",
-                        hSub: `12P:${fmtSigned(sm14.hP12)} • Pwr:${fmtSigned(sm14.hSPwr)}`,
+                            ? "هم‌جهت GF"
+                            : "واگرا با GF",
+                        hSub: `GF:${fmtSigned(sm14.hP12)} • Pwr:${fmtSigned(sm14.hSPwr)}`,
                         hTick: !hIsSm14Base
                           ? hM11Team || sm14.p12FavOpp || (sm14.hasActiveTrap && hM11Dir)
                             ? "pass"
@@ -5589,12 +5571,12 @@ export default function NbaDashboardTab({
                               : sm14.hasActiveTrap && aM11Dir
                                 ? "مسیر ۱۱ ضدتله"
                                 : sm14.p12FavOpp
-                                  ? "برتری ۱۲ بازیکن"
+                                  ? "برتری بُعد فردی"
                                   : "بدون تایید"
                           : sm14.p12FavBase
-                            ? "هم‌جهت ۱۲P"
-                            : "واگرا با ۱۲P",
-                        aSub: `12P:${fmtSigned(sm14.aP12)} • Pwr:${fmtSigned(sm14.aSPwr)}`,
+                            ? "هم‌جهت GF"
+                            : "واگرا با GF",
+                        aSub: `GF:${fmtSigned(sm14.aP12)} • Pwr:${fmtSigned(sm14.aSPwr)}`,
                         aTick: !aIsSm14Base
                           ? aM11Team || sm14.p12FavOpp || (sm14.hasActiveTrap && aM11Dir)
                             ? "pass"
@@ -5607,16 +5589,16 @@ export default function NbaDashboardTab({
                         key: "sm14_shield",
                         testId: `row-sm14-shield-${g.n}`,
                         stepTitle: "حکم نهایی باکس هوشمند ۱۴",
-                        stepSub: "حذف تیم تله بازنده و انتخاب برنده",
+                        stepSub: "حذف سمت تله بازنده و انتخاب برنده",
                         hText: sm14.hasActiveTrap && hIsSm14Base
-                          ? "حذف تیم تله"
+                          ? "حذف سمت تله"
                           : sm14.kind === "M14_VETO_TRAP" && !hIsSm14Base
                             ? "مسیر عکس (بدون بت)"
                             : sm14.sig && sm14.pick === g.h
                               ? sm14.kind === "M14_TRAP_FLIP"
                                 ? "چرخش ضدتله ✓"
                                 : sm14.kind === "M14_OPPOSITE_FLIP"
-                                  ? "تیم عکس مجاز"
+                                  ? "بازیکن مقابل مجاز"
                                   : sm14.kind === "M14_DIRECT_RELEASE"
                                     ? "مستقیم مجاز"
                                     : sm14.vip
@@ -5629,14 +5611,14 @@ export default function NbaDashboardTab({
                             ? "pass"
                             : "none",
                         aText: sm14.hasActiveTrap && aIsSm14Base
-                          ? "حذف تیم تله"
+                          ? "حذف سمت تله"
                           : sm14.kind === "M14_VETO_TRAP" && !aIsSm14Base
                             ? "مسیر عکس (بدون بت)"
                             : sm14.sig && sm14.pick === g.a
                               ? sm14.kind === "M14_TRAP_FLIP"
                                 ? "چرخش ضدتله ✓"
                                 : sm14.kind === "M14_OPPOSITE_FLIP"
-                                  ? "تیم عکس مجاز"
+                                  ? "بازیکن مقابل مجاز"
                                   : sm14.kind === "M14_DIRECT_RELEASE"
                                     ? "مستقیم مجاز"
                                     : sm14.vip
@@ -5703,7 +5685,7 @@ export default function NbaDashboardTab({
                       const anbRowLog5: CheckRow = {
                         key: "anb_log5",
                         testId: `row-anb-log5-${g.n}`,
-                        stepTitle: "قدرت جدول غیر EARTH",
+                        stepTitle: "قدرت پایه غیر EARTH (Surface Elo)",
                         stepSub: "مستقیم ≥75% | عکس ≥60%",
                         hText: hEl === "EARTH" ? "تله EARTH" : hEl,
                         hSub: `${hL5}%`,
@@ -5717,7 +5699,7 @@ export default function NbaDashboardTab({
                         key: "anb_pole",
                         testId: `row-anb-pole-${g.n}`,
                         stepTitle: "قطب سرد ۰xxx و همزاد مخالف",
-                        stepSub: "تایید چرخش به تیم عکس",
+                        stepSub: "تایید چرخش به بازیکن مقابل",
                         hText:
                           hDpOpp && hColdNeg
                             ? "همزاد + ۰xxx"
@@ -5802,8 +5784,8 @@ export default function NbaDashboardTab({
                         ULTRA_ZERO_1XXX_OPP: "قفل حبس ۱xxx=0.0 (انتقال برد به حریف غیر EARTH)",
                         ULTRA_S3_SPLIT: "قفل شکاف علامت Σ(3) منفی برابر مثبت + تایید همزاد",
                         ULTRA_GF_FLIP: "قفل چرخش داور سنگین GF-FIN به سود حریف",
-                        ULTRA_TWIN_TIEBREAK: "قفل گره‌گشایی موتور همزاد در نبرد دو تیم غیر EARTH",
-                        ULTRA_DUAL_EARTH_HOLD: "قفل ایمنی ۱ (v68): توقف تقابل پرنوسان دو تیم EARTH",
+                        ULTRA_TWIN_TIEBREAK: "قفل گره‌گشایی موتور همزاد در نبرد دو بازیکن غیر EARTH",
+                        ULTRA_DUAL_EARTH_HOLD: "قفل ایمنی ۱: توقف تقابل پرنوسان دو بازیکن EARTH",
                         ULTRA_3OF3_CLASH_HOLD: "قفل ایمنی ۲ (v68): مهار چرخش همزاد برابر اجماع ۳/۳ اعداد",
                         ULTRA_GF_HOLD: "قفل ایمنی ۳: توقف به علت مخالفت سنگین داور GF-FIN",
                         ULTRA_FALLBACK: "مسیر پایه ۳ عددی (بدون احراز شرایط ابرقفل)",
@@ -5812,7 +5794,7 @@ export default function NbaDashboardTab({
                       const anbTitleMap: Record<AntiNoBetKind, string> = {
                         M12_CORE: m12LockTitleMap[m12Code] || "سیگنال اصلی حالت ۱۲ (تایید مستقیم ابرقفل)",
                         DIRECT_RELEASE: "گروه ۱ ضد NO-BET: آزادسازی مستقیم بازی حذف‌شده",
-                        OPPOSITE_FLIP: "گروه ۲ ضد NO-BET: چرخش هوشمند به تیم عکس",
+                        OPPOSITE_FLIP: "گروه ۲ ضد NO-BET: چرخش هوشمند به بازیکن مقابل",
                         HOLD_DUAL_EARTH: "سپر ایمنی ضد NO-BET: توقف تقابل دو EARTH",
                         HOLD_3OF3_CLASH: "سپر ایمنی ضد NO-BET: مهار تضاد همزاد برابر ۳/۳",
                         HOLD_NEUTRAL: "توقف خنثی ضد NO-BET (خارج از شرایط مستقیم و عکس)",
@@ -5821,13 +5803,13 @@ export default function NbaDashboardTab({
                       const t12Code = t12?.code ?? "";
                       const t12TitleMap: Record<string, string> = {
                         TOT12_POLARITY_LOCK: "قفل قطبیت کامل موتور ۱۴ (قطب گرم + تفاضل دوقطبی + المنت کل)",
-                        TOT12_BIPOLAR_HARMONY: "قفل هم‌جهتی دوقطبی Σ(1xxx) و Σ(0xxx) در ۱۳ موجودیت",
-                        TOT12_COLD_TOTAL: "قفل قطب سرد Σ(0xxx) + جمع کل ۱۳ موجودیت + المنت کل",
-                        TOT12_3OF3: "اجماع ۳/۳ المنت کل (۱۲P+تیم + ۱۲P + کیفیت کل)",
-                        TOT12_MAJ_CONFIRM: "اکثریت ۲/۳ المنت کل ۱۲P+تیم + تایید",
-                        TOT12_GF_PAIR: "توافق جفت GF-FIN (۱۲ بازیکن و ۱۲P+تیم)",
-                        TOT12_EARTH_FLIP: "قفل قطبیت المنت کل موتور ۱۴ + برتری احتمال جدول (Log5)",
-                        TOT12_DUAL_EARTH_HOLD: "مسیر پایه موتور ۱۴ (بدون احراز آستانه احتمال جدول)",
+                        TOT12_BIPOLAR_HARMONY: "قفل هم‌جهتی دوقطبی Σ(1xxx) و Σ(0xxx) بردار کل",
+                        TOT12_COLD_TOTAL: "قفل قطب سرد Σ(0xxx) + جمع کل + المنت کل",
+                        TOT12_3OF3: "اجماع ۳/۳ المنت کل (بُعد فردی + مکان/کورت + کیفیت کل)",
+                        TOT12_MAJ_CONFIRM: "اکثریت ۲/۳ المنت کل بازیکن + کورت",
+                        TOT12_GF_PAIR: "توافق جفت GF-FIN (بُعد فردی و کورت/تورنمنت)",
+                        TOT12_EARTH_FLIP: "قفل قطبیت المنت کل موتور ۱۴ + برتری Surface Elo",
+                        TOT12_DUAL_EARTH_HOLD: "مسیر پایه موتور ۱۴ (بدون احراز آستانه Surface Elo)",
                         TOT12_HOLD: "مسیر پایه دوقطبی موتور ۱۴ (خارج از شرط قفل ورود)",
                       };
 
@@ -5844,14 +5826,14 @@ export default function NbaDashboardTab({
                         ? "فیلتر دستی کاربر (۱۲ ستون همزاد)"
                         : isTotalElem12Mode
                           ? sm14.kind === "M14_TRAP_FLIP"
-                            ? "قانون ۱+۲ حالت ۱۴: تشخیص تله روی تیم بازنده و چرخش برد به تیم عکس"
+                            ? "قانون ۱+۲ حالت ۱۴: تشخیص تله روی سمت بازنده و چرخش برد به بازیکن مقابل"
                             : sm14.kind === "M14_OPPOSITE_FLIP"
-                              ? "قانون ۲ حالت ۱۴: چرخش هوشمند به تیم عکس فاقد شرایط"
+                              ? "قانون ۲ حالت ۱۴: چرخش هوشمند به بازیکن مقابل"
                               : sm14.kind === "M14_DIRECT_RELEASE"
-                                ? "قانون ۳ حالت ۱۴: آزادسازی مستقیم با احتمال برد قاطع (Log5≥75%)"
+                                ? "قانون ۳ حالت ۱۴: آزادسازی مستقیم با Surface Elo≥75%"
                                 : sm14.kind === "M14_VETO_TRAP"
-                                  ? "قانون ۱ حالت ۱۴: مهار تله تیم بازنده (چرخش مسیر جایگزین به تیم عکس • بدون بت)"
-                                  : t12TitleMap[t12Code] || "موتور المنت کل ۱۲ بازیکن + تیم"
+                                  ? "قانون ۱ حالت ۱۴: مهار تله سمت بازنده (چرخش مسیر جایگزین به بازیکن مقابل • بدون بت)"
+                                  : t12TitleMap[t12Code] || "موتور المنت کل بازیکن + تورنمنت/کورت"
                           : isAntiNoBetMode
                             ? anbTitleMap[anb.kind]
                             : isTriUltraMode
@@ -5869,7 +5851,7 @@ export default function NbaDashboardTab({
                                     : isGfRescued
                                       ? `قفل داور ۲ از ۳ شاخص GF-FIN (ΔGF=${gfAbsDiff})`
                                       : isSafeDl
-                                        ? "قفل ایمن دوگانه ۱xxx + Σ(8) + ضد EARTH + لنگر منفی"
+                                        ? "قفل ایمن دوگانه ۱xxx + Σ(All) + ضد EARTH + لنگر منفی"
                                         : !pickEarthOk
                                           ? "توقف قفل ضد EARTH"
                                           : !pickNegOk && !isPure2EngineMode
@@ -5904,7 +5886,7 @@ export default function NbaDashboardTab({
                           data-testid={`nba-daily-card-${g.n}`}
                           className={`rounded-xl overflow-hidden flex flex-col justify-between transition-all ${cleanBorderCls}`}
                         >
-                          {/* Minimal Clean Matchup Header (Full Untruncated Team Names) */}
+                          {/* Clean 1v1 Singles Tennis Matchup Header (P1 vs P2 + Tournament + City + Surface + Round) */}
                           <div
                             className={`px-3 py-2 border-b flex items-start justify-between gap-2 ${
                               isQualified && isVip3
@@ -5915,16 +5897,42 @@ export default function NbaDashboardTab({
                             }`}
                             dir="rtl"
                           >
-                            <div className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1 space-y-1">
                               <div className="text-xs font-extrabold text-slate-950 leading-snug break-words" dir="ltr">
+                                <span className="px-1 py-0.2 rounded bg-sky-700 text-white text-[9.5px] font-mono mr-1">P1</span>
                                 <span className="text-sky-800">{g.h}</span>{" "}
-                                <span className="text-[10px] text-slate-500">({g.hc})</span>{" "}
+                                <span className="text-[10px] text-slate-500 font-mono">({g.h_ioc || g.hc})</span>{" "}
                                 <span className="text-slate-400 mx-0.5">vs</span>{" "}
+                                <span className="px-1 py-0.2 rounded bg-indigo-700 text-white text-[9.5px] font-mono mr-1">P2</span>
                                 <span className="text-indigo-900">{g.a}</span>{" "}
-                                <span className="text-[10px] text-slate-500">({g.ac})</span>
+                                <span className="text-[10px] text-slate-500 font-mono">({g.a_ioc || g.ac})</span>
                               </div>
-                              <div className="text-[10px] text-slate-600 font-semibold mt-0.5 flex flex-wrap items-center gap-2">
-                                <span>میزبان: <b>{g.hc}</b> • میهمان: <b>{g.ac}</b></span>
+                              <div className="text-[10px] text-slate-700 font-semibold flex flex-wrap items-center gap-1.5">
+                                <span>
+                                  بازیکن ۱ (P1): <b dir="ltr">{getPlayerLastName(g.h)} ({g.hc})</b> • بازیکن ۲ (P2): <b dir="ltr">{getPlayerLastName(g.a)} ({g.ac})</b>
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-white/90 border border-sky-200 text-slate-900 font-bold" dir="ltr">
+                                  🎾 {g.tourney || g.venue || "Main Tour"}{g.city ? ` • ${g.city}` : ""}
+                                </span>
+                                {g.surface && (
+                                  <span
+                                    dir="ltr"
+                                    className={`px-1.5 py-0.5 rounded font-mono font-extrabold text-[9.5px] border ${
+                                      g.surface === "Clay"
+                                        ? "bg-orange-100 text-orange-950 border-orange-300"
+                                        : g.surface === "Grass"
+                                          ? "bg-emerald-100 text-emerald-950 border-emerald-300"
+                                          : "bg-sky-100 text-sky-950 border-sky-300"
+                                    }`}
+                                  >
+                                    {g.surface}
+                                  </span>
+                                )}
+                                {g.rnd && (
+                                  <span dir="ltr" className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 font-mono font-bold text-[9.5px]">
+                                    Round: {g.rnd}
+                                  </span>
+                                )}
                                 {cardFlipDir[g.n] && (
                                   <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-950 font-bold text-[9.5px]">
                                     جهت معکوس دستی
@@ -5933,7 +5941,7 @@ export default function NbaDashboardTab({
                               </div>
                             </div>
                             <div className="text-left shrink-0 font-mono text-[10px] text-slate-600 font-bold" dir="ltr">
-                              <div>#{g.n}</div>
+                              <div>{g.tour ? `${g.tour} ` : ""}#{g.n}</div>
                               <div>{g.d}</div>
                             </div>
                           </div>
@@ -6064,9 +6072,9 @@ export default function NbaDashboardTab({
                                         <div className="text-[10.5px] font-bold text-slate-600">
                                           {r6.active
                                             ? r6.isOppositeWin
-                                              ? "تیم برنده رتبه‌بندی ۶ باکس (چرخش به تیم معکوس ⇄):"
-                                              : "تیم برنده رتبه‌بندی ۶ باکس:"
-                                            : "تیم پیشرو در جمع امتیاز ۶ باکس (برتری سبک):"}
+                                              ? "بازیکن برنده رتبه‌بندی ۶ باکس (چرخش به بازیکن مقابل ⇄):"
+                                              : "بازیکن برنده رتبه‌بندی ۶ باکس:"
+                                            : "بازیکن پیشرو در جمع امتیاز ۶ باکس (برتری سبک):"}
                                         </div>
                                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                           <span
@@ -6084,7 +6092,7 @@ export default function NbaDashboardTab({
                                             {r6.pick} ({getTeam3Code(r6.pick)})
                                           </span>
                                           <span className="px-2 py-0.5 rounded-md bg-sky-100 border border-sky-300 text-sky-950 text-[10.5px] font-extrabold">
-                                            {r6PickIsHome ? "میزبان ✓" : "میهمان ✓"}
+                                            {r6PickIsHome ? "بازیکن ۱ ✓" : "بازیکن ۲ ✓"}
                                           </span>
                                           {r6.isOppositeWin && (
                                             <span className="px-2 py-0.5 rounded-md bg-violet-100 border border-violet-400 text-violet-950 text-[10px] font-extrabold">
@@ -6198,10 +6206,10 @@ export default function NbaDashboardTab({
                                         <tr className="bg-sky-50 border-b border-sky-200 text-slate-800">
                                           <th className="py-1.5 px-2.5 text-right font-extrabold w-[46%]">رتبه اهمیت و وزن باکس</th>
                                           <th className="py-1.5 px-1.5 text-center font-extrabold border-r border-sky-100 w-[27%]">
-                                            میزبان ({g.hc}: {r6.ptsHome}p)
+                                            بازیکن ۱ ({g.hc}: {r6.ptsHome}p)
                                           </th>
                                           <th className="py-1.5 px-1.5 text-center font-extrabold border-r border-sky-100 w-[27%]">
-                                            میهمان ({g.ac}: {r6.ptsAway}p)
+                                            بازیکن ۲ ({g.ac}: {r6.ptsAway}p)
                                           </th>
                                         </tr>
                                       </thead>
@@ -6326,7 +6334,7 @@ export default function NbaDashboardTab({
                                 }`}
                               >
                                 <span className="font-extrabold text-sky-950">
-                                  باکس ۱ • چک‌لیست شاخص‌های دو تیم
+                                  باکس ۱ • چک‌لیست شاخص‌های دو بازیکن
                                 </span>
                                 <div className="inline-flex items-center gap-1 shrink-0">
                                   <span
@@ -6347,10 +6355,10 @@ export default function NbaDashboardTab({
                                     <tr className="bg-slate-50 border-b border-sky-100 text-slate-700">
                                       <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص مرحله</th>
                                       <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[30%]">
-                                        میزبان ({g.hc})
+                                        بازیکن ۱ ({g.hc})
                                       </th>
                                       <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[30%]">
-                                        میهمان ({g.ac})
+                                        بازیکن ۲ ({g.ac})
                                       </th>
                                     </tr>
                                   </thead>
@@ -6506,10 +6514,10 @@ export default function NbaDashboardTab({
                                         <tr className="bg-slate-50 border-b border-slate-100 text-slate-700">
                                           <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص ضد NO-BET</th>
                                           <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
-                                            میزبان ({g.hc})
+                                            بازیکن ۱ ({g.hc})
                                           </th>
                                           <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
-                                            میهمان ({g.ac})
+                                            بازیکن ۲ ({g.ac})
                                           </th>
                                         </tr>
                                       </thead>
@@ -6615,13 +6623,13 @@ export default function NbaDashboardTab({
                                             </>
                                           ) : anb.kind === "OPPOSITE_FLIP" ? (
                                             <>
-                                              ↺ گروه ۲ (تیم عکس): برد{" "}
+                                              ↺ گروه ۲ (بازیکن مقابل): برد{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {anb.pick} ({getTeam3Code(anb.pick)})
+                                                {anb.pick} ({shortCode(anb.pick)})
                                               </span>{" "}
-                                              — عکسِ{" "}
+                                              — مقابلِ{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {getTeam3Code(anb.baseM12Pick)}
+                                                {shortCode(anb.baseM12Pick)}
                                               </span>
                                             </>
                                           ) : anb.kind === "M12_CORE" ? (
@@ -6687,7 +6695,7 @@ export default function NbaDashboardTab({
                                   } ${isSmartBoxOpen ? "border-b" : ""}`}
                                 >
                                   <span className="font-extrabold text-slate-950">
-                                    باکس هوشمند حالت ۱۴ • اصلاح خطا و تیم عکس
+                                    باکس هوشمند حالت ۱۴ • اصلاح خطا و بازیکن مقابل
                                   </span>
                                   <div className="inline-flex items-center gap-1 shrink-0">
                                     <span
@@ -6737,10 +6745,10 @@ export default function NbaDashboardTab({
                                         <tr className="bg-slate-50 border-b border-slate-100 text-slate-700">
                                           <th className="py-1 px-2 text-right font-extrabold w-[40%]">شاخص هوشمند ۱۴</th>
                                           <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
-                                            میزبان ({g.hc})
+                                            بازیکن ۱ ({g.hc})
                                           </th>
                                           <th className="py-1 px-1.5 text-center font-extrabold border-r border-slate-100 w-[30%]">
-                                            میهمان ({g.ac})
+                                            بازیکن ۲ ({g.ac})
                                           </th>
                                         </tr>
                                       </thead>
@@ -6855,31 +6863,31 @@ export default function NbaDashboardTab({
                                             </>
                                           ) : sm14.kind === "M14_TRAP_FLIP" ? (
                                             <>
-                                              ↺ قانون ۱+۲ (حذف تله بازنده → برد تیم عکس):{" "}
+                                              ↺ قانون ۱+۲ (حذف تله بازنده → برد بازیکن مقابل):{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                                {sm14.pick} ({shortCode(sm14.pick)})
                                               </span>{" "}
                                               — ردِ{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {getTeam3Code(sm14.baseM14Pick)}
+                                                {shortCode(sm14.baseM14Pick)}
                                               </span>
                                             </>
                                           ) : sm14.kind === "M14_OPPOSITE_FLIP" ? (
                                             <>
-                                              ↺ قانون ۲ (تیم عکس فاقد شرایط): برد{" "}
+                                              ↺ قانون ۲ (چرخش به بازیکن مقابل): برد{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                                {sm14.pick} ({shortCode(sm14.pick)})
                                               </span>{" "}
-                                              — عکسِ{" "}
+                                              — مقابلِ{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {getTeam3Code(sm14.baseM14Pick)}
+                                                {shortCode(sm14.baseM14Pick)}
                                               </span>
                                             </>
                                           ) : sm14.kind === "M14_VETO_TRAP" ? (
                                             <>
-                                              ✕ مهار تله تیم بازنده ({getTeam3Code(sm14.baseM14Pick)}) → مسیر جایگزین بدون بت:{" "}
+                                              ✕ مهار تله سمت بازنده ({shortCode(sm14.baseM14Pick)}) → مسیر جایگزین بدون بت:{" "}
                                               <span dir="ltr" className="inline-block font-mono">
-                                                {sm14.pick} ({getTeam3Code(sm14.pick)})
+                                                {sm14.pick} ({shortCode(sm14.pick)})
                                               </span>
                                             </>
                                           ) : (
@@ -6940,14 +6948,14 @@ export default function NbaDashboardTab({
                                 className="w-full px-2.5 py-1.5 bg-slate-100/90 hover:bg-slate-200/75 transition-colors border-b border-slate-200 flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-right"
                               >
                                 <span className="font-extrabold text-slate-900">
-                                  باکس ۲ • حکم نهایی، قفل و پیش‌بینی روز
+                                  باکس ۲ • حکم نهایی، قفل و پیش‌بینی مسابقه
                                 </span>
                                 <div className="inline-flex items-center gap-1 shrink-0">
                                   <span
                                     dir="ltr"
                                     className="font-mono font-extrabold text-[9.5px] px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-900"
                                   >
-                                    {getTeam3Code(predTeam)}
+                                    {shortCode(predTeam)}
                                   </span>
                                   <span
                                     data-testid={`badge-preset-status-${g.n}`}
@@ -7012,9 +7020,9 @@ export default function NbaDashboardTab({
                                           : "مسیر پیشنهادی (بدون بت):"}
                                     </span>
                                     <span className="inline-flex items-center gap-1.5 font-extrabold text-xs">
-                                      <bdi dir="ltr">{predTeam}</bdi>
+                                      <bdi dir="ltr">{predTeam} ({shortCode(predTeam)})</bdi>
                                       <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-300 text-[9.5px] font-bold text-slate-800 shrink-0">
-                                        {homeFav ? "میزبان" : "میهمان"} {isQualified ? "✓" : ""}
+                                        {homeFav ? "بازیکن ۱ (P1)" : "بازیکن ۲ (P2)"} {isQualified ? "✓" : ""}
                                       </span>
                                     </span>
                                   </div>
@@ -7086,7 +7094,7 @@ export default function NbaDashboardTab({
                                       <table className="w-full text-[9.5px] border-collapse bg-white/95 font-mono" dir="ltr">
                                         <thead>
                                           <tr className="bg-sky-50 border-b border-sky-100 text-slate-700">
-                                            <th className="py-1 px-2 text-left font-extrabold">TEAM</th>
+                                            <th className="py-1 px-2 text-left font-extrabold">PLAYER</th>
                                             <th className="py-1 px-1 text-center font-extrabold">FIRE</th>
                                             <th className="py-1 px-1 text-center font-extrabold">AIR</th>
                                             <th className="py-1 px-1 text-center font-extrabold">WATER</th>
@@ -7096,7 +7104,7 @@ export default function NbaDashboardTab({
                                         </thead>
                                         <tbody className="divide-y divide-sky-100 text-slate-900">
                                           <tr>
-                                            <td className="py-1 px-2 font-extrabold">{g.hc} (H)</td>
+                                            <td className="py-1 px-2 font-extrabold">{g.hc} (P1)</td>
                                             {[0, 1, 2, 3].map((idx) => (
                                               <td
                                                 key={idx}
@@ -7114,7 +7122,7 @@ export default function NbaDashboardTab({
                                             </td>
                                           </tr>
                                           <tr>
-                                            <td className="py-1 px-2 font-extrabold">{g.ac} (A)</td>
+                                            <td className="py-1 px-2 font-extrabold">{g.ac} (P2)</td>
                                             {[0, 1, 2, 3].map((idx) => (
                                               <td
                                                 key={idx}
@@ -7306,13 +7314,13 @@ export default function NbaDashboardTab({
                                               <span className="font-extrabold text-slate-900">
                                                 {ef.hasPick ? (
                                                   <>
-                                                    تیم برنده المنت غالب:{" "}
+                                                    بازیکن برنده المنت غالب:{" "}
                                                     <span dir="ltr" className="inline-block font-mono text-sky-950">
                                                       {ef.pick} ({getTeam3Code(ef.pick)})
                                                     </span>
                                                   </>
                                                 ) : (
-                                                  "تیم برنده المنت غالب: — خنثی (جلوگیری از ورود نویز)"
+                                                  "بازیکن برنده المنت غالب: — خنثی (جلوگیری از ورود نویز)"
                                                 )}
                                               </span>
                                               {hasFinalScore ? (
@@ -7357,30 +7365,30 @@ export default function NbaDashboardTab({
                                       {
                                         key: "f4_p1",
                                         testId: `row-f4-p1-${g.n}`,
-                                        stepTitle: "۱. هم‌جهتی دو باکس + میزبان + مسیر ۱۱",
-                                        stepSub: "قوی≥52% یا متوسط≥58% • تاریخچه ۸۲.۲٪ (+۱۰.۸pp)",
+                                        stepTitle: "۱. هم‌جهتی دو باکس + بازیکن ۱ + مسیر ۱۱",
+                                        stepSub: "قوی≥52% یا متوسط≥58%",
                                         hText: f4.p1Hit
                                           ? "تایید پترن ۱"
                                           : !ef.hasPick
                                             ? "المنت خنثی"
                                             : ef.pick !== g.h
-                                              ? "المنت میهمان"
+                                              ? "المنت بازیکن ۲"
                                               : !f4.agreeBoxes
                                                 ? "تضاد دو باکس"
                                                 : !f4.epM11Dir
                                                   ? "بدون مسیر M11"
                                                   : ef.tier === "STRONG"
-                                                    ? `L5:${sm14.hL5}%<52%`
-                                                    : `L5:${sm14.hL5}%<58%`,
-                                        hSub: f4.p1Hit ? `L5:${sm14.hL5}% • M11✓` : undefined,
+                                                    ? `Elo:${sm14.hL5}%<52%`
+                                                    : `Elo:${sm14.hL5}%<58%`,
+                                        hSub: f4.p1Hit ? `Elo:${sm14.hL5}% • M11✓` : undefined,
                                         hTick: f4.p1Hit ? "pass" : "none",
-                                        aText: "ویژه میزبان",
+                                        aText: "ویژه بازیکن ۱",
                                         aTick: "none",
                                       },
                                       {
                                         key: "f4_p2",
                                         testId: `row-f4-p2-${g.n}`,
-                                        stepTitle: "۲. هم‌جهتی با سیگنال ۱۴ / تیم / قفل ۱۱ / ۱۲P+Σ",
+                                        stepTitle: "۲. هم‌جهتی با سیگنال ۱۴ / زاویه T / قفل ۱۱ / Σ",
                                         stepSub: "تاریخچه ۸۳.۷٪ (فصل ۲۶-۲۷: ۳۱/۳۱ = ۱۰۰٪)",
                                         hText:
                                           f4.p2Hit && ef.pick === g.h
@@ -7399,8 +7407,8 @@ export default function NbaDashboardTab({
                                                 : f4.epM11Sig
                                                   ? "قفل M11 فعال"
                                                   : f4.sugTeamSig
-                                                    ? "سیگنال تیم + المنت قوی"
-                                                    : "12P + Σ + ≥60%"
+                                                    ? "سیگنال T + المنت قوی"
+                                                    : "GF + Σ + ≥60%"
                                             : undefined,
                                         hTick: f4.p2Hit && ef.pick === g.h ? "pass" : "none",
                                         aText:
@@ -7420,15 +7428,15 @@ export default function NbaDashboardTab({
                                                 : f4.epM11Sig
                                                   ? "قفل M11 فعال"
                                                   : f4.sugTeamSig
-                                                    ? "سیگنال تیم + المنت قوی"
-                                                    : "12P + Σ + ≥60%"
+                                                    ? "سیگنال T + المنت قوی"
+                                                    : "GF + Σ + ≥60%"
                                             : undefined,
                                         aTick: f4.p2Hit && ef.pick === g.a ? "pass" : "none",
                                       },
                                       {
                                         key: "f4_p3",
                                         testId: `row-f4-p3-${g.n}`,
-                                        stepTitle: "۳. المنت قوی + ۱۲ بازیکن + جدول ≥62%",
+                                        stepTitle: "۳. المنت قوی + بُعد فردی + Surface Elo ≥62%",
                                         stepSub: "تاریخچه ۷۸.۱٪ (فصل ۲۵-۲۶: ۸۴.۴٪ • ۲۶-۲۷: ۸۳.۳٪)",
                                         hText:
                                           f4.p3Hit && ef.pick === g.h
@@ -7437,12 +7445,12 @@ export default function NbaDashboardTab({
                                               ? ef.tier !== "STRONG"
                                                 ? "المنت متوسط"
                                                 : !f4.epP12Ok
-                                                  ? "بدون برتری 12P"
+                                                  ? "بدون برتری فردی"
                                                   : !f4.agreeBoxes && !f4.isNoBetM14
                                                     ? "تضاد سیگنال ۱۴"
                                                     : `L5:${sm14.hL5}%<62%`
                                               : "غیرفعال",
-                                        hSub: f4.p3Hit && ef.pick === g.h ? `12P✓ • L5:${sm14.hL5}%` : undefined,
+                                        hSub: f4.p3Hit && ef.pick === g.h ? `GF✓ • Elo:${sm14.hL5}%` : undefined,
                                         hTick: f4.p3Hit && ef.pick === g.h ? "pass" : "none",
                                         aText:
                                           f4.p3Hit && ef.pick === g.a
@@ -7451,18 +7459,18 @@ export default function NbaDashboardTab({
                                               ? ef.tier !== "STRONG"
                                                 ? "المنت متوسط"
                                                 : !f4.epP12Ok
-                                                  ? "بدون برتری 12P"
+                                                  ? "بدون برتری فردی"
                                                   : !f4.agreeBoxes && !f4.isNoBetM14
                                                     ? "تضاد سیگنال ۱۴"
                                                     : `L5:${sm14.aL5}%<62%`
                                               : "غیرفعال",
-                                        aSub: f4.p3Hit && ef.pick === g.a ? `12P✓ • L5:${sm14.aL5}%` : undefined,
+                                        aSub: f4.p3Hit && ef.pick === g.a ? `GF✓ • Elo:${sm14.aL5}%` : undefined,
                                         aTick: f4.p3Hit && ef.pick === g.a ? "pass" : "none",
                                       },
                                       {
                                         key: "f4_p4",
                                         testId: `row-f4-p4-${g.n}`,
-                                        stepTitle: "۴. تضاد دو باکس + سیگنال تیم یا ۱۴(≥75%)",
+                                        stepTitle: "۴. تضاد دو باکس + سیگنال T یا ۱۴(≥75%)",
                                         stepSub: "بدون اشباع AIR/EARTH • تاریخچه ۷۹.۷٪",
                                         hText:
                                           f4.p4Hit && f4.sugPick === g.h
@@ -7473,7 +7481,7 @@ export default function NbaDashboardTab({
                                         hSub:
                                           f4.p4Hit && f4.sugPick === g.h
                                             ? f4.sugTeamSig
-                                              ? "سیگنال تیم ✓"
+                                              ? "سیگنال T ✓"
                                               : `سیگنال ۱۴ (${sm14.hL5}%)`
                                             : f4.p4AirTrap && f4.sugPick === g.h
                                               ? "رد تله پترن ۴"
@@ -7493,7 +7501,7 @@ export default function NbaDashboardTab({
                                         aSub:
                                           f4.p4Hit && f4.sugPick === g.a
                                             ? f4.sugTeamSig
-                                              ? "سیگنال تیم ✓"
+                                              ? "سیگنال T ✓"
                                               : `سیگنال ۱۴ (${sm14.aL5}%)`
                                             : f4.p4AirTrap && f4.sugPick === g.a
                                               ? "رد تله پترن ۴"
@@ -7581,10 +7589,10 @@ export default function NbaDashboardTab({
                                                 <tr className="bg-sky-50/70 border-b border-sky-100 text-slate-700">
                                                   <th className="py-1 px-2 text-right font-extrabold w-[44%]">پترن ثابت سه‌فصله</th>
                                                   <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[28%]">
-                                                    میزبان ({g.hc})
+                                                    بازیکن ۱ ({g.hc})
                                                   </th>
                                                   <th className="py-1 px-1.5 text-center font-extrabold border-r border-sky-100 w-[28%]">
-                                                    میهمان ({g.ac})
+                                                    بازیکن ۲ ({g.ac})
                                                   </th>
                                                 </tr>
                                               </thead>
@@ -7765,421 +7773,24 @@ export default function NbaDashboardTab({
                               )}
                             </div>
 
-                            {/* ============================================================ */}
-                            {/* Single Collapsible Dropdown for All Secondary Card Details   */}
-                            {/* ============================================================ */}
+                            {/* Minimal Collapsible 1-Line Kalshi Tennis Order Strip (Zero 8-Player Bloat) */}
                             <div className="mt-auto rounded-lg border border-sky-200 bg-white overflow-hidden">
                               <button
                                 type="button"
-                                data-testid={`button-fusion-lineup-${g.n}`}
+                                data-testid={`button-kalshi-card-strip-${g.n}`}
                                 onClick={() => toggleCardBox(g.n, "lineup")}
                                 className="w-full px-2.5 py-1.5 bg-sky-50/80 hover:bg-sky-100/80 text-sky-950 text-[10px] font-extrabold flex items-center justify-between gap-2 transition-colors"
                               >
-                                <span>
-                                  {isTotalElem12Mode
-                                    ? `جزئیات موتور ۱۴ (شاخص GEO هر ${t12?.h_cnt12 ?? 12} بازیکن + تیم${outCnt > 0 ? ` • ${outCnt} غایب OUT` : ""} • پنل Kalshi ${liveAsk}¢)`
-                                    : `جزئیات تکمیلی (لیست ۸ بازیکن${outCnt > 0 ? ` • ${outCnt} غایب OUT` : ""} • پنل Kalshi ${liveAsk}¢)`}
+                                <span className="truncate">
+                                  سفارش تکی Kalshi تنیس (<span dir="ltr" className="font-mono">{kalshiTicker}</span> • {liveAsk}¢)
                                 </span>
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-white border border-sky-300 text-sky-950 text-[9.5px] whitespace-nowrap">{isLineupOpen ? "بستن ▲" : "باز کردن ▼"}</span>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-white border border-sky-300 text-sky-950 text-[9px] whitespace-nowrap">
+                                  {isLineupOpen ? "بستن ▲" : "پنل Kalshi ▼"}
+                                </span>
                               </button>
 
                               {isLineupOpen && (
-                                <div className="p-2 space-y-2 border-t border-sky-200 bg-sky-50/30">
-                                  {/* Standings Strip (Twin Summary Hidden in Mode 14 for Strict Engine Isolation) */}
-                                  <div className="rounded border border-sky-200 bg-white px-2 py-1.5 text-[9.5px] space-y-1">
-                                    <div className="flex flex-wrap items-center justify-between gap-1 font-mono" dir="ltr">
-                                      <span>H#{wtpObj.hrk} ({wtpObj.hwl}) {hEl} {wtpObj.hodds}x</span>
-                                      <span>A#{wtpObj.ark} ({wtpObj.awl}) {aEl} {wtpObj.aodds}x</span>
-                                    </div>
-                                    {!isTotalElem12Mode && (
-                                      <div className="flex flex-wrap items-center justify-between gap-1 text-slate-700 font-mono" dir="ltr">
-                                        <span>Team+Arena: {shortCode(tm.pick)} {tm.votes} ({tm.pct}) F30:{tm.f30}</span>
-                                        <span>8-Players: {shortCode(pm.pick)} {pm.votes} ({pm.pct}) F30:{pm.f30}</span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Mode 14 Isolated View: 12 Dressed Players + 1 Team Entity (13 Entities Per-Person GEO Index & Bipolar Totals) */}
-                                  {isTotalElem12Mode && t12 && (
-                                    <div data-testid={`drawer-total12-${g.n}`} className="rounded border border-indigo-200 bg-white p-2 space-y-2 text-[9.5px]">
-                                      <div className="font-extrabold text-indigo-950 flex flex-wrap items-center justify-between gap-2">
-                                        <span>بردار کل المنت‌ها (۱۲ بازیکن لباس‌پوشیده + ۱ تیم/استادیوم)</span>
-                                        <span className="font-mono text-[8.5px] text-slate-500" dir="ltr">
-                                          EP_12P + EP_Team = EP_Tot → EF_Tot
-                                        </span>
-                                      </div>
-                                      <div className="grid grid-cols-1 gap-1 font-mono text-[9px]" dir="ltr">
-                                        <div className="bg-sky-50/70 rounded px-1.5 py-1 border border-sky-200 break-words">
-                                          <b>{g.hc} ({t12.h_cnt12}P+TM):</b> 12P[{fmtFawe(t12.h_ep_p12)}] + TM[{fmtFawe(t12.h_ep_tm)}] = EP[{fmtFawe(t12.h_ep_tot)}] → EF[{fmtFawe(t12.h_ef_tot)}] | GEO:{t12.h_gf_tot} ({fmtSigned(t12.h_gff_tot)}) | QTOT:{t12.h_qtot}
-                                        </div>
-                                        <div className="bg-indigo-50/70 rounded px-1.5 py-1 border border-indigo-200 break-words">
-                                          <b>{g.ac} ({t12.a_cnt12}P+TM):</b> 12P[{fmtFawe(t12.a_ep_p12)}] + TM[{fmtFawe(t12.a_ep_tm)}] = EP[{fmtFawe(t12.a_ep_tot)}] → EF[{fmtFawe(t12.a_ef_tot)}] | GEO:{t12.a_gf_tot} ({fmtSigned(t12.a_gff_tot)}) | QTOT:{t12.a_qtot}
-                                        </div>
-                                      </div>
-
-                                      <div className="space-y-1.5" dir="ltr">
-                                        {[
-                                          {
-                                            code: g.hc,
-                                            lbl: `${g.h} (${g.hc} • HOME • ${t12.h_cnt12}P + 1 Team)`,
-                                            rows: t12.h_p12 ?? (g.h_players ?? []).map((p: any) => ({ ...p, gff: p.gff ?? p.gf_fin })),
-                                            tmEnt: t12.h_tm_ent,
-                                            outs: g.h_out ?? [],
-                                            cnt1: t12HCnt1,
-                                            cnt0: t12HCnt0,
-                                            cnt0011: t12HCnt0011,
-                                            wGff: t12HWarm,
-                                            cGff: t12HCold,
-                                            c0011Gff: Number(t12.h_c0011_gff ?? 0),
-                                            dGff: t12HDelta,
-                                            sGff: t12HSum13,
-                                            cls: "bg-sky-700 text-white",
-                                          },
-                                          {
-                                            code: g.ac,
-                                            lbl: `${g.a} (${g.ac} • AWAY • ${t12.a_cnt12}P + 1 Team)`,
-                                            rows: t12.a_p12 ?? (g.a_players ?? []).map((p: any) => ({ ...p, gff: p.gff ?? p.gf_fin })),
-                                            tmEnt: t12.a_tm_ent,
-                                            outs: g.a_out ?? [],
-                                            cnt1: t12ACnt1,
-                                            cnt0: t12ACnt0,
-                                            cnt0011: t12ACnt0011,
-                                            wGff: t12AWarm,
-                                            cGff: t12ACold,
-                                            c0011Gff: Number(t12.a_c0011_gff ?? 0),
-                                            dGff: t12ADelta,
-                                            sGff: t12ASum13,
-                                            cls: "bg-indigo-700 text-white",
-                                          },
-                                        ].map((s12) => (
-                                          <div key={s12.code} data-testid={`table-t12-${g.n}-${s12.code}`} className="bg-white rounded border border-sky-200 overflow-hidden">
-                                            <div className={`px-2 py-0.5 text-[9px] font-extrabold flex flex-wrap items-center justify-between gap-1 ${s12.cls}`}>
-                                              <span>{s12.lbl}</span>
-                                              <span className="font-mono">FIN [F-A-W-E] • GEO • GF-FIN • Pwr</span>
-                                            </div>
-                                            {s12.rows.length > 0 || s12.tmEnt ? (
-                                              <div className="divide-y divide-slate-100">
-                                                {s12.rows.map((p12, i12) => {
-                                                  const gfCode = String(p12.gf || "0000");
-                                                  const is1xxx = gfCode.startsWith("1");
-                                                  const is0011 = gfCode === "0011";
-                                                  const gffVal = typeof p12.gff === "number" ? p12.gff : calcPlayerGfFin(p12.ef || p12.ep, gfCode);
-                                                  const pwrVal = typeof p12.pwr === "number" ? p12.pwr : 0;
-                                                  return (
-                                                    <div
-                                                      key={`${s12.code}-p-${i12}`}
-                                                      data-testid={`row-t12-ent-${g.n}-${s12.code}-${i12}`}
-                                                      className={`px-1.5 py-0.5 flex items-center justify-between gap-1 text-[8.5px] font-mono tabular-nums ${
-                                                        is1xxx
-                                                          ? "bg-amber-50/90 border-l-2 border-l-amber-500"
-                                                          : is0011
-                                                            ? "bg-cyan-50/80 border-l-2 border-l-cyan-500"
-                                                            : "bg-white"
-                                                      }`}
-                                                    >
-                                                      <div className="min-w-0 truncate font-sans font-bold text-slate-900">
-                                                        <span className="inline-block w-5 text-sky-800 font-mono">#{p12.no}</span>{" "}
-                                                        {p12.fn} <span className="text-slate-400 font-normal">({p12.mpg}m)</span>
-                                                      </div>
-                                                      <div className="shrink-0 flex items-center gap-1">
-                                                        <span className="px-1 rounded bg-slate-50 text-slate-700 border border-slate-200">
-                                                          {p12.ef || p12.ep}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded tracking-wider ${
-                                                            is1xxx
-                                                              ? "bg-amber-200/95 text-amber-950 border border-amber-500 font-extrabold"
-                                                              : is0011
-                                                                ? "bg-cyan-100 text-cyan-950 border border-cyan-400 font-extrabold"
-                                                                : "bg-sky-50 text-sky-800 border border-sky-200 font-medium"
-                                                          }`}
-                                                        >
-                                                          {gfCode}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
-                                                            gffVal < 0
-                                                              ? "bg-teal-100 text-teal-950 border border-teal-400"
-                                                              : "bg-slate-50 text-slate-700 border border-slate-200"
-                                                          }`}
-                                                        >
-                                                          {fmtSigned(gffVal)}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
-                                                            pwrVal >= 0
-                                                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                                                              : "bg-rose-50 text-rose-800 border border-rose-200"
-                                                          }`}
-                                                        >
-                                                          {fmtSigned(pwrVal)}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                  );
-                                                })}
-                                                {s12.tmEnt && (() => {
-                                                  const tmGf = String(s12.tmEnt.gf || "0000");
-                                                  const tm1xxx = tmGf.startsWith("1");
-                                                  const tm0011 = tmGf === "0011";
-                                                  return (
-                                                    <div
-                                                      data-testid={`row-t12-team-ent-${g.n}-${s12.code}`}
-                                                      className={`px-1.5 py-1 flex items-center justify-between gap-1 text-[8.5px] font-mono tabular-nums border-t border-indigo-200 ${
-                                                        tm1xxx
-                                                          ? "bg-amber-100/80 border-l-2 border-l-amber-600"
-                                                          : tm0011
-                                                            ? "bg-cyan-100/70 border-l-2 border-l-cyan-600"
-                                                            : "bg-indigo-50/60"
-                                                      }`}
-                                                    >
-                                                      <div className="min-w-0 truncate font-sans font-extrabold text-indigo-950">
-                                                        <span className="inline-block px-1 mr-1 rounded bg-indigo-700 text-white font-mono text-[8px]">TM</span>
-                                                        {s12.code} Team + Arena <span className="text-slate-500 font-normal">(ATP: 121 • WTA: 47)</span>
-                                                      </div>
-                                                      <div className="shrink-0 flex items-center gap-1">
-                                                        <span className="px-1 rounded bg-white text-slate-800 border border-slate-300">
-                                                          {s12.tmEnt.ef}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded tracking-wider ${
-                                                            tm1xxx
-                                                              ? "bg-amber-300 text-amber-950 border border-amber-600 font-extrabold"
-                                                              : tm0011
-                                                                ? "bg-cyan-200 text-cyan-950 border border-cyan-500 font-extrabold"
-                                                                : "bg-sky-100 text-sky-900 border border-sky-300 font-bold"
-                                                          }`}
-                                                        >
-                                                          {tmGf}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
-                                                            s12.tmEnt.gff < 0
-                                                              ? "bg-teal-100 text-teal-950 border border-teal-400"
-                                                              : "bg-white text-slate-800 border border-slate-300"
-                                                          }`}
-                                                        >
-                                                          {fmtSigned(s12.tmEnt.gff)}
-                                                        </span>
-                                                        <span
-                                                          className={`px-1 rounded font-extrabold min-w-[34px] text-right ${
-                                                            s12.tmEnt.pwr >= 0
-                                                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                                                              : "bg-rose-50 text-rose-800 border border-rose-200"
-                                                          }`}
-                                                        >
-                                                          {fmtSigned(s12.tmEnt.pwr)}
-                                                        </span>
-                                                      </div>
-                                                    </div>
-                                                  );
-                                                })()}
-                                              </div>
-                                            ) : null}
-
-                                            <div
-                                              data-testid={`summary-t12-poles-${g.n}-${s12.code}`}
-                                              className="px-2 py-1 border-t bg-slate-50/90 border-slate-200 flex flex-wrap items-center justify-between gap-1 text-[8.5px]"
-                                              dir="rtl"
-                                            >
-                                              <span className="font-sans font-extrabold text-slate-900">
-                                                قطبیت ۱۳ موجودیت ({s12.code}):
-                                              </span>
-                                              <div className="flex flex-wrap items-center gap-1 font-mono tabular-nums" dir="ltr">
-                                                <span className="px-1 rounded bg-amber-100 text-amber-950 border border-amber-300 font-bold">
-                                                  Σ(1xxx)={fmtSigned(s12.wGff)} ({s12.cnt1}/13)
-                                                </span>
-                                                <span className="px-1 rounded bg-cyan-50 text-cyan-950 border border-cyan-300 font-bold">
-                                                  Σ(0xxx)={fmtSigned(s12.cGff)} ({s12.cnt0}/13)
-                                                </span>
-                                                {s12.cnt0011 > 0 && (
-                                                  <span className="px-1 rounded bg-cyan-100 text-cyan-950 border border-cyan-400 font-bold">
-                                                    0011({s12.cnt0011})={fmtSigned(s12.c0011Gff)}
-                                                  </span>
-                                                )}
-                                                <span className="px-1 rounded bg-indigo-100 text-indigo-950 border border-indigo-300 font-bold">
-                                                  Δ(1−0)={fmtSigned(s12.dGff)}
-                                                </span>
-                                                <span className="px-1 rounded bg-teal-50 text-teal-950 border border-teal-300 font-bold">
-                                                  Σ(13)={fmtSigned(s12.sGff)}
-                                                </span>
-                                              </div>
-                                            </div>
-                                            {s12.outs.length > 0 && (
-                                              <div className="px-1.5 py-0.5 bg-rose-50 border-t border-rose-200 text-[8.5px] text-rose-900 font-sans" dir="rtl">
-                                                <b>غایب مصدوم/محروم (OUT):</b> {s12.outs.join(" ، ")}
-                                              </div>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* 8-Player Active Lineup & Geomantic Codes (Hidden in Mode 14 for Strict Engine Isolation) */}
-                                  {!isTotalElem12Mode && (hpList.length > 0 || apList.length > 0) && (
-                                    <div className="space-y-1.5" dir="ltr">
-                                      {[
-                                        {
-                                          code: g.hc,
-                                          tName: g.h,
-                                          lbl: `${g.h} (${g.hc} • HOME)`,
-                                          list: hpList,
-                                          outs: g.h_out ?? [],
-                                          sum1: g1.h_sum,
-                                          cnt1: g1.h_cnt,
-                                          sum0: h0Val,
-                                          cnt0: h0Cnt,
-                                          sum0011: h0011Val,
-                                          cnt0011: h0011Cnt,
-                                          sumAll: g1.h_all,
-                                          sumGf: hGfVal,
-                                          sumS3: hS3Val,
-                                          is1xxxWin: g1.win === g.h,
-                                          isCold0Win: cold0Win === g.h,
-                                          isAll8Win: all8Win === g.h,
-                                          isGfWin: gfWin === g.h,
-                                          isS3Win: s3Win === g.h,
-                                          cls: "bg-sky-700 text-white",
-                                        },
-                                        {
-                                          code: g.ac,
-                                          tName: g.a,
-                                          lbl: `${g.a} (${g.ac} • AWAY)`,
-                                          list: apList,
-                                          outs: g.a_out ?? [],
-                                          sum1: g1.a_sum,
-                                          cnt1: g1.a_cnt,
-                                          sum0: a0Val,
-                                          cnt0: a0Cnt,
-                                          sum0011: a0011Val,
-                                          cnt0011: a0011Cnt,
-                                          sumAll: g1.a_all,
-                                          sumGf: aGfVal,
-                                          sumS3: aS3Val,
-                                          is1xxxWin: g1.win === g.a,
-                                          isCold0Win: cold0Win === g.a,
-                                          isAll8Win: all8Win === g.a,
-                                          isGfWin: gfWin === g.a,
-                                          isS3Win: s3Win === g.a,
-                                          cls: "bg-indigo-700 text-white",
-                                        },
-                                      ].map((side) => (
-                                        <div key={side.lbl} className="bg-white rounded border border-sky-200 overflow-hidden">
-                                          <div className={`px-2 py-0.5 text-[9px] font-extrabold flex flex-wrap items-center justify-between gap-1 ${side.cls}`}>
-                                            <span>{side.lbl}</span>
-                                            <span className="font-mono">DEG2•DEG3 • FIN • GEO • GF-FIN • Pwr</span>
-                                          </div>
-                                          <div className="divide-y divide-slate-100">
-                                            {side.list.map((pl) => {
-                                              const gfCode = calcGeoFin(pl.ef, pl.gf);
-                                              const is1xxx = gfCode.startsWith("1");
-                                              const is0011 = gfCode === "0011";
-                                              const plGfVal = calcPlayerGfFin(pl.ef, pl.gf, pl.gf_fin);
-                                              return (
-                                                <div
-                                                  key={pl.pid}
-                                                  data-testid={`row-player-${g.n}-${pl.pid}`}
-                                                  className={`px-1.5 py-0.5 flex items-center justify-between gap-1 text-[9px] font-mono tabular-nums ${
-                                                    is1xxx
-                                                      ? "bg-amber-50/90 border-l-2 border-l-amber-500"
-                                                      : is0011
-                                                        ? "bg-cyan-50/80 border-l-2 border-l-cyan-500"
-                                                        : "bg-white"
-                                                  }`}
-                                                >
-                                                  <div className="min-w-0 truncate font-sans font-bold text-slate-900">
-                                                    <span className="inline-block w-5 text-sky-800 font-mono">#{pl.no}</span>{" "}
-                                                    {pl.fn} <span className="text-slate-400 font-normal">({pl.mpg}m)</span>
-                                                  </div>
-                                                  <div className="shrink-0 flex items-center gap-1 text-[8.5px]">
-                                                    <span className="px-1 rounded bg-sky-50 text-sky-900 border border-sky-200">
-                                                      D2:{pl.d2} D3:{pl.d3}
-                                                    </span>
-                                                    <span className="px-1 rounded bg-slate-50 text-slate-700 border border-slate-200">
-                                                      {pl.ef}
-                                                    </span>
-                                                    <span
-                                                      data-testid={`badge-geofin-${g.n}-${pl.pid}`}
-                                                      className={`px-1 rounded tracking-wider ${
-                                                        is1xxx
-                                                          ? "bg-amber-200/95 text-amber-950 border border-amber-500 font-extrabold"
-                                                          : is0011
-                                                            ? "bg-cyan-100 text-cyan-950 border border-cyan-400 font-extrabold"
-                                                            : "bg-sky-50 text-sky-800 border border-sky-200 font-medium"
-                                                      }`}
-                                                    >
-                                                      {gfCode}
-                                                    </span>
-                                                    <span
-                                                      data-testid={`badge-gffin-${g.n}-${pl.pid}`}
-                                                      className={`px-1 rounded font-extrabold min-w-[32px] text-right ${
-                                                        plGfVal < 0
-                                                          ? "bg-teal-100 text-teal-950 border border-teal-400"
-                                                          : "bg-slate-50 text-slate-700 border border-slate-200"
-                                                      }`}
-                                                    >
-                                                      {fmtSigned(plGfVal)}
-                                                    </span>
-                                                    <span className={`px-1 rounded font-extrabold min-w-[34px] text-right ${pl.pwr >= 0 ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-rose-50 text-rose-800 border border-rose-200"}`}>
-                                                      {pl.pwr >= 0 ? `+${pl.pwr}` : pl.pwr}
-                                                    </span>
-                                                  </div>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                          <div
-                                            data-testid={`summary-1xxx-${g.n}-${side.code}`}
-                                            className="px-2 py-1 border-t bg-slate-50/80 border-slate-200 flex flex-wrap items-center justify-between gap-1 text-[8.5px]"
-                                            dir="rtl"
-                                          >
-                                            <span className="font-sans font-extrabold text-slate-900">
-                                              جمع قطب‌ها ({side.code}):
-                                            </span>
-                                            <div className="flex flex-wrap items-center gap-1 font-mono tabular-nums" dir="ltr">
-                                              <span className="px-1 rounded bg-amber-100 text-amber-950 border border-amber-300 font-bold">
-                                                Σ(1xxx)={fmtSigned(side.sum1)} ({side.cnt1})
-                                              </span>
-                                              <span
-                                                data-testid={`pill-cold0-${g.n}-${side.code}`}
-                                                className="px-1 rounded bg-cyan-50 text-cyan-950 border border-cyan-300 font-bold"
-                                              >
-                                                Σ(0xxx)={fmtSigned(side.sum0)} ({side.cnt0})
-                                              </span>
-                                              {side.cnt0011 > 0 && (
-                                                <span
-                                                  data-testid={`pill-0011-${g.n}-${side.code}`}
-                                                  className="px-1 rounded bg-cyan-100 text-cyan-950 border border-cyan-400 font-bold"
-                                                >
-                                                  0011({side.cnt0011})={fmtSigned(side.sum0011)}
-                                                </span>
-                                              )}
-                                              <span className="px-1 rounded bg-indigo-50 text-indigo-950 border border-indigo-200 font-bold">
-                                                Σ(8)={fmtSigned(side.sumAll)}
-                                              </span>
-                                              <span className="px-1 rounded bg-teal-50 text-teal-950 border border-teal-300 font-bold">
-                                                Σ(GF)={fmtSigned(side.sumGf)}
-                                              </span>
-                                              <span
-                                                data-testid={`pill-s3-${g.n}-${side.code}`}
-                                                className="px-1 rounded bg-sky-100 text-sky-950 border border-sky-300 font-bold"
-                                              >
-                                                Σ(3)={fmtSigned(side.sumS3)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                          {side.outs.length > 0 && (
-                                            <div className="px-1.5 py-0.5 bg-rose-50 border-t border-rose-200 text-[8.5px] text-rose-900 font-sans" dir="rtl">
-                                              <b>غایب مصدوم/محروم (OUT):</b> {side.outs.join(" ، ")}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {/* Single-Card Kalshi Order & Combo Controls */}
+                                <div className="p-2 space-y-1.5 border-t border-sky-200 bg-sky-50/30">
                                   <div className="rounded-lg p-2 border border-sky-200 bg-white space-y-1.5">
                                     <div className="flex items-center justify-between gap-1.5">
                                       <label className="inline-flex items-center gap-1.5 cursor-pointer text-[10.5px] font-extrabold text-slate-900">
@@ -8345,39 +7956,6 @@ export default function NbaDashboardTab({
                                         </button>
                                       </div>
                                     )}
-
-                                    <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setDateFilter(g.d);
-                                          setOpenManualSection(true);
-                                          setManualOpenGames((prev) => ({ ...prev, [g.n]: true }));
-                                          setTimeout(() => {
-                                            document
-                                              .getElementById(`manual-nba-game-row-${g.n}`)
-                                              ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                                          }, 80);
-                                        }}
-                                        className="py-1 px-2 rounded bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-200 font-bold text-[10px] transition-colors"
-                                      >
-                                        جدول فیلتر دستی ↓
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setCardFlipDir((prev) => ({ ...prev, [g.n]: !prev[g.n] }))
-                                        }
-                                        className={`py-1 px-2 rounded font-bold text-[10px] border transition-colors ${
-                                          cardFlipDir[g.n]
-                                            ? "bg-amber-500 text-slate-950 border-amber-600"
-                                            : "bg-white hover:bg-slate-100 text-slate-700 border-slate-300"
-                                        }`}
-                                      >
-                                        {cardFlipDir[g.n] ? "بازگشت به جهت سیستم" : "تغییر جهت دستی"}
-                                      </button>
-                                    </div>
                                   </div>
                                 </div>
                               )}
@@ -8822,21 +8400,23 @@ export default function NbaDashboardTab({
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-medium text-slate-600">جستجوی نام تیم (Search Team)</label>
+              <label className="text-[11px] font-medium text-slate-600" dir="rtl">
+                جستجوی نام بازیکن، شهر یا تورنمنت
+              </label>
               <Input
                 value={teamQuery}
                 onChange={(e) => {
                   setTeamQuery(e.target.value);
                   setPage(1);
                 }}
-                placeholder="e.g. Boston, Cleveland, Lakers, Nuggets..."
-                className="h-9 text-xs font-mono bg-white"
+                placeholder="جستجوی نام بازیکن، شهر یا تورنمنت (مثلاً Sinner, Sabalenka, Doha, Wimbledon...)"
+                className="h-9 text-xs font-sans bg-white"
               />
             </div>
 
             <div className="flex items-center justify-between gap-2 h-9 px-2 bg-sky-50 rounded border border-sky-200 text-xs font-mono">
               <span className="truncate">
-                Showing: <b>{filteredGames.length}</b> games
+                Showing: <b>{filteredGames.length}</b> matches
                 {dateFilter !== "ALL" ? ` (${dateFilter})` : ""}
               </span>
               <button
@@ -8879,7 +8459,7 @@ export default function NbaDashboardTab({
                 🎛️ فیلتر دستی (DAY) — همزادیاب دقیق ELE-P • ELE-FINAL • ELE-DYN
               </span>
               <span className="text-xs text-sky-950 font-mono font-semibold bg-white/90 px-2.5 py-0.5 rounded border border-sky-300">
-                دیتابیس تاریخی: <b className="text-emerald-700">{histGames.length.toLocaleString()}</b> بازی (۲۰۱۰–۲۰۲۶)
+                دیتابیس تاریخی تنیس: <b className="text-emerald-700">{histGames.length.toLocaleString()}</b> مسابقه
               </span>
             </div>
             <button
@@ -8899,7 +8479,7 @@ export default function NbaDashboardTab({
               {/* Top Toolbar Controls (Light Blue Theme) */}
               <div className="bg-sky-100/80 px-4 py-2.5 border-b border-sky-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Home vs Away Elemental Perspective Toggle */}
+                  {/* Player 1 vs Player 2 Elemental Perspective Toggle */}
                   <div className="inline-flex rounded-md border border-sky-300 bg-white p-0.5 text-[11px] shadow-sm">
                     <button
                       type="button"
@@ -8910,7 +8490,7 @@ export default function NbaDashboardTab({
                           : "text-slate-700 hover:bg-sky-50"
                       }`}
                     >
-                      🏠 المنت میزبان (HOME ELE-P/FINAL/DYN)
+                      🎾 المنت بازیکن ۱ (P1 ELE-P/FINAL/DYN)
                     </button>
                     <button
                       type="button"
@@ -8921,11 +8501,11 @@ export default function NbaDashboardTab({
                           : "text-slate-700 hover:bg-indigo-50"
                       }`}
                     >
-                      ✈️ المنت میهمان (AWAY ELE-P/FINAL/DYN)
+                      🎾 المنت بازیکن ۲ (P2 ELE-P/FINAL/DYN)
                     </button>
                   </div>
 
-                <div className="inline-flex rounded-md border border-sky-300 bg-white p-0.5" title="انتخاب نوع شکل رمل در فیلتر دستی NBA">
+                <div className="inline-flex rounded-md border border-sky-300 bg-white p-0.5" title="انتخاب نوع شکل رمل در فیلتر دستی تنیس">
                   <button
                     type="button"
                     onClick={() => setManualGeoKind("fin")}
@@ -9580,9 +9160,9 @@ export default function NbaDashboardTab({
                                     >
                                       رأی ۴ کانال مستقل (Δ+S): {ch3Open.votesHome} به {ch3Open.votesAway}{" "}
                                       {ch3Open.votesHome > ch3Open.votesAway
-                                        ? `به نفع میزبان (${g.h})`
+                                        ? `به نفع بازیکن ۱ (${g.h})`
                                         : ch3Open.votesAway > ch3Open.votesHome
-                                          ? `به نفع میهمان (${g.a})`
+                                          ? `به نفع بازیکن ۲ (${g.a})`
                                           : "مساوی"}
                                       {ch3Open.votesHome === 4 && (
                                         <bdi dir="ltr" className="inline-block mr-1">
@@ -9591,7 +9171,7 @@ export default function NbaDashboardTab({
                                       )}
                                     </span>
                                     <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-300 font-bold" dir="ltr">
-                                      Active Pool ({filteredPool.length}r): H +{liveIdx.idxH} ({liveIdx.formulaH}) | A -{liveIdx.idxA} ({liveIdx.formulaA}) ➔ Δ={liveIdx.delta > 0 ? `+${liveIdx.delta}` : liveIdx.delta} • S={liveIdx.scoreH}:{liveIdx.scoreA} (Δ+S={liveIdx.effDelta > 0 ? `+${liveIdx.effDelta}` : liveIdx.effDelta})
+                                      Active Pool ({filteredPool.length}r): P1 +{liveIdx.idxH} ({liveIdx.formulaH}) | P2 -{liveIdx.idxA} ({liveIdx.formulaA}) ➔ Δ={liveIdx.delta > 0 ? `+${liveIdx.delta}` : liveIdx.delta} • S={liveIdx.scoreH}:{liveIdx.scoreA} (Δ+S={liveIdx.effDelta > 0 ? `+${liveIdx.effDelta}` : liveIdx.effDelta})
                                     </span>
                                   </div>
                                 </div>
@@ -9650,16 +9230,16 @@ export default function NbaDashboardTab({
                                           {ch.titleFa}
                                         </span>
                                         <span className="px-1.5 py-0.5 rounded bg-white border border-sky-200 text-[10px] font-bold text-slate-700 whitespace-nowrap" dir="ltr">
-                                          {ch.res.unslicedPool.length}r • {ch.idx.hw}H-{ch.idx.aw}A
+                                          {ch.res.unslicedPool.length}r • {ch.idx.hw}P1-{ch.idx.aw}P2
                                           {ch.res.isNatural57 ? " (5-7✓)" : ""}
                                         </span>
                                       </div>
                                       <div className="flex items-center justify-between gap-1 text-[10px]" dir="ltr">
                                         <span className="text-emerald-800 font-bold">
-                                          H: {ch.idx.formulaH} = <b>+{ch.idx.idxH}</b>
+                                          P1: {ch.idx.formulaH} = <b>+{ch.idx.idxH}</b>
                                         </span>
                                         <span className="text-rose-800 font-bold">
-                                          A: {ch.idx.formulaA} = <b>-{ch.idx.idxA}</b>
+                                          P2: {ch.idx.formulaA} = <b>-{ch.idx.idxA}</b>
                                         </span>
                                       </div>
                                       <div className="flex items-center justify-between gap-1 mt-1 pt-1 border-t border-black/5 text-[10px]" dir="ltr">
@@ -9675,7 +9255,7 @@ export default function NbaDashboardTab({
                                                 : "bg-slate-300 text-slate-800"
                                           }`}
                                         >
-                                          {ch.idx.effDelta > 0 ? "برد Δ+S میزبان" : ch.idx.effDelta < 0 ? "برد Δ+S میهمان" : "تساوی/خنثی"}
+                                          {ch.idx.effDelta > 0 ? "برد Δ+S بازیکن ۱" : ch.idx.effDelta < 0 ? "برد Δ+S بازیکن ۲" : "تساوی/خنثی"}
                                         </span>
                                       </div>
                                     </button>
@@ -9694,7 +9274,7 @@ export default function NbaDashboardTab({
                                   <span className="text-emerald-800 font-bold" dir="ltr">
                                     {curState.pathLog && curState.pathLog.length > 0
                                       ? curState.pathLog.join(" ➔ ")
-                                      : "بدون فیلتر (همه بازی‌های روز)"}
+                                      : "بدون فیلتر (همه مسابقات روز)"}
                                   </span>
                                 </div>
                                 {curState.stepSummary && curState.geoSummary && (
@@ -9717,21 +9297,21 @@ export default function NbaDashboardTab({
                                   {/* Group Header Row */}
                                   <tr className="bg-sky-100 text-sky-950 border-b border-sky-300">
                                     <th colSpan={5} className="p-1.5 text-left pl-3 text-sky-950 font-extrabold">
-                                      MATCHUP INFO ({manualPersp === "home" ? "HOME ELEMENTAL VIEW" : "AWAY ELEMENTAL VIEW"})
+                                      MATCHUP INFO ({manualPersp === "home" ? "PLAYER 1 ELEMENTAL VIEW" : "PLAYER 2 ELEMENTAL VIEW"})
                                     </th>
                                     <th colSpan={4} className="p-1.5 bg-indigo-100/90 text-indigo-950 border-x border-sky-300 font-extrabold">
-                                      PRIM 1..4 ≡ ELE-DYN (P+FIN) [Sheet3 P:S]
+                                      PRIM 1..4 ≡ ELE-DYN (P+FIN)
                                     </th>
                                     <th colSpan={4} className="p-1.5 bg-teal-100/90 text-teal-950 border-x border-sky-300 font-extrabold">
-                                      FINAL 1..4 ≡ ELE-FINAL [Sheet3 K:N]
+                                      FINAL 1..4 ≡ ELE-FINAL
                                     </th>
                                     <th colSpan={4} className="p-1.5 bg-sky-200/80 text-sky-950 border-x border-sky-300 font-extrabold">
-                                      ELE-P 1..4 ≡ ELE-P [Sheet3 F:I]
+                                      ELE-P 1..4 ≡ ELE-P
                                     </th>
                                     <th className="p-1.5 bg-amber-100/90 text-amber-950 border-x border-sky-300 font-extrabold">
                                       CODE-DYN
                                     </th>
-                                    <th className="p-1.5 bg-orange-100/90 text-orange-950 border-x border-sky-300 font-extrabold" title="شکل رملی ۴ خطی روزانه جایگاه دو تیم در جدول (تا شب قبل)">
+                                    <th className="p-1.5 bg-orange-100/90 text-orange-950 border-x border-sky-300 font-extrabold" title="شکل رملی ۴ خطی روزانه قدرت پایه دو بازیکن (تا شب قبل)">
                                       GEO-TAB
                                     </th>
                                     <th className="p-1.5 text-emerald-900 font-extrabold">RESULT</th>
@@ -9742,7 +9322,7 @@ export default function NbaDashboardTab({
                                     <th className="p-1.5">#</th>
                                     <th className="p-1.5">DAY</th>
                                     <th className="p-1.5">DATE</th>
-                                    <th className="p-1.5">HOME vs AWAY</th>
+                                    <th className="p-1.5">P1 vs P2</th>
                                     <th className="p-1.5">SCORE</th>
 
                                     {MANUAL_COL_META.map((col) => {
@@ -10156,7 +9736,7 @@ export default function NbaDashboardTab({
             <div className="p-3 bg-white">
         {loading ? (
           <div className="p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading 2,642 NBA games + 2010–2026 Twins...
+            <Loader2 className="h-4 w-4 animate-spin" /> در حال بارگذاری مسابقات انفرادی تنیس ATP / WTA (۲۰۲۴–۲۰۲۶)...
           </div>
         ) : (
           <div className="bg-white border border-sky-200 rounded-md overflow-hidden">
@@ -10167,10 +9747,10 @@ export default function NbaDashboardTab({
                     <tr>
                       <th className="p-2">#</th>
                       <th className="p-2">Date</th>
-                      <th className="p-2">Home Team (میزبان)</th>
-                      <th className="p-2">Away Team (میهمان)</th>
+                      <th className="p-2">Player 1 (بازیکن ۱)</th>
+                      <th className="p-2">Player 2 (بازیکن ۲)</th>
                       <th className="p-2">Fusion (30)</th>
-                      <th className="p-2">SMART Twins (2010–2026)</th>
+                      <th className="p-2">SMART Twins</th>
                       <th className="p-2">Formula_5 (Full / LOO)</th>
                       <th className="p-2">TP1 / TP2 / TP3</th>
                       <th className="p-2">Twin × Fusion</th>
@@ -10182,8 +9762,8 @@ export default function NbaDashboardTab({
                     <tr>
                       <th className="p-2">#</th>
                       <th className="p-2">Date</th>
-                      <th className="p-2">Home Team (میزبان)</th>
-                      <th className="p-2">Away Team (میهمان)</th>
+                      <th className="p-2">Player 1 (بازیکن ۱)</th>
+                      <th className="p-2">Player 2 (بازیکن ۲)</th>
                       <th className="p-2">5 Methods (A / B / C / D / E)</th>
                       <th className="p-2">Pure Astro (25)</th>
                       <th className="p-2">Fusion (30)</th>
@@ -10196,10 +9776,10 @@ export default function NbaDashboardTab({
                     <tr>
                       <th className="p-2">#</th>
                       <th className="p-2">Date</th>
-                      <th className="p-2">Home Team (میزبان)</th>
-                      <th className="p-2">Away Team (میهمان)</th>
-                      <th className="p-2">QULITY-FIN (H vs A)</th>
-                      <th className="p-2">QULITY-DECAN (H vs A)</th>
+                      <th className="p-2">Player 1 (بازیکن ۱)</th>
+                      <th className="p-2">Player 2 (بازیکن ۲)</th>
+                      <th className="p-2">QULITY-FIN (P1 vs P2)</th>
+                      <th className="p-2">QULITY-DECAN (P1 vs P2)</th>
                       <th className="p-2">VM6</th>
                       <th className="p-2">Pattern Tier</th>
                       <th className="p-2">Predicted Winner</th>
@@ -10237,12 +9817,12 @@ export default function NbaDashboardTab({
                                 </span>
                               </td>
                               <td className="p-2 whitespace-nowrap text-[10px]">
-                                <span className="font-bold text-slate-900">{g.vip ? "VIP Dual-88" : g.f1 ? "تلفیق ۱ ✓" : "—"}</span>
+                                <span className="font-bold text-slate-900">{g.vip ? "VIP Dual" : g.f1 ? "تلفیق ۱ ✓" : "—"}</span>
                                 <span className="text-slate-400 mx-1">/</span>
-                                <span className="text-sky-700 font-semibold">{g.a1_veto ? "وتو ۸۸ ⛔" : g.s_a1 ? "گارد ۸۸ ✓" : "آزاد"}</span>
+                                <span className="text-sky-700 font-semibold">{g.a1_veto ? "وتو ⛔" : g.s_a1 ? "گارد ✓" : "آزاد"}</span>
                               </td>
                               <td className="p-2 whitespace-nowrap text-[10px] font-bold text-amber-800">
-                                {g.tp ? `+${g.tp[0]} / +${g.tp[1]} / +${g.tp[2]} gls` : "—"}
+                                {g.tp ? `+${g.tp[0]} / +${g.tp[1]} / +${g.tp[2]} gms` : "—"}
                               </td>
                               <td className="p-2 whitespace-nowrap">
                                 {g.twAgree ? (
@@ -10299,10 +9879,10 @@ export default function NbaDashboardTab({
                           ) : (
                             <>
                               <td className="p-2 whitespace-nowrap text-[10px] font-mono">
-                                88 / {g.deg?.[1] ?? 0} / {g.deg?.[2] ?? 0}
+                                {g.deg1 ?? 121} / {g.deg?.[1] ?? 0} / {g.deg?.[2] ?? 0}
                               </td>
                               <td className="p-2 whitespace-nowrap text-[10px] font-mono">
-                                88 / {g.deg?.[3] ?? 0} / {g.deg?.[4] ?? 0}
+                                {g.deg1 ?? 121} / {g.deg?.[3] ?? 0} / {g.deg?.[4] ?? 0}
                               </td>
                               <td className="p-2 font-bold text-sky-900">{g.f30 && g.f30 > 0 ? `+${g.f30}` : (g.f30 ?? 0)}</td>
                               <td className="p-2 whitespace-nowrap">
@@ -10317,7 +9897,7 @@ export default function NbaDashboardTab({
                                           : "bg-slate-100 text-slate-600"
                                   }`}
                                 >
-                                  {g.vip ? "VIP Dual-88" : g.f1 ? "تلفیق ۱ ✓" : g.a1_veto ? "وتوی گارد ۸۸" : "رد فیلتر"}
+                                  {g.vip ? "VIP Dual" : g.f1 ? "تلفیق ۱ ✓" : g.a1_veto ? "وتوی گارد" : "رد فیلتر"}
                                 </span>
                               </td>
                             </>
@@ -10340,16 +9920,16 @@ export default function NbaDashboardTab({
                           <tr key={`exp-${g.n}`} className="bg-sky-50/90 border-b border-sky-200">
                             <td colSpan={12} className="p-3.5">
                               <div className="text-xs font-bold text-sky-950 mb-2">
-                                جزئیات کامل همزادهای المنتی (۲۰۱۰–۲۰۲۶)، ۵ روش تلفیقی و ۹ لایه عنصری بازی #{g.n} ({g.h} vs {g.a} • {g.sc})
+                                جزئیات کامل همزادهای المنتی تنیس و لایه‌های نجومی-جمتریا مسابقه #{g.n} ({g.h} vs {g.a} • {g.sc})
                               </div>
                               {g.twPeers && g.twPeers.length > 0 && (
                                 <div className="mb-3 p-3 rounded-lg bg-emerald-50/90 border border-emerald-300">
                                   <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
                                     <div className="text-[11px] font-bold text-emerald-950">
-                                      همزادهای استخراج‌شده از ۲۱٬۴۹۸ بازی تاریخی (۲۰۱۰–۲۰۲۶) • روش: {g.twMode} • رأی همزادها: {g.twVotes} ({g.twPct}) → {g.twWin}
+                                      همزادهای استخراج‌شده تنیس • روش: {g.twMode} • رأی همزادها: {g.twVotes} ({g.twPct}) → {g.twWin}
                                     </div>
                                     <div className="text-[11px] font-mono font-bold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded border border-amber-300">
-                                      Spread Targets: TP1 +{g.tp?.[0]} pts | TP2 +{g.tp?.[1]} pts | TP3 +{g.tp?.[2]} pts
+                                      Game Margin: TP1 +{g.tp?.[0]} | TP2 +{g.tp?.[1]} | TP3 +{g.tp?.[2]}
                                     </div>
                                   </div>
                                   <div className="text-[11px] font-mono text-slate-700 mb-2 bg-white px-2.5 py-1 rounded border border-emerald-200">
@@ -10367,32 +9947,32 @@ export default function NbaDashboardTab({
                               <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-[11px]">
                                 <div className="bg-white p-2.5 rounded border border-sky-300">
                                   <div className="font-bold text-sky-900 mb-1">5-Method Fusion Breakdown (30 Votes)</div>
-                                  <div><b>Method A (3L+NewDEG3+UTC00):</b> {mv[0] > 0 ? `+${mv[0]}` : mv[0]}</div>
-                                  <div><b>Method B (Full+NewDEG3+UTC00):</b> {mv[1] > 0 ? `+${mv[1]}` : mv[1]}</div>
-                                  <div><b>Method C (3L+NewDEG3+Local):</b> {mv[2] > 0 ? `+${mv[2]}` : mv[2]}</div>
-                                  <div><b>Method D (3L+OldDEG3+UTC00):</b> {mv[3] > 0 ? `+${mv[3]}` : mv[3]}</div>
-                                  <div><b>Method E (115+Full+OldDEG3):</b> {mv[4] > 0 ? `+${mv[4]}` : mv[4]}</div>
+                                  <div><b>Method A (3L+DEG3+UTC00):</b> {mv[0] > 0 ? `+${mv[0]}` : mv[0]}</div>
+                                  <div><b>Method B (Full+DEG3+UTC00):</b> {mv[1] > 0 ? `+${mv[1]}` : mv[1]}</div>
+                                  <div><b>Method C (3L+DEG3+Local):</b> {mv[2] > 0 ? `+${mv[2]}` : mv[2]}</div>
+                                  <div><b>Method D (Surface+IOC+UTC00):</b> {mv[3] > 0 ? `+${mv[3]}` : mv[3]}</div>
+                                  <div><b>Method E (Full+City):</b> {mv[4] > 0 ? `+${mv[4]}` : mv[4]}</div>
                                   <div className="mt-1 pt-1 border-t border-slate-200 font-bold text-emerald-800">
                                     FUSION_30 = {f30 > 0 ? `+${f30}` : f30} | PURE_ASTRO_25 = {a25 > 0 ? `+${a25}` : a25} ({g.ag5 ?? 0}/5 Agree)
                                   </div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">
-                                  <div className="font-bold text-slate-700 mb-1">درجات سیستم جدید NBA (ATP: DEG1=121 [1° LEO] • WTA: DEG1=47 [17° TAURUS])</div>
-                                  <div><b>میزبان ({g.hc}):</b> DEG1=53 | DEG2={g.deg?.[1]} | DEG3={g.deg?.[2]}</div>
-                                  <div><b>میهمان ({g.ac}):</b> DEG1=53 | DEG2={g.deg?.[3]} | DEG3={g.deg?.[4]}</div>
-                                  <div><b>استادیوم میزبان:</b> {g.venue}</div>
+                                  <div className="font-bold text-slate-700 mb-1">درجات نجومی-جمتریا تنیس (ATP: 121 • WTA: 47)</div>
+                                  <div><b>بازیکن ۱ ({g.hc}):</b> DEG1={g.deg1 ?? 121} | DEG2={g.deg?.[1]} | DEG3={g.deg?.[2]}</div>
+                                  <div><b>بازیکن ۲ ({g.ac}):</b> DEG1={g.deg1 ?? 121} | DEG2={g.deg?.[3]} | DEG3={g.deg?.[4]}</div>
+                                  <div><b>تورنمنت و زمین:</b> {g.venue}</div>
                                   <div><b>تاریخ شمسی:</b> {g.sh_d} ({g.sh_m})</div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">
-                                  <div className="font-bold text-slate-700 mb-1">درجات نگهبان سیستم اول ۸۸ (S_A1 Guard)</div>
-                                  <div><b>میزبان ({g.hc}):</b> DEG1=53 | DEG2={g.deg?.[5]} | DEG3={g.deg?.[7]}</div>
-                                  <div><b>میهمان ({g.ac}):</b> DEG1=53 | DEG2={g.deg?.[6]} | DEG3={g.deg?.[7]}</div>
-                                  <div><b>وضعیت سیستم اول:</b> {g.s_a1 ? "تأیید میزبان ✓" : g.a1_veto ? "وتوی میهمان ⛔" : "آزاد (بدون وتو)"}</div>
+                                  <div className="font-bold text-slate-700 mb-1">زاویه دوم زمین و کد کشور (P: Surface + IOC)</div>
+                                  <div><b>بازیکن ۱ ({g.hc}):</b> IOC={g.h_ioc ?? "—"} | Surface={g.surface ?? "—"}</div>
+                                  <div><b>بازیکن ۲ ({g.ac}):</b> IOC={g.a_ioc ?? "—"} | Surface={g.surface ?? "—"}</div>
+                                  <div><b>وضعیت سیستم پایه:</b> {g.s_a1 ? "تأیید بازیکن ۱ ✓" : g.a1_veto ? "وتوی بازیکن ۲ ⛔" : "آزاد (بدون وتو)"}</div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">
                                   <div className="font-bold text-slate-700 mb-1">شکل رمل دوگانه (GEO-FIN & GEO-DYN)</div>
-                                  <div><b>GEO-FIN میزبان/میهمان:</b> {g.h_geo} vs {g.a_geo}</div>
-                                  <div><b>GEO-DYN میزبان/میهمان:</b> {g.h_geo_dyn} vs {g.a_geo_dyn}</div>
+                                  <div><b>GEO-FIN بازیکن ۱ / ۲:</b> {g.h_geo} vs {g.a_geo}</div>
+                                  <div><b>GEO-DYN بازیکن ۱ / ۲:</b> {g.h_geo_dyn} vs {g.a_geo_dyn}</div>
                                   <div><b>کانال منتخب:</b> {g.chan} | <b>تلفیق ۱:</b> {g.f1 ? "واجد شرایط ✓" : "رد فیلتر"}</div>
                                 </div>
                               </div>

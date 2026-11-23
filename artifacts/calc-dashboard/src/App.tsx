@@ -236,7 +236,7 @@ function Home() {
 
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-extrabold" dir="rtl">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" />
-            ایزوله ۱۰۰٪ از شیت NBA-FUSION-CALCULATION
+            حالت ایزوله تنیس • بدون تاریخ تولد
           </div>
         </header>
 

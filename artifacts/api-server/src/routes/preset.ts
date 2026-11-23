@@ -1168,7 +1168,7 @@ let nbaRosterSyncing = false;
 
 router.post("/nba/sync-rosters", async (req, res): Promise<void> => {
   if (nbaRosterSyncing) {
-    res.status(409).json({ ok: false, error: "بروزرسانی زنده مصدومان و لیست ۸ نفره در حال انجام است." });
+    res.status(409).json({ ok: false, error: "بروزرسانی زنده جدول مسابقات تنیس در حال انجام است." });
     return;
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
