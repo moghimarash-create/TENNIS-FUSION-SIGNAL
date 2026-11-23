@@ -10,7 +10,7 @@ cmds = [
 [phases.build]
 cmds = [
   "pnpm run typecheck:libs",
-  "NODE_ENV=production VITE_SKIP_PUBLIC_COPY=1 PORT=8080 BASE_PATH=./ pnpm --filter @workspace/calc-dashboard run build",
+  "NODE_ENV=production VITE_SKIP_PUBLIC_COPY=1 PORT=8080 BASE_PATH=/ pnpm --filter @workspace/calc-dashboard run build",
   "pnpm --filter @workspace/api-server run build"
 ]
 

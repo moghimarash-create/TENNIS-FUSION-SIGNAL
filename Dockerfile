@@ -41,7 +41,7 @@ RUN pnpm install --frozen-lockfile --allow-build=esbuild
 COPY . .
 
 RUN pnpm run typecheck:libs \
-  && NODE_ENV=production VITE_SKIP_PUBLIC_COPY=1 PORT=8080 BASE_PATH=./ pnpm --filter @workspace/calc-dashboard run build \
+  && NODE_ENV=production VITE_SKIP_PUBLIC_COPY=1 PORT=8080 BASE_PATH=/ pnpm --filter @workspace/calc-dashboard run build \
   && pnpm --filter @workspace/api-server run build
 
 # Stage 3: Lean production runtime (Node.js 22 + Python 3 venv with pyswisseph, bound to 0.0.0.0:8080)

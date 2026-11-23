@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { Component, useState, useEffect, type ErrorInfo, type ReactNode } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layers, ShieldCheck, ChevronDown, ChevronUp, Database } from "lucide-react";
-import NotFound from "@/pages/not-found";
 import NbaDashboardTab, { type FusionModeKey, type TwinDbKind } from "./NbaDashboardTab";
 import {
   DEG3_OPTIONS,
@@ -457,25 +456,88 @@ function Home() {
   );
 }
 
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; errorMessage: string }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMessage: "" };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    return { hasError: true, errorMessage: msg };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("TENNIS-FUSION-SIGNAL UI ErrorBoundary caught:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen w-full bg-slate-50 flex items-center justify-center p-6" dir="rtl">
+          <div className="max-w-xl w-full rounded-xl border-2 border-rose-300 bg-white p-5 shadow-sm space-y-3">
+            <h2 className="text-base font-extrabold text-rose-800">
+              خطای زمان اجرا در رندر داشبورد (ErrorBoundary)
+            </h2>
+            <pre
+              className="text-xs font-mono bg-slate-900 text-rose-200 p-3 rounded-lg overflow-x-auto whitespace-pre-wrap"
+              dir="ltr"
+            >
+              {this.state.errorMessage}
+            </pre>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  window.localStorage.removeItem("tennis_fusion_tour_v2");
+                  window.localStorage.removeItem("tennis_fusion_deg3_v2");
+                  window.localStorage.removeItem("tennis_fusion_mode_v2");
+                } catch {}
+                window.location.reload();
+              }}
+              className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold"
+            >
+              بازنشانی تنظیمات و بارگذاری مجدد داشبورد
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route component={NotFound} />
+      <Route path="/index.html" component={Home} />
+      <Route component={Home} />
     </Switch>
   );
 }
 
+const rawViteBase = String(import.meta.env.BASE_URL || "/").trim();
+const normalizedRouterBase =
+  rawViteBase === "/" || rawViteBase === "./" || rawViteBase === "." || rawViteBase === ""
+    ? ""
+    : rawViteBase.replace(/\/$/, "");
+
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <WouterRouter base={normalizedRouterBase}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   );
 }
 
