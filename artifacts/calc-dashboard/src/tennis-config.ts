@@ -17,7 +17,7 @@ export type Deg3OptionKey = "opt1" | "opt2" | "opt3";
 export const ARCHITECTURE_MODE = "ASTRO_GEMATRIA_NAME_AND_MATCH_SKY" as const;
 export const BIRTHDATE_USED = false as const;
 export const TENNIS_SHEETS_WRITE_ENABLED = false as const;
-export const SHARD_BUILD_VERSION = "v20_abc_clean" as const;
+export const SHARD_BUILD_VERSION = "v21_veto_shield" as const;
 export type V20GradeKey = "C" | "B" | "A";
 export const V20_GRADE_KEYS: V20GradeKey[] = ["C", "B", "A"];
 
@@ -162,9 +162,9 @@ export const POWER_PROFILES: Record<
 > = {
   c_vol: {
     key: "c_vol",
-    shortFa: "⚡ هیبرید جدول فصل + Pyth (۸۷٫۱٪ طلایی B • پیشنهادی ★)",
-    badgeFa: "هیبرید جدول فصل + Surface Pyth + معماری ۳ سطحی (C ⊂ B ⊂ A)",
-    formulaEn: "Neutral-Court Hybrid (Surface_Pyth + Season_WL + L10) + v20 Nested 3-Grade (C: 88.6% ⊂ B: 87.1% ★ ⊂ A: 85.4%)",
+    shortFa: "⚡ هیبرید جدول فصل + Pyth (۸۷٫۸٪ طلایی B • پیشنهادی ★)",
+    badgeFa: "هیبرید جدول فصل + Surface Pyth + سپر ائتلاف موتورها (C ⊂ B ⊂ A)",
+    formulaEn: "Neutral-Court Hybrid (Surface_Pyth + Season_WL + L10) + v21 Nested 3-Grade + Veto-1∪3 (C: 89.2% ⊂ B: 87.8% ★ ⊂ A: 86.2%)",
   },
   b_pure: {
     key: "b_pure",

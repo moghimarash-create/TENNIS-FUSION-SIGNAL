@@ -60,8 +60,8 @@ const FUSION_MODES: Record<
   mode17: {
     modeNum: 17,
     benchKey: "mode17",
-    shortFa: "★ حالت ۱۷ • معماری ۳ سطحی خلوص (C ⊂ B ⊂ A • طلایی B: ۸۷٫۱٪) [پیشنهادی]",
-    formulaEn: "v20 Nested Purity (C: 88.6% ⊂ B: 87.1% ★ ⊂ A: 85.4%) • Clean 13∩15 + Flip-A + Gem 1..4 + Gem-5H Reversal + Gem-6",
+    shortFa: "★ حالت ۱۷ • معماری ۳ سطحی + سپر ائتلاف موتورها (C ⊂ B ⊂ A • طلایی B: ۸۷٫۸٪) [پیشنهادی]",
+    formulaEn: "v21 Nested Purity + Orthogonal Veto-1∪3 Shield (C: 89.2% ⊂ B: 87.8% ★ ⊂ A: 86.2%) • Clean 13∩15 + Pure Flip-A + Gem 1..6",
   },
   dual_pillar: {
     modeNum: 1,
@@ -294,7 +294,7 @@ function Home() {
     typeof liveM17Pct === "number" && liveM17Pct > 0
       ? toPersianPct(liveM17Pct)
       : powerProfile === "c_vol"
-        ? "۸۷٫۱٪"
+        ? "۸۷٫۸٪"
         : powerProfile === "b_pure"
           ? "۸۰٫۰٪"
           : "۷۱٫۱٪";

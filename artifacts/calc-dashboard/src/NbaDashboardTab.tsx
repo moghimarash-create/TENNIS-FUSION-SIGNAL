@@ -1822,6 +1822,9 @@ export type Mode17SubKind =
   | "DROP_T4"
   | "DROP_BASE17"
   | "DROP_GEM4"
+  | "VETO_1"
+  | "VETO_3"
+  | "VETO_4"
   | "GEM_1"
   | "GEM_2"
   | "GEM_3"
@@ -2770,12 +2773,34 @@ export function applyPowerProfileToGame(
     isC = Boolean(rawC);
     isB = Boolean(isC || rawB);
     isA = Boolean(isB || rawA);
+    let vetoOrigPk = basePk17 || favC;
+    if (isA && finalPk) {
+      const ishV = finalPk === h;
+      const oppV = ishV ? a : h;
+      const pL5V = ishV ? hL5 : aL5;
+      const dpythV = ishV ? hPyth - aPyth : aPyth - hPyth;
+      const oRkV = Number(ishV ? (smMeta.a_rk ?? 999) : (smMeta.h_rk ?? 999));
+      const tpBothPkV = tpk === finalPk && ppk === finalPk;
+      const g1OppV = g1Win === oppV;
+      const m14VipPkV = Boolean(isSm14 && vipSm14 && pkSm14 === finalPk);
+      const veto4 = finalSub === "FLIP_A" && Boolean(isM5 && pkDp === oppV);
+      const veto1 = !tpBothPkV && g1OppV && pL5V < 78.0;
+      const veto3 = !m14VipPkV && dpythV < 10.0 && oRkV <= 35;
+      if (veto1 || veto3) {
+        vetoOrigPk = finalPk;
+        finalSub = veto4 ? "VETO_4" : veto1 ? "VETO_1" : "VETO_3";
+        finalPk = "";
+        isC = false;
+        isB = false;
+        isA = false;
+      }
+    }
     v20Grade = isC ? "C" : isB ? "B" : isA ? "A" : "";
     sig17 = isB;
     vipM17 = isC;
     pkM17 = isA ? finalPk : "";
     m17Sub = finalSub;
-    m17OrigPick = basePk17 || favC;
+    m17OrigPick = vetoOrigPk;
   }
 
   const nextModes: Record<
@@ -2965,12 +2990,23 @@ export function evalMode17Gold(g: NbaGamePred, activeGrade: V20GradeKey = "B") {
   let maxBuyCents = 0;
 
   if (!activeSig) {
+    const vetoTarget = getTeam3Code(origPick || pick);
+    const vetoOpp = getTeam3Code((origPick || pick) === g.h ? g.a : g.h);
     if (cardGrade !== "") {
       lockTitleFa = `خارج از سطح انتخابی ${activeGrade} (متعلق به سطح ${cardGrade} • بدون سیگنال در این فیلتر)`;
       reasonFa = `این مسابقه دارای گرید خلوص ${cardGrade} روی ${getTeam3Code(cardValidPick || pick)} است اما در فیلتر فعلی (سطح ${activeGrade}) غیرفعال و قفل شده است.`;
+    } else if (m17Sub === "VETO_4") {
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر ائتلاف موتورها Veto-4 روی Flip-A)";
+      reasonFa = `چرخش ضدحباب به ${vetoTarget} توسط موتورهای ۵ و ۶ (قفل همزاد + قطب گرم ۱xxx به سود ${vetoOpp}) وتو شد تا خلوص Flip-A روی ۱۰۰٪ حفظ شود.`;
+    } else if (m17Sub === "VETO_1") {
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر ائتلاف متعامد Veto-1: همزاد + باکس ۱)";
+      reasonFa = `انتخاب اولیه ${vetoTarget} به دلیل عدم اجماع همزاد (T×P) + برتری قطب گرم ۱xxx باکس ۱ به سود ${vetoOpp} در مرز قدرت L5<78% مهار شد.`;
+    } else if (m17Sub === "VETO_3") {
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر ائتلاف متعامد Veto-3: المان M14 + حریف Top-35)";
+      reasonFa = `انتخاب اولیه ${vetoTarget} به دلیل عدم تایید VIP موتور ۱۴ + نزدیکی قدرت زمین (ΔPyth<10%) مقابل حریف رنک بالای فصل (${vetoOpp} • Top-35) مهار شد.`;
     } else if (m17Sub === "DROP_T4" || m17Sub === "DROP_FLIP_B" || m17Sub === "DROP_BASE17" || m17Sub === "DROP_GEM4") {
-      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر خلوص v20 و حذف تله‌های نوسانی)";
-      reasonFa = `فیلتر محافظ v20 روی ${getTeam3Code(origPick || pick)} فعال شد (ضعف فرم ۱۰ بازی اخیر، حبس ۱xxx یا ناهماهنگی قدرت تاریخی و فصل).`;
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر خلوص و حذف تله‌های نوسانی)";
+      reasonFa = `فیلتر محافظ خلوص روی ${vetoTarget} فعال شد (ضعف فرم ۱۰ بازی اخیر، حبس ۱xxx یا ناهماهنگی قدرت تاریخی و فصل).`;
     } else {
       const trapNames = [wtp.htrap ? getTeam3Code(g.h) : "", wtp.atrap ? getTeam3Code(g.a) : ""]
         .filter(Boolean)
@@ -2996,20 +3032,20 @@ export function evalMode17Gold(g: NbaGamePred, activeGrade: V20GradeKey = "B") {
       tier = "grade_c";
       tierRank = 3;
       badgeFa = `👑 نخبه C${revTag}`;
-      calWinPct = 88.6;
-      maxBuyCents = 86;
+      calWinPct = 89.2;
+      maxBuyCents = 87;
     } else if (cardGrade === "B") {
       tier = "grade_b";
       tierRank = 2;
       badgeFa = `⭐ طلایی B${revTag}`;
-      calWinPct = 87.1;
-      maxBuyCents = 84;
+      calWinPct = 87.8;
+      maxBuyCents = 85;
     } else {
       tier = "grade_a";
       tierRank = 1;
       badgeFa = `🟢 پایه A${revTag}`;
-      calWinPct = 85.4;
-      maxBuyCents = 81;
+      calWinPct = 86.2;
+      maxBuyCents = 82;
     }
 
     const pickCode = getTeam3Code(pick);
@@ -3018,8 +3054,8 @@ export function evalMode17Gold(g: NbaGamePred, activeGrade: V20GradeKey = "B") {
       lockTitleFa = `شکار معکوس تله (Gem-5H • ۹۰٫۰٪): توافق همزاد T✓•P✓ + جهش فرم ۱۰ بازی و تفاضل گیم به سود ${pickCode}`;
       reasonFa = `بازگشت هوشمند از تله فِیوریت (${origCode}) به ${pickCode} • برتری قاطع W10 (+3) و تفاضل گیم (+2.5) + تایید T×P`;
     } else if (m17Sub === "FLIP_A") {
-      lockTitleFa = `شکار معکوس ضدحباب (Flip-A • ۷۸٫۶٪): حباب تورنمنت ۲۵۰/۵۰۰ روی ${origCode} ← چرخش به ${pickCode}`;
-      reasonFa = `ضعف جدول خالص فصل روی ${origCode} (<60%) در تورنمنت ۲۵۰/۵۰۰ • چرخش محافظ به ${pickCode}`;
+      lockTitleFa = `شکار معکوس ضدحباب خالص (Flip-A • ۱۰۰٪): حباب تورنمنت ۲۵۰/۵۰۰ روی ${origCode} ← چرخش به ${pickCode}`;
+      reasonFa = `ضعف جدول خالص فصل روی ${origCode} (<60%) در تورنمنت ۲۵۰/۵۰۰ بدون مخالفت موتور ۵/۶ • چرخش محافظ به ${pickCode}`;
     } else if (m17Sub === "GEM_1") {
       lockTitleFa = `جواهر الماس (Gem-1 • ۱۰۰٪): قفل همزاد دو-ستونی (T+P) + اکثریت ۲/۳ رمل + اقتدار فصل ≥68%`;
       reasonFa = `هم‌جهتی کامل Dual Pillar و اکثریت ۲/۳ روی ${pickCode} • L5=${pickL5.toFixed(1)}%`;
@@ -4111,7 +4147,7 @@ export default function NbaDashboardTab({
                     ? `${v20ScopeStats.active.pct.toFixed(1).replace(".", "٫").replace(/\d/g, (d) => faDigits[Number(d)] ?? d)}٪`
                     : powerProfile === "a_elo"
                       ? "۷۱٫۱٪"
-                      : "۸۷٫۱٪";
+                      : "۸۷٫۸٪";
                 const gradeTitleFa =
                   activeV20Grade === "C"
                     ? "👑 نخبه C"

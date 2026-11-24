@@ -1213,12 +1213,32 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         is_C = bool(rawC)
         is_B = bool(is_C or rawB)
         is_A = bool(is_B or rawA)
+        veto_orig_pk = base_pk17 or fav_c
+        if is_A and final_pk:
+            ish_v = (final_pk == h)
+            opp_v = a if ish_v else h
+            p_l5_v = h_l5 if ish_v else a_l5
+            dpyth_v = (h_pyth - a_pyth) if ish_v else (a_pyth - h_pyth)
+            o_rk_v = int(sm_meta.get("a_rk" if ish_v else "h_rk", 999))
+            tp_both_pk_v = (tpk == final_pk and ppk == final_pk)
+            g1_opp_v = (g1_win == opp_v)
+            m14_vip_pk_v = bool(is_sm14 and vip_sm14 and pk_sm14 == final_pk)
+            veto_4 = (final_sub == "FLIP_A") and bool(is_m5 and pk_dp == opp_v)
+            veto_1 = (not tp_both_pk_v) and g1_opp_v and (p_l5_v < 78.0)
+            veto_3 = (not m14_vip_pk_v) and (dpyth_v < 10.0) and (o_rk_v <= 35)
+            if veto_1 or veto_3:
+                veto_orig_pk = final_pk
+                final_sub = "VETO_4" if veto_4 else ("VETO_1" if veto_1 else "VETO_3")
+                final_pk = ""
+                is_C = False
+                is_B = False
+                is_A = False
         v20_grade = "C" if is_C else ("B" if is_B else ("A" if is_A else ""))
         sig17 = is_B
         vip_m17 = is_C
         pk_m17 = final_pk if is_A else ""
         m17_sub = final_sub
-        m17_orig_pick = base_pk17 or fav_c
+        m17_orig_pick = veto_orig_pk
 
     return {
         "dual_pillar":     {"sig": is_dual_pillar, "vip": is_vip_cross, "pick": pk_dp},
