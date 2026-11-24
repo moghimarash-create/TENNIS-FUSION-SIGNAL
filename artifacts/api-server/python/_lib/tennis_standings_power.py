@@ -9,8 +9,16 @@ Early-Month / Jan 1-7 / ATP-WTA 250 / Finals Protective Shields & Symmetric Neut
 from __future__ import annotations
 
 import datetime
+import re
 from collections import defaultdict
 from typing import Any
+
+_GD10_RE = re.compile(r"\(([+-]?\d+(?:\.\d+)?)\)")
+
+
+def parse_gd10_from_l10(s: str) -> float:
+    m = _GD10_RE.search(str(s or ""))
+    return float(m.group(1)) if m else 0.0
 
 
 def log5(pa: float, pb: float) -> float:
@@ -938,6 +946,93 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         ):
             vip_m17 = True
 
+    m17_sub = ""
+    m17_orig_pick = pk_m17
+    sm_meta = card.get("st_meta") or {}
+    bp_prof = (card.get("pwr_p") or {}).get("b_pure") or {}
+    if profile_key == "c_vol" and sm_meta and bp_prof:
+        t_tier = classify_tourney_tier(str(card.get("tourney") or ""))
+        rnd_u = str(card.get("rnd") or "R32").strip().upper()
+        b_hl5 = round(float(bp_prof.get("l5h", 50.0)), 1)
+        b_al5 = round(100.0 - b_hl5, 1)
+        if sig17 and not vip_m17:
+            ish17 = (pk_m17 == h)
+            opp17 = a if ish17 else h
+            p_l5 = h_l5 if ish17 else a_l5
+            p_bl5 = b_hl5 if ish17 else b_al5
+            o_rk = int(sm_meta.get("a_rk" if ish17 else "h_rk", 999))
+            p_p12 = h_gff_p12 if ish17 else a_gff_p12
+            o_p12 = a_gff_p12 if ish17 else h_gff_p12
+            p_gf = h_gf if ish17 else a_gf
+            o_gf = a_gf if ish17 else h_gf
+            p_1sum = h_sum if ish17 else a_sum
+            o_1sum = a_sum if ish17 else h_sum
+            if t_tier in ("250", "500") and p_bl5 < 60.0:
+                pk_m17 = opp17
+                vip_m17 = True
+                m17_sub = "FLIP_A"
+            elif t_tier in ("250", "500") and p_l5 < 75.0 and o_rk <= 50 and o_p12 < p_p12:
+                pk_m17 = opp17
+                vip_m17 = True
+                m17_sub = "FLIP_B"
+            elif (
+                p_l5 < 65.0
+                or (t_tier in ("250", "500") and p_l5 < 75.0)
+                or (p_l5 < 75.0 and o_gf < p_gf and o_p12 < p_p12)
+                or (rnd_u in ("SF", "F") and t_tier in ("250", "500") and o_1sum < p_1sum and (tpk != ppk))
+            ):
+                sig17 = False
+                pk_m17 = ""
+                vip_m17 = False
+                m17_sub = "DROP_T4"
+        elif (not sig17) and (not dual_water):
+            h_gd10 = parse_gd10_from_l10(str(sm_meta.get("h_l10") or ""))
+            a_gd10 = parse_gd10_from_l10(str(sm_meta.get("a_l10") or ""))
+            maj23_raw = str(g1.get("maj23_win") or maj23_win)
+            for cand_pk in (h, a):
+                ish_c = (cand_pk == h)
+                p_trap_c = htrap_lv if ish_c else atrap_lv
+                p_el_c = h_el if ish_c else a_el
+                if p_trap_c > 0 or p_el_c == "EARTH":
+                    continue
+                p_l5 = h_l5 if ish_c else a_l5
+                p_bl5 = b_hl5 if ish_c else b_al5
+                p_pyth = float(sm_meta.get("h_pyth" if ish_c else "a_pyth", 50.0))
+                p_0011 = h_0011_sum if ish_c else a_0011_sum
+                o_0011 = a_0011_sum if ish_c else h_0011_sum
+                p_gd10 = h_gd10 if ish_c else a_gd10
+                o_gd10 = a_gd10 if ish_c else h_gd10
+                p_1cnt = h_cnt if ish_c else a_cnt
+                p_1sum = h_sum if ish_c else a_sum
+                dp_ok = bool(is_dual_pillar and pk_dp == cand_pk)
+                maj23_ok = (maj23_raw == cand_pk)
+                m12_ok = bool(is_m12 and pk_m12 == cand_pk)
+                m15_ok = bool(is_m15 and pk_m15 == cand_pk)
+                if p_l5 >= 68.0 and p_bl5 >= 68.0 and dp_ok and maj23_ok:
+                    sig17 = True
+                    pk_m17 = cand_pk
+                    vip_m17 = True
+                    m17_sub = "GEM_1"
+                    break
+                elif p_l5 >= 82.0 and p_pyth >= 64.0 and p_0011 < 0 and p_0011 < o_0011:
+                    sig17 = True
+                    pk_m17 = cand_pk
+                    vip_m17 = True
+                    m17_sub = "GEM_2"
+                    break
+                elif p_l5 >= 75.0 and p_bl5 >= 68.0 and m12_ok:
+                    sig17 = True
+                    pk_m17 = cand_pk
+                    vip_m17 = True
+                    m17_sub = "GEM_3"
+                    break
+                elif m15_ok and p_l5 >= 77.0 and p_pyth >= 66.0 and p_gd10 > o_gd10 and p_1cnt >= 1 and p_1sum < 0:
+                    sig17 = True
+                    pk_m17 = cand_pk
+                    vip_m17 = True
+                    m17_sub = "GEM_4"
+                    break
+
     return {
         "dual_pillar":     {"sig": is_dual_pillar, "vip": is_vip_cross, "pick": pk_dp},
         "vip_cross":       {"sig": is_vip_cross,   "vip": is_diamond,   "pick": pk_vip},
@@ -956,5 +1051,5 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         "smart_elem_14":   {"sig": is_sm14,        "vip": vip_sm14,     "pick": pk_sm14},
         "fusion4_elem":    {"sig": is_m15,         "vip": vip_m15,      "pick": pk_m15},
         "referee6_ranked": {"sig": is_m16,         "vip": vip_m16,      "pick": pk_m16},
-        "mode17":          {"sig": sig17,          "vip": vip_m17,      "pick": pk_m17},
+        "mode17":          {"sig": sig17,          "vip": vip_m17,      "pick": pk_m17, "sub": m17_sub, "orig_pick": m17_orig_pick},
     }

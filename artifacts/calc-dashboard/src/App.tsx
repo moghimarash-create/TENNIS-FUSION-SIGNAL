@@ -59,8 +59,8 @@ const FUSION_MODES: Record<
   mode17: {
     modeNum: 17,
     benchKey: "mode17",
-    shortFa: "★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ۷۹٫۹٪) [پیشنهادی]",
-    formulaEn: "Mode_13(anti_nobet_smart).sig AND Mode_15(fusion4_elem).sig AND (Pick_13 === Pick_15) • 4-Tier DirectElo & 0011 Badges",
+    shortFa: "★ حالت ۱۷ • تقاطع طلایی + جواهرها (۸۲٫۸٪) [پیشنهادی]",
+    formulaEn: "(Mode_13 ∩ Mode_15 + Flip_A∪B \\ Weak_T4) ∪ Gem_1..4 • 4-Tier DirectElo, Cold-0011, Anti-Bubble Flip & Gems",
   },
   dual_pillar: {
     modeNum: 1,

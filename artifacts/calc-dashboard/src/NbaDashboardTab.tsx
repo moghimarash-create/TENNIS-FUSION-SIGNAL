@@ -261,7 +261,8 @@ type NbaGamePred = {
     driver: "BOTH" | "TEAM" | "PLAYER";
     in_auth_overlap: boolean;
     vetoed: boolean;
-    modes: Record<string, { sig: boolean; vip: boolean; pick: string }>;
+    modes: Record<string, { sig: boolean; vip: boolean; pick: string; sub?: string; orig_pick?: string }>;
+    m17_meta?: { profileKey: PowerProfileKey; sub: string; origPick: string };
     team: { pick: string; votes: string; pct: string; f30: number; ch: string; sig: boolean; vip: boolean; guard?: boolean; guard_sym?: boolean; nat?: boolean; vh?: number; va?: number; minD?: number; deg2: number; deg3: number };
     player: { pick: string; votes: string; pct: string; f30: number; ch: string; sig: boolean; vip: boolean; guard?: boolean; guard_sym?: boolean; nat?: boolean; vh?: number; va?: number; minD?: number };
     geo1xxx?: {
@@ -1757,11 +1758,51 @@ function dominantElemInfoVec(vec: number[]): [string, number, boolean] {
   return [`TIE(${winners.map((w) => w[0]).join("+")})`, mx, true];
 }
 
+const GD10_RE = /\(([+-]?\d+(?:\.\d+)?)\)/;
+
+export function parseGd10FromL10(s?: string | null): number {
+  const m = GD10_RE.exec(String(s ?? ""));
+  return m ? parseFloat(m[1]) : 0.0;
+}
+
+export function classifyTourneyTier(tname?: string | null): "SLAM" | "FINALS" | "1000" | "500" | "250" {
+  const u = String(tname ?? "").toUpperCase();
+  if (["AUSTRALIAN OPEN", "ROLAND GARROS", "FRENCH OPEN", "WIMBLEDON", "US OPEN"].some((x) => u.includes(x))) {
+    return "SLAM";
+  }
+  if (["FINALS", "UNITED CUP", "OLYMPIC"].some((x) => u.includes(x))) {
+    return "FINALS";
+  }
+  if (
+    [
+      "INDIAN WELLS", "MIAMI", "MONTE CARLO", "MONTE-CARLO", "MADRID", "ROME", "INTERNAZIONALI",
+      "CANADA", "MONTREAL", "TORONTO", "CINCINNATI", "SHANGHAI", "PARIS", "WUHAN", "DOHA", "DUBAI",
+      "BEIJING", "GUADALAJARA",
+    ].some((x) => u.includes(x))
+  ) {
+    return "1000";
+  }
+  if (
+    [
+      "ROTTERDAM", "RIO", "ACAPULCO", "BARCELONA", "HALLE", "QUEEN", "HAMBURG", "WASHINGTON",
+      "TOKYO", "VIENNA", "BASEL", "LINZ", "STUTTGART", "CHARLESTON", "BERLIN", "EASTBOURNE",
+      "SAN DIEGO", "MONTERREY", "SEOUL", "NINGBO", "ZHENGZHOU", "STRASBOURG", "BAD HOMBURG",
+      "BRISBANE", "ADELAIDE", "DALLAS", "MUNICH",
+    ].some((x) => u.includes(x))
+  ) {
+    return "500";
+  }
+  return "250";
+}
+
+export type Mode17SubKind = "" | "FLIP_A" | "FLIP_B" | "DROP_T4" | "GEM_1" | "GEM_2" | "GEM_3" | "GEM_4";
+
 export function applyPowerProfileToGame(
   g: NbaGamePred,
   profileKey: PowerProfileKey = "c_vol"
 ): NbaGamePred {
   if (profileKey === "a_elo") return g;
+  if (g.wtp?.profileKey === profileKey && g.fusion_meta?.m17_meta?.profileKey === profileKey) return g;
   const pp = g.pwr_p?.[profileKey];
   const fm = g.fusion_meta;
   const g1 = fm?.geo1xxx;
@@ -2385,8 +2426,8 @@ export function applyPowerProfileToGame(
     vipM13 = false;
   }
 
-  const sig17 = Boolean(isM13 && isM15 && pkM13 && pkM13 === pkM15);
-  const pkM17 = sig17 ? pkM13 : "";
+  let sig17 = Boolean(isM13 && isM15 && pkM13 && pkM13 === pkM15);
+  let pkM17 = sig17 ? pkM13 : "";
   let vipM17 = false;
   if (sig17) {
     const ish17 = pkM17 === h;
@@ -2405,7 +2446,98 @@ export function applyPowerProfileToGame(
     }
   }
 
-  const nextModes: Record<string, { sig: boolean; vip: boolean; pick: string }> = {
+  let m17Sub: Mode17SubKind = "";
+  const m17OrigPick = pkM17;
+  const smMeta = g.st_meta;
+  const bpProf = g.pwr_p?.b_pure;
+  if (profileKey === "c_vol" && smMeta && bpProf) {
+    const tTier = classifyTourneyTier(g.tourney);
+    const rndU = String(g.rnd || "R32").trim().toUpperCase();
+    const bHl5 = Math.round(Number(bpProf.l5h ?? 50.0) * 10) / 10;
+    const bAl5 = Math.round((100.0 - bHl5) * 10) / 10;
+    if (sig17 && !vipM17) {
+      const ish17 = pkM17 === h;
+      const opp17 = ish17 ? a : h;
+      const pL5 = ish17 ? hL5 : aL5;
+      const pBl5 = ish17 ? bHl5 : bAl5;
+      const oRk = Number(ish17 ? (smMeta.a_rk ?? 999) : (smMeta.h_rk ?? 999));
+      const pP12 = ish17 ? hGffP12 : aGffP12;
+      const oP12 = ish17 ? aGffP12 : hGffP12;
+      const pGf = ish17 ? hGf : aGf;
+      const oGf = ish17 ? aGf : hGf;
+      const p1Sum = ish17 ? hSum : aSum;
+      const o1Sum = ish17 ? aSum : hSum;
+      if ((tTier === "250" || tTier === "500") && pBl5 < 60.0) {
+        pkM17 = opp17;
+        vipM17 = true;
+        m17Sub = "FLIP_A";
+      } else if ((tTier === "250" || tTier === "500") && pL5 < 75.0 && oRk <= 50 && oP12 < pP12) {
+        pkM17 = opp17;
+        vipM17 = true;
+        m17Sub = "FLIP_B";
+      } else if (
+        pL5 < 65.0 ||
+        ((tTier === "250" || tTier === "500") && pL5 < 75.0) ||
+        (pL5 < 75.0 && oGf < pGf && oP12 < pP12) ||
+        ((rndU === "SF" || rndU === "F") && (tTier === "250" || tTier === "500") && o1Sum < p1Sum && tpk !== ppk)
+      ) {
+        sig17 = false;
+        pkM17 = "";
+        vipM17 = false;
+        m17Sub = "DROP_T4";
+      }
+    } else if (!sig17 && !dualWater) {
+      const hGd10 = parseGd10FromL10(smMeta.h_l10);
+      const aGd10 = parseGd10FromL10(smMeta.a_l10);
+      const maj23Raw = String(g1.maj23_win || maj23Win);
+      for (const candPk of [h, a]) {
+        const ishC = candPk === h;
+        const pTrapC = ishC ? htrapLv : atrapLv;
+        const pElC = ishC ? hEl : aEl;
+        if (pTrapC > 0 || pElC === "EARTH") continue;
+        const pL5 = ishC ? hL5 : aL5;
+        const pBl5 = ishC ? bHl5 : bAl5;
+        const pPyth = Number(ishC ? (smMeta.h_pyth ?? 50.0) : (smMeta.a_pyth ?? 50.0));
+        const p0011 = ishC ? h0011Sum : a0011Sum;
+        const o0011 = ishC ? a0011Sum : h0011Sum;
+        const pGd10 = ishC ? hGd10 : aGd10;
+        const oGd10 = ishC ? aGd10 : hGd10;
+        const p1Cnt = ishC ? hCnt : aCnt;
+        const p1Sum = ishC ? hSum : aSum;
+        const dpOk = Boolean(isDualPillar && pkDp === candPk);
+        const maj23Ok = maj23Raw === candPk;
+        const m12Ok = Boolean(isM12 && pkM12 === candPk);
+        const m15Ok = Boolean(isM15 && pkM15 === candPk);
+        if (pL5 >= 68.0 && pBl5 >= 68.0 && dpOk && maj23Ok) {
+          sig17 = true;
+          pkM17 = candPk;
+          vipM17 = true;
+          m17Sub = "GEM_1";
+          break;
+        } else if (pL5 >= 82.0 && pPyth >= 64.0 && p0011 < 0 && p0011 < o0011) {
+          sig17 = true;
+          pkM17 = candPk;
+          vipM17 = true;
+          m17Sub = "GEM_2";
+          break;
+        } else if (pL5 >= 75.0 && pBl5 >= 68.0 && m12Ok) {
+          sig17 = true;
+          pkM17 = candPk;
+          vipM17 = true;
+          m17Sub = "GEM_3";
+          break;
+        } else if (m15Ok && pL5 >= 77.0 && pPyth >= 66.0 && pGd10 > oGd10 && p1Cnt >= 1 && p1Sum < 0) {
+          sig17 = true;
+          pkM17 = candPk;
+          vipM17 = true;
+          m17Sub = "GEM_4";
+          break;
+        }
+      }
+    }
+  }
+
+  const nextModes: Record<string, { sig: boolean; vip: boolean; pick: string; sub?: string; orig_pick?: string }> = {
     ...fm.modes,
     dual_pillar: { sig: isDualPillar, vip: isVipCross, pick: pkDp },
     vip_cross: { sig: isVipCross, vip: isDiamond, pick: pkVip },
@@ -2432,7 +2564,7 @@ export function applyPowerProfileToGame(
     smart_elem_14: { sig: isSm14, vip: vipSm14, pick: pkSm14 },
     fusion4_elem: { sig: isM15, vip: vipM15, pick: pkM15 },
     referee6_ranked: { sig: isM16, vip: vipM16, pick: pkM16 },
-    mode17: { sig: sig17, vip: vipM17, pick: pkM17 },
+    mode17: { sig: sig17, vip: vipM17, pick: pkM17, sub: m17Sub, orig_pick: m17OrigPick },
   };
 
   const pHome01 = Math.min(0.99, Math.max(0.01, hL5 / 100));
@@ -2461,6 +2593,7 @@ export function applyPowerProfileToGame(
       ...fm,
       vetoed: isVetoed,
       modes: nextModes,
+      m17_meta: { profileKey, sub: m17Sub, origPick: m17OrigPick },
       team: { ...tm, sig: tSig, vip: tVip },
       player: { ...pl, sig: pSig, vip: pVip },
       geo1xxx: {
@@ -2492,6 +2625,11 @@ export function evalMode17Gold(g: NbaGamePred) {
 
   const rawM13 = fm?.modes?.anti_nobet_smart;
   const rawM15 = fm?.modes?.fusion4_elem;
+  const rawM17 = fm?.modes?.mode17;
+  const m17Meta = fm?.m17_meta?.profileKey === profKey ? fm.m17_meta : undefined;
+  const m17Sub = (m17Meta?.sub || rawM17?.sub || "") as Mode17SubKind;
+  const origPick = m17Meta?.origPick || rawM17?.orig_pick || "";
+
   const fallbackAnb = rawM13 ? null : evalSmartAntiNoBet(g);
   const fallbackSm14 = rawM15 ? null : evalSmartMode14(g);
 
@@ -2508,14 +2646,18 @@ export function evalMode17Gold(g: NbaGamePred) {
   const m15Sig = Boolean((rawM15 ? rawM15.sig : fallbackSm14?.fusion4.active) && inOverlap);
   const m15Pick = (rawM15 ? rawM15.pick : fallbackSm14?.fusion4.pick) || "";
 
-  const agreed = Boolean(m13Sig && m15Sig && m13Pick && m13Pick === m15Pick);
-  const pick = agreed
-    ? m13Pick
-    : (m13Sig && m13Pick) || (m15Sig && m15Pick) || g.sys_win || g.h;
+  const baseAgreed = Boolean(m13Sig && m15Sig && m13Pick && m13Pick === m15Pick);
+  const hasOpt3Override = profKey === "c_vol" && Boolean(rawM17 && m17Meta);
+  const activeSig = hasOpt3Override ? Boolean(rawM17?.sig && inOverlap) : baseAgreed;
+  const pick = activeSig
+    ? (hasOpt3Override ? rawM17?.pick : m13Pick) || m13Pick || g.sys_win || g.h
+    : origPick || (m13Sig && m13Pick) || (m15Sig && m15Pick) || g.sys_win || g.h;
   const isHomePick = pick === g.h;
 
   const rawDirectElo = Number(isHomePick ? (wtp.hpct ?? 50) : (wtp.apct ?? 50));
   const directElo = Math.round(rawDirectElo * 10) / 10;
+  const rawL5Pick = Number(isHomePick ? (wtp.l5h ?? 50) : 100 - Number(wtp.l5h ?? 50));
+  const pickL5 = Math.round(rawL5Pick * 10) / 10;
   const pickElem = String(isHomePick ? (wtp.hel ?? "AIR") : (wtp.ael ?? "AIR"));
   const oppElem = String(isHomePick ? (wtp.ael ?? "AIR") : (wtp.hel ?? "AIR"));
   const pick0011 = Math.round(Number(isHomePick ? (g1?.h_0011 ?? 0) : (g1?.a_0011 ?? 0)) * 10) / 10;
@@ -2530,23 +2672,79 @@ export function evalMode17Gold(g: NbaGamePred) {
   let calWinPct = 50.0;
   let maxBuyCents = 0;
 
-  if (!agreed) {
-    const trapNames = [wtp.htrap ? getTeam3Code(g.h) : "", wtp.atrap ? getTeam3Code(g.a) : ""]
-      .filter(Boolean)
-      .join(" / ");
-    const trapSuffix =
-      profKey !== "a_elo" && trapNames
-        ? ` • 🛡️ مهار سپر ایمنی فصل/اول‌ماه/۲۵۰ (${trapNames})`
-        : "";
-    if (m13Sig && m15Sig && m13Pick !== m15Pick) {
-      reasonFa = `تضاد جهت دو موتور: حالت ۱۳ روی ${getTeam3Code(m13Pick)} و حالت ۱۵ روی ${getTeam3Code(m15Pick)} حکم داده است (ورود ممنوع)${trapSuffix}`;
-    } else if (m13Sig && !m15Sig) {
-      reasonFa = `حالت ۱۳ (${getTeam3Code(m13Pick)}) فعال است اما حالت ۱۵ (تلفیق ۴ پترن المنت) سیگنال تایید نداده است${trapSuffix}`;
-    } else if (!m13Sig && m15Sig) {
-      reasonFa = `حالت ۱۵ (${getTeam3Code(m15Pick)}) فعال است اما حالت ۱۳ (ضد NO-BET هوشمند) سیگنال تایید نداده است${trapSuffix}`;
+  if (!activeSig) {
+    if (hasOpt3Override && m17Sub === "DROP_T4") {
+      badgeFa = "⛔ NO-BET (حذف تله ضعیف سطح ۴)";
+      lockTitleFa = "NO-BET (سپر حذف تله ضعیف Tier-4 در تورنمنت ۲۵۰/۵۰۰ یا نیمه‌نهایی واگرا)";
+      reasonFa = `حذف هوشمند تله سطح ۴ روی ${getTeam3Code(origPick || pick)} • زیر آستانه L5<75% در ۲۵۰/۵۰۰ یا تضاد داور GF-FIN / ۱xxx`;
     } else {
-      reasonFa = `هر دو موتور حالت ۱۳ و حالت ۱۵ در این مسابقه خارج از سیگنال هستند${trapSuffix}`;
+      const trapNames = [wtp.htrap ? getTeam3Code(g.h) : "", wtp.atrap ? getTeam3Code(g.a) : ""]
+        .filter(Boolean)
+        .join(" / ");
+      const trapSuffix =
+        profKey !== "a_elo" && trapNames
+          ? ` • 🛡️ مهار سپر ایمنی فصل/اول‌ماه/۲۵۰ (${trapNames})`
+          : "";
+      if (m13Sig && m15Sig && m13Pick !== m15Pick) {
+        reasonFa = `تضاد جهت دو موتور: حالت ۱۳ روی ${getTeam3Code(m13Pick)} و حالت ۱۵ روی ${getTeam3Code(m15Pick)} حکم داده است (ورود ممنوع)${trapSuffix}`;
+      } else if (m13Sig && !m15Sig) {
+        reasonFa = `حالت ۱۳ (${getTeam3Code(m13Pick)}) فعال است اما حالت ۱۵ (تلفیق ۴ پترن المنت) سیگنال تایید نداده است${trapSuffix}`;
+      } else if (!m13Sig && m15Sig) {
+        reasonFa = `حالت ۱۵ (${getTeam3Code(m15Pick)}) فعال است اما حالت ۱۳ (ضد NO-BET هوشمند) سیگنال تایید نداده است${trapSuffix}`;
+      } else {
+        reasonFa = `هر دو موتور حالت ۱۳ و حالت ۱۵ در این مسابقه خارج از سیگنال هستند${trapSuffix}`;
+      }
     }
+  } else if (hasOpt3Override && (m17Sub === "FLIP_A" || m17Sub === "FLIP_B")) {
+    tier = "daily_gold";
+    tierRank = 2;
+    const origCode = getTeam3Code(origPick || (isHomePick ? g.a : g.h));
+    const pickCode = getTeam3Code(pick);
+    if (m17Sub === "FLIP_A") {
+      badgeFa = "🔄 چرخش ضدحباب • ۷۸٫۶٪";
+      lockTitleFa = `چرخش هوشمند ضدحباب (Flip-A • ۷۸٫۶٪): حباب تورنمنت ۲۵۰/۵۰۰ روی ${origCode} (جدول خالص <60%) ← برد ${pickCode}`;
+      reasonFa = `چرخش قطبیت از ${origCode} به ${pickCode} بدون حذف بازی • ضعف جدول خالص فصل در تورنمنت ۲۵۰/۵۰۰`;
+      calWinPct = 78.6;
+      maxBuyCents = 75;
+    } else {
+      badgeFa = "🔄 چرخش ضدحباب • ۶۹٫۰٪";
+      lockTitleFa = `چرخش هوشمند ضدحباب (Flip-B • ۶۹٫۰٪): آسیب‌پذیری سطح ۴ در ۲۵۰/۵۰۰ برابر حریف Top-50 و برتری GFF فردی ← برد ${pickCode}`;
+      reasonFa = `چرخش قطبیت از ${origCode} به ${pickCode} بدون حذف بازی • رتبه فصل حریف ≤50 + برتری بُعد فردی رمل (GFF_P12)`;
+      calWinPct = 69.0;
+      maxBuyCents = 66;
+    }
+  } else if (hasOpt3Override && m17Sub === "GEM_1") {
+    tier = "black_diamond";
+    tierRank = 4;
+    badgeFa = "💎 جواهر الماس • ۱۰۰٪ (Gem-1)";
+    lockTitleFa = "جواهر سطح ۱ (Gem-1 • ۱۰۰٪ — ۴۵/۴۵): قفل همزاد دو-ستونی (T+P) + اکثریت ۲/۳ رمل + تایید دوگانه جدول فصل ≥68%";
+    reasonFa = `هم‌جهتی کامل همزاد مکان و بازیکن (Dual Pillar) + داور اکثریت ۲/۳ + L5=${pickL5.toFixed(1)}% (≥68% در هر دو پروفایل فصل)`;
+    calWinPct = 99.0;
+    maxBuyCents = 88;
+  } else if (hasOpt3Override && m17Sub === "GEM_2") {
+    tier = "black_diamond";
+    tierRank = 4;
+    badgeFa = "💎 جواهر لنگر سرد • ۹۳٫۰٪ (Gem-2)";
+    lockTitleFa = "جواهر سطح ۱ (Gem-2 • ۹۳٫۰٪): اقتدار فصل L5≥82% + Surface Pyth≥64% + برتری قاطع کد سرد 0011<0";
+    reasonFa = `قدرت فصل L5=${pickL5.toFixed(1)}% (≥82%) • فیثاغورثی زمین ≥64% • کد سرد 0011=${fmtVal(pick0011)} قوی‌تر از حریف`;
+    calWinPct = 93.0;
+    maxBuyCents = 86;
+  } else if (hasOpt3Override && m17Sub === "GEM_3") {
+    tier = "pure_astro";
+    tierRank = 3;
+    badgeFa = "💎 جواهر ابرقفل M12 • ۹۲٫۷٪ (Gem-3)";
+    lockTitleFa = "جواهر سطح ۲ (Gem-3 • ۹۲٫۷٪): ابرقفل ۳ عددی حالت ۱۲ + قدرت هیبرید فصل ≥75% + جدول خالص ≥68%";
+    reasonFa = `تایید مستقیم ابرقفل حالت ۱۲ (M12 UltraLock) • L5=${pickL5.toFixed(1)}% (≥75%) + جدول خالص ≥68% (بدون تله)`;
+    calWinPct = 92.7;
+    maxBuyCents = 84;
+  } else if (hasOpt3Override && m17Sub === "GEM_4") {
+    tier = "daily_gold";
+    tierRank = 2;
+    badgeFa = "💎 جواهر نخبه M15 • ۸۲٫۲٪ (Gem-4)";
+    lockTitleFa = "جواهر سطح ۳ (Gem-4 • ۸۲٫۲٪): موتور المنت M15 + قدرت فصل ≥77% + Pyth≥66% + فرم ۱۰ بازی اخیر + Σ(1xxx)<0";
+    reasonFa = `تایید موتور حالت ۱۵ • L5=${pickL5.toFixed(1)}% (≥77%) • Surface Pyth≥66% • برتری تفاضل گیم ۱۰ بازی اخیر • Σ(1xxx)=${fmtVal(pick1xxx)}<0`;
+    calWinPct = 82.2;
+    maxBuyCents = 79;
   } else if (directElo >= 75.0 && pick0011 < 0 && m13Vip) {
     tier = "black_diamond";
     tierRank = 4;
@@ -2599,20 +2797,22 @@ export function evalMode17Gold(g: NbaGamePred) {
   } else {
     tier = "standard";
     tierRank = 1;
-    const stdPctTxt = profKey === "b_pure" ? "۷۷٫۳٪" : profKey === "c_vol" ? "۷۸٫۰٪" : "۶۷٫۱٪";
+    const stdPctTxt = profKey === "b_pure" ? "۷۷٫۳٪" : profKey === "c_vol" ? "۸۱٫۱٪" : "۶۷٫۱٪";
     badgeFa = `✅ استاندارد طلایی • ${stdPctTxt}`;
     lockTitleFa = `سطح ۴ استاندارد طلایی (${stdPctTxt}): توافق هم‌جهت حالت ۱۳ (ضد NO-BET) ∩ حالت ۱۵ (تلفیق ۴ پترن)`;
     reasonFa = `هم‌جهتی کامل Pick_13 === Pick_15 روی ${getTeam3Code(pick)} • ${pwrTag}=${directElo.toFixed(1)}%`;
-    calWinPct = profKey === "b_pure" ? 77.3 : profKey === "c_vol" ? 78.0 : 67.1;
+    calWinPct = profKey === "b_pure" ? 77.3 : profKey === "c_vol" ? 81.1 : 67.1;
     maxBuyCents = profKey === "a_elo" ? 65 : 75;
   }
 
   const vip = tier === "black_diamond" || tier === "pure_astro" || tier === "daily_gold";
 
   return {
-    sig: agreed,
+    sig: activeSig,
     vip,
     pick,
+    sub: m17Sub,
+    origPick,
     tier,
     tierRank,
     badgeFa,

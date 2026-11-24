@@ -17,7 +17,7 @@ export type Deg3OptionKey = "opt1" | "opt2" | "opt3";
 export const ARCHITECTURE_MODE = "ASTRO_GEMATRIA_NAME_AND_MATCH_SKY" as const;
 export const BIRTHDATE_USED = false as const;
 export const TENNIS_SHEETS_WRITE_ENABLED = false as const;
-export const SHARD_BUILD_VERSION = "v18_fix1" as const;
+export const SHARD_BUILD_VERSION = "v19_opt3_gems" as const;
 
 export const ENGLISH_GEM_MAP: Readonly<Record<string, number>> = {
   A: 1,
@@ -160,9 +160,9 @@ export const POWER_PROFILES: Record<
 > = {
   c_vol: {
     key: "c_vol",
-    shortFa: "⚡ هیبرید جدول فصل + Pyth (۷۹٫۹٪ • پیشنهادی ★)",
-    badgeFa: "هیبرید جدول فصل + Surface Pyth",
-    formulaEn: "Neutral-Court Hybrid (Surface_Games_Pyth k=3.5 + Season_WL + L10) + Smart Shields (Early-Month/Finals/250/Rookie)",
+    shortFa: "⚡ هیبرید جدول فصل + Pyth (۸۲٫۸٪ • پیشنهادی ★)",
+    badgeFa: "هیبرید جدول فصل + Surface Pyth + جواهرها",
+    formulaEn: "Neutral-Court Hybrid (Surface_Games_Pyth k=3.5 + Season_WL + L10) + Option-3 Expanded (Flip A∪B + Swap-Out Weak T4 + Gem 1..4)",
   },
   b_pure: {
     key: "b_pure",
