@@ -17,7 +17,7 @@ export type Deg3OptionKey = "opt1" | "opt2" | "opt3";
 export const ARCHITECTURE_MODE = "ASTRO_GEMATRIA_NAME_AND_MATCH_SKY" as const;
 export const BIRTHDATE_USED = false as const;
 export const TENNIS_SHEETS_WRITE_ENABLED = false as const;
-export const SHARD_BUILD_VERSION = "v22_3code_geomancy" as const;
+export const SHARD_BUILD_VERSION = "v22_fix1" as const;
 export type V20GradeKey = "C" | "B" | "A";
 export const V20_GRADE_KEYS: V20GradeKey[] = ["C", "B", "A"];
 

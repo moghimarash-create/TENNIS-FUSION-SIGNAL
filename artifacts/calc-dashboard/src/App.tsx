@@ -170,10 +170,10 @@ function toPersianPct(pct: number): string {
 function Home() {
   const [activeTour, setActiveTour] = useState<TennisTourScope>(() => {
     try {
-      const saved = window.localStorage.getItem("tennis_fusion_tour_v3");
+      const saved = window.localStorage.getItem("tennis_fusion_tour_v4");
       if (saved === "ATP" || saved === "WTA" || saved === "ALL") return saved;
     } catch {}
-    return "ATP";
+    return "ALL";
   });
 
   const [deg3Opt, setDeg3Opt] = useState<Deg3OptionKey>(() => {
@@ -257,7 +257,7 @@ function Home() {
   const switchTour = (t: TennisTourScope) => {
     setActiveTour(t);
     try {
-      window.localStorage.setItem("tennis_fusion_tour_v3", t);
+      window.localStorage.setItem("tennis_fusion_tour_v4", t);
     } catch {}
   };
 

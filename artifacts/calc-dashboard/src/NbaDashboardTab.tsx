@@ -863,14 +863,34 @@ const SINGLE_PATTERN_DEFS = TWIN_PATTERN_DEFS as any;
 
 const DAILY_QUICK_DATES = [
   { label: "All Dates (همه روزها)", date: "ALL" },
-  { label: "2026-11-04 (Wed • 14 Games)", date: "2026-11-04" },
-  { label: "2026-11-06 (Fri • 9 Games)", date: "2026-11-06" },
-  { label: "2026-11-12 (Thu • 4 Games)", date: "2026-11-12" },
-  { label: "2026-11-13 (Fri • 9 Games)", date: "2026-11-13" },
-  { label: "2026-11-14 (Sat • 5 Games)", date: "2026-11-14" },
-  { label: "2026-11-15 (Sun • 9 Games)", date: "2026-11-15" },
-  { label: "2026-11-16 (Mon • 8 Games)", date: "2026-11-16" },
+  { label: "2026-10-24 (Sat • 10 Games)", date: "2026-10-24" },
+  { label: "2026-11-04 (Wed • 23 Games)", date: "2026-11-04" },
+  { label: "2026-11-06 (Fri • 12 Games)", date: "2026-11-06" },
+  { label: "2026-11-10 (Tue • 8 Games)", date: "2026-11-10" },
+  { label: "2026-11-14 (Sat • 3 Games)", date: "2026-11-14" },
+  { label: "2026-11-18 (Wed • 2 Games)", date: "2026-11-18" },
+  { label: "2026-11-21 (Sat • 2 Games)", date: "2026-11-21" },
 ];
+
+function findNearestAvailableDate(targetIso: string, sortedDates: string[]): string {
+  if (!sortedDates.length) return targetIso || "2026-11-21";
+  if (!targetIso || targetIso === "ALL") return sortedDates[sortedDates.length - 1];
+  if (sortedDates.includes(targetIso)) return targetIso;
+  const targetMs = Date.parse(`${targetIso}T00:00:00Z`);
+  if (!Number.isFinite(targetMs)) return sortedDates[sortedDates.length - 1];
+  let bestDate = sortedDates[sortedDates.length - 1];
+  let bestDiff = Infinity;
+  for (const d of sortedDates) {
+    const dMs = Date.parse(`${d}T00:00:00Z`);
+    if (!Number.isFinite(dMs)) continue;
+    const diff = Math.abs(dMs - targetMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestDate = d;
+    }
+  }
+  return bestDate;
+}
 
 const KALSHI_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
@@ -3313,7 +3333,7 @@ export function computeMode17BenchStats(
 export default function NbaDashboardTab({
   fusionMode = "mode17",
   twinDbKind = "team",
-  tour = "ATP",
+  tour = "ALL",
   deg3Opt = "opt3",
   powerProfile = "c_vol",
   v20Grade = "B",
@@ -3462,7 +3482,9 @@ export default function NbaDashboardTab({
   const [manualPersp, setManualPersp] = useState<"home" | "away">("home");
   const [manualDayFilter, setManualDayFilter] = useState<string>("ALL");
   const [openDailyCardsSection, setOpenDailyCardsSection] = useState<boolean>(true);
-  const [dailyCardDate, setDailyCardDate] = useState<string>("2026-11-18");
+  const [dailyCardDate, setDailyCardDate] = useState<string>("");
+  const [cardsPage, setCardsPage] = useState<number>(1);
+  const CARDS_PAGE_SIZE = 50;
   const [manualGeoKind, setManualGeoKind] = useState<"fin" | "dyn">("fin");
   const [monthlyCalendarKind, setMonthlyCalendarKind] = useState<"shamsi" | "greg">("shamsi");
   const [syncBusy, setSyncBusy] = useState<boolean>(false);
@@ -3747,10 +3769,14 @@ export default function NbaDashboardTab({
           "بروزرسانی زنده نتایج واقعی مسابقات تنیس (ATP / WTA) از ESPN انجام شد ✓"
         );
       } catch {}
+      const syncTargetDate =
+        dailyCardDate && dailyCardDate !== "ALL"
+          ? dailyCardDate
+          : rawGames[rawGames.length - 1]?.d ?? "2026-11-21";
       const d = await apiRpcJson("/api/nba/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetDate: dailyCardDate }),
+        body: JSON.stringify({ targetDate: syncTargetDate }),
       });
       if (d?.ok) {
         const ts = Date.now();
@@ -3821,10 +3847,14 @@ export default function NbaDashboardTab({
     setRosterSyncBusy(true);
     setSyncMsg("");
     try {
+      const syncTargetDate =
+        dailyCardDate && dailyCardDate !== "ALL"
+          ? dailyCardDate
+          : rawGames[rawGames.length - 1]?.d ?? "2026-11-21";
       const d = await apiRpcJson("/api/nba/sync-rosters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetDate: dailyCardDate }),
+        body: JSON.stringify({ targetDate: syncTargetDate }),
       });
       if (d?.ok) {
         const ts = Date.now();
@@ -3912,29 +3942,46 @@ export default function NbaDashboardTab({
     };
   });
 
-  const allMonths = Array.from(new Set(games.map((g) => g.ym))).sort();
-  const allGameDates = Array.from(new Set(games.map((g) => g.d))).sort();
-  const activeDailyDate = allGameDates.includes(dailyCardDate)
-    ? dailyCardDate
-    : allGameDates.includes("2026-11-21")
-      ? "2026-11-21"
-      : allGameDates[allGameDates.length - 1] ?? "2026-11-14";
-  const dailyDateIdx = allGameDates.indexOf(activeDailyDate);
-  const gamesOnDailyDateRaw = games.filter((g) => g.d === activeDailyDate);
+  const { allMonths, allGameDates, dateMetaByIso } = useMemo(() => {
+    const mSet = new Set<string>();
+    const dMeta: Record<string, { cnt: number; dayName: string }> = {};
+    for (const g of games) {
+      if (g.ym) mSet.add(g.ym);
+      const cur = dMeta[g.d];
+      if (cur) cur.cnt += 1;
+      else dMeta[g.d] = { cnt: 1, dayName: g.day ?? "" };
+    }
+    return {
+      allMonths: Array.from(mSet).sort(),
+      allGameDates: Object.keys(dMeta).sort(),
+      dateMetaByIso: dMeta,
+    };
+  }, [games]);
+  const monthMetaByYm = useMemo(() => {
+    const mMap: Record<string, { done: number; pend: number }> = {};
+    for (const g of patternGames) {
+      if (seasonFilter !== "ALL" && g.s !== seasonFilter) continue;
+      const cur = mMap[g.ym] ?? (mMap[g.ym] = { done: 0, pend: 0 });
+      if (g.done) cur.done += 1;
+      else cur.pend += 1;
+    }
+    return mMap;
+  }, [patternGames, seasonFilter]);
+  const isAllDatesCardMode = dailyCardDate === "ALL";
+  const singleDailyDate =
+    !isAllDatesCardMode && dailyCardDate
+      ? findNearestAvailableDate(dailyCardDate, allGameDates)
+      : allGameDates[allGameDates.length - 1] ?? "2026-11-21";
+  const activeDailyDate = isAllDatesCardMode ? "ALL" : singleDailyDate;
+  const dailyDateIdx = isAllDatesCardMode ? -1 : allGameDates.indexOf(singleDailyDate);
+  const gamesOnDailyDateRaw = games.filter((g) => g.d === singleDailyDate);
   const gamesOnDailyDate = [...gamesOnDailyDateRaw].sort(
     (a, b) => Math.abs(b.f30 ?? 0) - Math.abs(a.f30 ?? 0)
   );
 
-  const v20ScopeStats = useMemo(() => {
-    const calcBucket = (arr: { won: boolean | null }[]) => {
-      const doneArr = arr.filter((x) => x.won !== null);
-      const w = doneArr.filter((x) => x.won === true).length;
-      const n = doneArr.length;
-      const pct = n > 0 ? Math.round((10000 * w) / n) / 100 : 0;
-      return { total: arr.length, w, n, pct };
-    };
+  const scopedAllGames = useMemo(() => {
     const q = teamQuery.trim().toLowerCase();
-    const scoped = games.filter((g) => {
+    return games.filter((g) => {
       if (manualDayFilter !== "ALL" && g.day !== manualDayFilter) return false;
       if (seasonFilter !== "ALL" && g.s !== seasonFilter) return false;
       if (monthFilter !== "ALL" && g.ym !== monthFilter) return false;
@@ -3947,7 +3994,17 @@ export default function NbaDashboardTab({
       }
       return true;
     });
-    const evalsA = scoped.map((g) => {
+  }, [games, manualDayFilter, seasonFilter, monthFilter, teamQuery]);
+
+  const v20ScopeStats = useMemo(() => {
+    const calcBucket = (arr: { won: boolean | null }[]) => {
+      const doneArr = arr.filter((x) => x.won !== null);
+      const w = doneArr.filter((x) => x.won === true).length;
+      const n = doneArr.length;
+      const pct = n > 0 ? Math.round((10000 * w) / n) / 100 : 0;
+      return { total: arr.length, w, n, pct };
+    };
+    const evalsA = scopedAllGames.map((g) => {
       const rA = evalMode17Gold(g, "A");
       const isDone = Boolean(g.done && g.aw && g.aw !== "PENDING");
       const won = isDone && rA.sig ? rA.pick === g.aw : null;
@@ -3975,9 +4032,18 @@ export default function NbaDashboardTab({
       lastActiveDate: activeDates.length > 0 ? activeDates[activeDates.length - 1] : "",
       recentActiveDates: activeDates.slice(-5),
     };
-  }, [games, manualDayFilter, seasonFilter, monthFilter, teamQuery, activeV20Grade]);
+  }, [scopedAllGames, activeV20Grade]);
 
   const v20DayCounts = useMemo(() => {
+    if (isAllDatesCardMode) {
+      return {
+        C: v20ScopeStats.C.total,
+        B: v20ScopeStats.B.total,
+        A: v20ScopeStats.A.total,
+        active: v20ScopeStats.active.total,
+        slate: scopedAllGames.length,
+      };
+    }
     let cntC = 0;
     let cntB = 0;
     let cntA = 0;
@@ -3994,7 +4060,105 @@ export default function NbaDashboardTab({
     }
     const active = activeV20Grade === "C" ? cntC : activeV20Grade === "B" ? cntB : cntA;
     return { C: cntC, B: cntB, A: cntA, active, slate: gamesOnDailyDate.length };
-  }, [gamesOnDailyDate, activeV20Grade]);
+  }, [isAllDatesCardMode, v20ScopeStats, scopedAllGames.length, gamesOnDailyDate, activeV20Grade]);
+
+  const allDatesFilteredSorted = useMemo(() => {
+    if (!isAllDatesCardMode) return [] as NbaGamePred[];
+    const isSysMode =
+      dailyCardMode === "nhl_best" ||
+      dailyCardMode === "nhl_vip3" ||
+      dailyCardMode === "nhl_f1_guard" ||
+      dailyCardMode === "nhl_f1_idx_raw" ||
+      dailyCardMode === "nhl_f1" ||
+      dailyCardMode === "nhl_f1_union";
+    const matched: { g: NbaGamePred; tierRank: number; directElo: number }[] = [];
+    for (const g of scopedAllGames) {
+      const m17 = fusionMode === "mode17" ? evalMode17Gold(g, activeV20Grade) : null;
+      const inActiveSignal =
+        fusionMode === "mode17"
+          ? Boolean(m17?.sig)
+          : !isSysMode
+            ? true
+            : dailyCardMode === "nhl_vip3"
+              ? activeVip3Of(g)
+              : dailyCardMode === "nhl_best"
+                ? activeF1WtpOf(g)
+                : dailyCardMode === "nhl_f1_guard"
+                  ? Boolean(g.f1_guard)
+                  : dailyCardMode === "nhl_f1_idx_raw"
+                    ? Boolean(g.f1_idx)
+                    : dailyCardMode === "nhl_f1_union"
+                      ? activeUnionOf(g)
+                      : Boolean(g.f1);
+      const baseHomeFav = g.sys_win ? g.sys_win === g.h : (g.f30 ?? 0) >= 0;
+      const homeFav = cardFlipDir[g.n] ? !baseHomeFav : baseHomeFav;
+      const predTeam = homeFav ? g.h : g.a;
+      const hasFinalScore = Boolean(g.done && g.st !== "PENDING" && g.aw);
+      const cardWon = !hasFinalScore ? null : predTeam === g.aw;
+      let keep = false;
+      if (dailyCardFilter === "win") keep = inActiveSignal && cardWon === true;
+      else if (dailyCardFilter === "loss") keep = inActiveSignal && cardWon === false;
+      else if (dailyCardFilter === "pending") keep = inActiveSignal && cardWon === null;
+      else if (showNoBetCards || dailyCardFilter === "all") keep = true;
+      else keep = inActiveSignal;
+      if (keep) {
+        matched.push({
+          g,
+          tierRank: m17?.tierRank ?? 0,
+          directElo: m17?.directElo ?? Math.abs(g.f30 ?? 0),
+        });
+      }
+    }
+    matched.sort((a, b) => {
+      if (b.g.d !== a.g.d) return b.g.d.localeCompare(a.g.d);
+      if (b.tierRank !== a.tierRank) return b.tierRank - a.tierRank;
+      if (b.directElo !== a.directElo) return b.directElo - a.directElo;
+      if (Math.abs(b.g.f30 ?? 0) !== Math.abs(a.g.f30 ?? 0)) {
+        return Math.abs(b.g.f30 ?? 0) - Math.abs(a.g.f30 ?? 0);
+      }
+      return a.g.n - b.g.n;
+    });
+    return matched.map((x) => x.g);
+  }, [
+    isAllDatesCardMode,
+    scopedAllGames,
+    fusionMode,
+    activeV20Grade,
+    dailyCardMode,
+    oddsFreqMode,
+    cardFlipDir,
+    dailyCardFilter,
+    showNoBetCards,
+  ]);
+
+  useEffect(() => {
+    setCardsPage(1);
+  }, [
+    dailyCardDate,
+    tour,
+    deg3Opt,
+    powerProfile,
+    activeV20Grade,
+    fusionMode,
+    dailyCardFilter,
+    showNoBetCards,
+    seasonFilter,
+    monthFilter,
+    manualDayFilter,
+    teamQuery,
+    dailyCardMode,
+  ]);
+
+  const totalFilteredCards = isAllDatesCardMode ? allDatesFilteredSorted.length : gamesOnDailyDate.length;
+  const totalCardPages = isAllDatesCardMode
+    ? Math.max(1, Math.ceil(totalFilteredCards / CARDS_PAGE_SIZE))
+    : 1;
+  const safeCardsPage = Math.min(Math.max(1, cardsPage), totalCardPages);
+  const pageStartIdx = totalFilteredCards === 0 ? 0 : (safeCardsPage - 1) * CARDS_PAGE_SIZE + 1;
+  const pageEndIdx = Math.min(safeCardsPage * CARDS_PAGE_SIZE, totalFilteredCards);
+  const cardsSourceGames = isAllDatesCardMode
+    ? allDatesFilteredSorted.slice((safeCardsPage - 1) * CARDS_PAGE_SIZE, safeCardsPage * CARDS_PAGE_SIZE)
+    : gamesOnDailyDate;
 
   const switchV20Grade = (nextGrade: V20GradeKey) => {
     if (onChangeV20Grade) {
@@ -4006,29 +4170,19 @@ export default function NbaDashboardTab({
     if (dailyCardFilter === "win" || dailyCardFilter === "loss") {
       setDailyCardFilter("qualified");
     }
-    if (!showNoBetCards) {
-      const dayHas = gamesOnDailyDate.some((x) => evalMode17Gold(x, nextGrade).sig);
-      if (!dayHas) {
-        const targetDate =
-          nextGrade === "C"
-            ? v20ScopeStats.lastDateC
-            : nextGrade === "B"
-              ? v20ScopeStats.lastDateB
-              : v20ScopeStats.lastDateA;
-        if (targetDate) {
-          setDailyCardDate(targetDate);
-        }
-      }
-    }
+    setCardsPage(1);
   };
 
-  const histByDay = useMemo(() => {
-    const map: Record<string, HistGameRow[]> = {};
+  const { histByDay, histByDate } = useMemo(() => {
+    const byDay: Record<string, HistGameRow[]> = {};
+    const byDate: Record<string, HistGameRow[]> = {};
     for (const r of histGames) {
-      if (!map[r.day]) map[r.day] = [];
-      map[r.day].push(r);
+      if (!byDay[r.day]) byDay[r.day] = [];
+      byDay[r.day].push(r);
+      if (!byDate[r.d]) byDate[r.d] = [];
+      byDate[r.d].push(r);
     }
-    return map;
+    return { histByDay: byDay, histByDate: byDate };
   }, [histGames]);
 
   const getDayPoolBefore = useCallback(
@@ -4047,15 +4201,21 @@ export default function NbaDashboardTab({
     [histByDay]
   );
 
-  const resolveNhlF1Pool = (g: NbaGamePred, dPool: HistGameRow[]): HistGameRow[] | null => {
+  const resolveNhlF1Pool = (g: NbaGamePred, _dPool?: HistGameRow[]): HistGameRow[] | null => {
     if (!g.twins || g.twins.length === 0) return null;
     const matched: HistGameRow[] = [];
     for (const tw of g.twins) {
       const td = String(tw[0]);
+      if (td >= g.d) continue;
       const thc = String(tw[1]);
       const tac = String(tw[2]);
-      const found = dPool.find(
-        (r) => r.d === td && (getTeam3Code(r.h) === getTeam3Code(thc) || r.h === thc) && (getTeam3Code(r.a) === getTeam3Code(tac) || r.a === tac)
+      const dayRows = histByDate[td];
+      if (!dayRows) continue;
+      const found = dayRows.find(
+        (r) =>
+          r.day === g.day &&
+          (getTeam3Code(r.h) === getTeam3Code(thc) || r.h === thc) &&
+          (getTeam3Code(r.a) === getTeam3Code(tac) || r.a === tac)
       );
       if (found) matched.push(found);
     }
@@ -4162,7 +4322,9 @@ export default function NbaDashboardTab({
                 کارت‌های تصمیم‌گیری ۲ باکسی مسابقات روز تنیس (ATP / WTA)
               </span>
               <span className="px-2.5 py-0.5 rounded bg-white text-sky-950 border border-sky-300 text-xs font-extrabold font-mono">
-                {activeDailyDate} • {gamesOnDailyDate.length} مسابقه تنیس
+                {isAllDatesCardMode
+                  ? `همه روزها (کل محدوده) • ${totalFilteredCards} کارت از ${scopedAllGames.length} مسابقه`
+                  : `${activeDailyDate} • ${gamesOnDailyDate.length} مسابقه تنیس`}
               </span>
             </div>
             <button
@@ -4179,7 +4341,7 @@ export default function NbaDashboardTab({
 
           {openDailyCardsSection && (
             <div className="p-3.5 space-y-3 bg-sky-50/50">
-              {/* Clean Daily Control Bar (Date Selector + Recent Active Signal Dates + Live Sync) */}
+              {/* Clean Daily Control Bar (Date Selector + All Days Toggle + Recent Active Signal Dates + Live Sync) */}
               <div className="bg-white p-2.5 rounded-lg border border-sky-200 shadow-2xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -4199,6 +4361,7 @@ export default function NbaDashboardTab({
                             if (!games.some((x) => x.d === prevD && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
                               setStatusFilter("ALL");
                             }
+                            setCardsPage(1);
                             setPage(1);
                           }
                         }}
@@ -4209,24 +4372,31 @@ export default function NbaDashboardTab({
                       </button>
 
                       <select
-                        value={activeDailyDate}
+                        value={isAllDatesCardMode ? "ALL" : activeDailyDate}
                         onChange={(e) => {
                           const dVal = e.target.value;
                           setDailyCardDate(dVal);
                           setDateFilter(dVal);
-                          setMonthFilter("ALL");
-                          setSeasonFilter("ALL");
-                          if (!games.some((x) => x.d === dVal && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
-                            setStatusFilter("ALL");
+                          if (dVal !== "ALL") {
+                            setMonthFilter("ALL");
+                            setSeasonFilter("ALL");
+                            if (!games.some((x) => x.d === dVal && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
+                              setStatusFilter("ALL");
+                            }
                           }
+                          setCardsPage(1);
                           setPage(1);
                         }}
                         data-testid="select-nba-daily-date"
                         className="h-7 rounded bg-white px-2 text-xs font-mono font-extrabold text-sky-950 border border-sky-200"
                       >
+                        <option value="ALL">
+                          📚 همه روزها — نمایش کل کارت‌ها ({v20ScopeStats.active.total} سیگنال / {scopedAllGames.length} بازی)
+                        </option>
                         {allGameDates.map((dStr) => {
-                          const cnt = games.filter((x) => x.d === dStr).length;
-                          const dayName = games.find((x) => x.d === dStr)?.day ?? "";
+                          const meta = dateMetaByIso[dStr];
+                          const cnt = meta?.cnt ?? 0;
+                          const dayName = meta?.dayName ?? "";
                           return (
                             <option key={dStr} value={dStr}>
                               {dStr} ({dayName} • {cnt} بازی)
@@ -4249,6 +4419,7 @@ export default function NbaDashboardTab({
                             if (!games.some((x) => x.d === nextD && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
                               setStatusFilter("ALL");
                             }
+                            setCardsPage(1);
                             setPage(1);
                           }
                         }}
@@ -4258,6 +4429,33 @@ export default function NbaDashboardTab({
                         روز بعد ▶
                       </button>
                     </div>
+
+                    {/* All-Days Full Card Browser Button */}
+                    <button
+                      type="button"
+                      data-testid="btn-cards-all-dates"
+                      onClick={() => {
+                        setDailyCardDate("ALL");
+                        setDateFilter("ALL");
+                        setCardsPage(1);
+                        setPage(1);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-extrabold border transition-all inline-flex items-center gap-1.5 shadow-2xs ${
+                        isAllDatesCardMode
+                          ? "bg-indigo-700 text-white border-indigo-900 ring-1 ring-indigo-300"
+                          : "bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border-indigo-300"
+                      }`}
+                    >
+                      <span>📚 همه روزها (نمایش کل کارت‌ها)</span>
+                      <span
+                        dir="ltr"
+                        className={`px-1.5 py-0.5 rounded font-mono text-[10.5px] ${
+                          isAllDatesCardMode ? "bg-indigo-950 text-indigo-100" : "bg-white text-indigo-900"
+                        }`}
+                      >
+                        {totalFilteredCards}
+                      </span>
+                    </button>
 
                     {/* Dynamic Quick Jump Buttons for Recent Active-Signal Dates */}
                     <div className="flex flex-wrap items-center gap-1">
@@ -4273,10 +4471,11 @@ export default function NbaDashboardTab({
                             if (!games.some((x) => x.d === dIso && Boolean(x.done)) && (statusFilter === "WIN" || statusFilter === "LOSS")) {
                               setStatusFilter("ALL");
                             }
+                            setCardsPage(1);
                             setPage(1);
                           }}
                           className={`px-2 py-1 rounded text-[11px] font-mono border transition-colors ${
-                            activeDailyDate === dIso
+                            !isAllDatesCardMode && activeDailyDate === dIso
                               ? "bg-sky-700 text-white border-sky-800 font-bold"
                               : "bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-200"
                           }`}
@@ -4342,7 +4541,8 @@ export default function NbaDashboardTab({
                 };
                 const isActiveSigCard = (x: NbaGamePred) =>
                   fusionMode === "mode17" ? evalMode17Gold(x, activeV20Grade).sig : activeF1WtpOf(x);
-                const sigCards = gamesOnDailyDate.filter(isActiveSigCard);
+                const scoreboardPool = isAllDatesCardMode ? scopedAllGames : gamesOnDailyDate;
+                const sigCards = scoreboardPool.filter(isActiveSigCard);
                 const sigDone = sigCards.filter((x) => Boolean(x.done && x.aw && x.aw !== "PENDING"));
                 const sigPend = sigCards.length - sigDone.length;
                 const sigWins = sigDone.filter((x) => evalPick(x) === x.aw).length;
@@ -4357,7 +4557,7 @@ export default function NbaDashboardTab({
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-extrabold text-sky-950">
-                        کارنامه برد و باخت {activeDailyDate} با {modeTitleMap[fusionMode]}:
+                        کارنامه برد و باخت {isAllDatesCardMode ? "همه روزها (کل محدوده)" : activeDailyDate} با {modeTitleMap[fusionMode]}:
                       </span>
                       {sigDone.length > 0 ? (
                         <span
@@ -4371,7 +4571,7 @@ export default function NbaDashboardTab({
                           data-testid="badge-daily-active-wl"
                           className="px-2 py-0.5 rounded bg-sky-100 text-sky-950 border border-sky-300 font-mono font-bold"
                         >
-                          سیگنال فعال روز: {sigCards.length} بازی
+                          سیگنال فعال: {sigCards.length} بازی
                         </span>
                       )}
                       {sigPend > 0 && (
@@ -4515,31 +4715,12 @@ export default function NbaDashboardTab({
                     const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
                     const activeGeoKind: "fin" | "dyn" = dailyCardMode === "geo_dyn" ? "dyn" : manualGeoKind;
                     const tGeo = activeGeoKind === "dyn" ? tGeoDyn : tGeoFin;
-                    const dPool = getDayPoolBefore(g.day, g.d);
                     const savedState = manualFilters[g.n];
-                    const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
-                    const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
-                    const getRowGeo = (r: HistGameRow) => (manualPersp === "home" ? (rowGeoKind === "dyn" ? (r.hGeoDyn ?? r.hGeo) : r.hGeo) : (rowGeoKind === "dyn" ? (r.aGeoDyn ?? r.aGeo) : r.aGeo));
-                    const stepRes = computeAutoFilterState(t12, tGeoFin, dPool, manualPersp, false, "fin");
-                    const geoRes = computeAutoFilterState(t12, tGeo, dPool, manualPersp, true, activeGeoKind);
-                    const f30Val = g.f30 ?? g.vm6 ?? 0;
-                    const stepAgrees = (stepRes.hw >= stepRes.aw) === (f30Val >= 0);
-                    const geoAgrees = (geoRes.hw >= geoRes.aw) === (f30Val >= 0);
-                    const pickGeo =
-                      dailyCardMode === "geo" || dailyCardMode === "geo_dyn"
-                        ? true
-                        : dailyCardMode === "step"
-                          ? false
-                          : (stepRes.pct < 60 || (stepAgrees && !geoAgrees && stepRes.pct >= 55))
-                            ? false
-                            : !stepAgrees && geoAgrees && geoRes.pct >= 55
-                              ? true
-                              : geoRes.pct > stepRes.pct || (geoRes.pct === stepRes.pct && geoRes.mv > stepRes.mv);
-                    const autoChosen = pickGeo ? geoRes : stepRes;
-                    const hasManualFilter =
+                    const hasManualFilter = Boolean(
                       savedState &&
-                      (Object.values(savedState.cols).some((v) => v && v !== "ALL") ||
-                        (savedState.geo && savedState.geo !== "ALL"));
+                        (Object.values(savedState.cols).some((v) => v && v !== "ALL") ||
+                          (savedState.geo && savedState.geo !== "ALL"))
+                    );
                     const isNhlSysMode =
                       dailyCardMode === "nhl_best" ||
                       dailyCardMode === "nhl_vip3" ||
@@ -4547,7 +4728,28 @@ export default function NbaDashboardTab({
                       dailyCardMode === "nhl_f1_idx_raw" ||
                       dailyCardMode === "nhl_f1" ||
                       dailyCardMode === "nhl_f1_union";
-                    const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g, dPool) : null;
+                    const needLegacyScan = !isNhlSysMode || hasManualFilter;
+                    const dPool = needLegacyScan ? getDayPoolBefore(g.day, g.d) : [];
+                    const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
+                    const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
+                    const getRowGeo = (r: HistGameRow) => (manualPersp === "home" ? (rowGeoKind === "dyn" ? (r.hGeoDyn ?? r.hGeo) : r.hGeo) : (rowGeoKind === "dyn" ? (r.aGeoDyn ?? r.aGeo) : r.aGeo));
+                    const stepRes = computeAutoFilterState(t12, tGeoFin, needLegacyScan ? dPool : [], manualPersp, false, "fin");
+                    const geoRes = computeAutoFilterState(t12, tGeo, needLegacyScan ? dPool : [], manualPersp, true, activeGeoKind);
+                    const f30Val = g.f30 ?? g.vm6 ?? 0;
+                    const stepAgrees = (stepRes.hw >= stepRes.aw) === (f30Val >= 0);
+                    const geoAgrees = (geoRes.hw >= geoRes.aw) === (f30Val >= 0);
+                    const pickGeo =
+                      dailyCardMode === "geo" || dailyCardMode === "geo_dyn"
+                        ? true
+                        : dailyCardMode === "step"
+                           ? false
+                           : (stepRes.pct < 60 || (stepAgrees && !geoAgrees && stepRes.pct >= 55))
+                             ? false
+                             : !stepAgrees && geoAgrees && geoRes.pct >= 55
+                               ? true
+                               : geoRes.pct > stepRes.pct || (geoRes.pct === stepRes.pct && geoRes.mv > stepRes.mv);
+                    const autoChosen = pickGeo ? geoRes : stepRes;
+                    const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g) : null;
                     let cardPool = f1Pool ?? autoChosen.pool;
                     let manualOverridden = false;
                     if (hasManualFilter && savedState) {
@@ -5836,7 +6038,7 @@ export default function NbaDashboardTab({
                               : "bg-slate-100 text-slate-800"
                           }`}
                         >
-                          {v20ScopeStats.C.w}/{v20ScopeStats.C.n} • امروز:{v20DayCounts.C}
+                          {v20ScopeStats.C.w}/{v20ScopeStats.C.n} • {isAllDatesCardMode ? `کل:${v20DayCounts.C}` : `امروز:${v20DayCounts.C}`}
                         </span>
                       </button>
 
@@ -5859,7 +6061,7 @@ export default function NbaDashboardTab({
                               : "bg-amber-100 text-amber-950"
                           }`}
                         >
-                          {v20ScopeStats.B.w}/{v20ScopeStats.B.n} • امروز:{v20DayCounts.B}
+                          {v20ScopeStats.B.w}/{v20ScopeStats.B.n} • {isAllDatesCardMode ? `کل:${v20DayCounts.B}` : `امروز:${v20DayCounts.B}`}
                         </span>
                       </button>
 
@@ -5882,7 +6084,7 @@ export default function NbaDashboardTab({
                               : "bg-emerald-100 text-emerald-950"
                           }`}
                         >
-                          {v20ScopeStats.A.w}/{v20ScopeStats.A.n} • امروز:{v20DayCounts.A}
+                          {v20ScopeStats.A.w}/{v20ScopeStats.A.n} • {isAllDatesCardMode ? `کل:${v20DayCounts.A}` : `امروز:${v20DayCounts.A}`}
                         </span>
                       </button>
                     </div>
@@ -5903,7 +6105,7 @@ export default function NbaDashboardTab({
                     >
                       {showNoBetCards || dailyCardFilter === "all"
                         ? `🙈 مخفی‌سازی NO-BET (فقط سیگنال‌های سطح ${activeV20Grade})`
-                        : `👁 نمایش کارت‌های NO-BET روز (${Math.max(0, v20DayCounts.slate - v20DayCounts.active)})`}
+                        : `👁 نمایش کارت‌های NO-BET ${isAllDatesCardMode ? "کل محدوده" : "روز"} (${Math.max(0, v20DayCounts.slate - v20DayCounts.active)})`}
                     </button>
                   </div>
 
@@ -5920,6 +6122,50 @@ export default function NbaDashboardTab({
                 </div>
               )}
 
+              {/* All-Dates Pagination Header Bar (50 Cards per Page, Newest First) */}
+              {isAllDatesCardMode && totalFilteredCards > 0 && (
+                <div
+                  data-testid="bar-cards-pagination-top"
+                  dir="rtl"
+                  className="bg-indigo-50/90 border border-indigo-300 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shadow-2xs"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-indigo-950 font-extrabold">
+                    <span>📚 نمایش کل کارت‌ها (مرتب‌شده از جدیدترین تاریخ به قدیمی‌ترین):</span>
+                    <span className="px-2 py-0.5 rounded bg-white border border-indigo-200 font-mono text-[11px]">
+                      نمایش {pageStartIdx} تا {pageEndIdx} از {totalFilteredCards} کارت • صفحه {safeCardsPage} از {totalCardPages}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={safeCardsPage <= 1}
+                      onClick={() => setCardsPage(1)}
+                      className="px-2 py-1 rounded bg-white hover:bg-indigo-100 disabled:opacity-40 text-indigo-950 border border-indigo-200 font-bold text-[11px]"
+                    >
+                      ⏮ صفحه اول
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="btn-cards-prev-page"
+                      disabled={safeCardsPage <= 1}
+                      onClick={() => setCardsPage((p) => Math.max(1, p - 1))}
+                      className="px-2.5 py-1 rounded bg-white hover:bg-indigo-100 disabled:opacity-40 text-indigo-950 border border-indigo-300 font-extrabold text-xs"
+                    >
+                      ▶ ۵۰ بازی قبلی
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="btn-cards-next-page"
+                      disabled={safeCardsPage >= totalCardPages}
+                      onClick={() => setCardsPage((p) => Math.min(totalCardPages, p + 1))}
+                      className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-800 disabled:opacity-40 text-white border border-indigo-900 font-extrabold text-xs shadow-2xs"
+                    >
+                      نمایش ۵۰ بازی بعدی ◀
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Daily Cards Grid (2 to 3 Cards per Row, Exact GOLD-FORMULA-PRIORITY Card Structure in Light Pale-Blue) */}
               {histLoading ? (
                 <div className="p-6 text-center text-xs text-sky-800 bg-white rounded-lg border border-sky-200 flex items-center justify-center gap-2">
@@ -5928,13 +6174,26 @@ export default function NbaDashboardTab({
               ) : fusionMode === "mode17" &&
                 !showNoBetCards &&
                 dailyCardFilter === "qualified" &&
-                v20DayCounts.active === 0 ? (
+                (isAllDatesCardMode ? totalFilteredCards === 0 : v20DayCounts.active === 0) ? (
                 <div className="p-4 rounded-xl border border-amber-300 bg-white text-center space-y-2.5" dir="rtl">
                   <div className="text-xs font-extrabold text-slate-800">
-                    در تاریخ انتخاب‌شده ({activeDailyDate}) سیگنال فعالی در سطح {activeV20Grade} ثبت نشده است ({gamesOnDailyDate.length} مسابقه این روز در وضعیت NO-BET قرار دارد).
+                    {isAllDatesCardMode
+                      ? `در محدوده فیلتر فعلی سیگنال فعالی در سطح ${activeV20Grade} یافت نشد.`
+                      : `در تاریخ انتخاب‌شده (${activeDailyDate}) سیگنال فعالی در سطح ${activeV20Grade} ثبت نشده است (${gamesOnDailyDate.length} مسابقه این روز در وضعیت NO-BET قرار دارد).`}
                   </div>
                   <div className="flex flex-wrap items-center justify-center gap-2">
-                    {v20ScopeStats.lastActiveDate ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDailyCardDate("ALL");
+                        setDateFilter("ALL");
+                        setCardsPage(1);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-extrabold"
+                    >
+                      📚 نمایش همه روزها ({v20ScopeStats.active.total} سیگنال سطح {activeV20Grade})
+                    </button>
+                    {!isAllDatesCardMode && v20ScopeStats.lastActiveDate ? (
                       <button
                         type="button"
                         onClick={() => setDailyCardDate(v20ScopeStats.lastActiveDate)}
@@ -5951,44 +6210,20 @@ export default function NbaDashboardTab({
                       }}
                       className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs font-extrabold"
                     >
-                      نمایش کارت‌های NO-BET امروز ({gamesOnDailyDate.length})
+                      نمایش کارت‌های NO-BET ({isAllDatesCardMode ? scopedAllGames.length : gamesOnDailyDate.length})
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
-                  {[...gamesOnDailyDate]
+                  {[...cardsSourceGames]
                     .map((g) => {
                       const t12 = (manualPersp === "home" ? g.h_12 : g.a_12) ?? [];
                       const tGeoFin = (manualPersp === "home" ? g.h_geo : g.a_geo) ?? "";
                       const tGeoDyn = (manualPersp === "home" ? (g.h_geo_dyn ?? g.h_geo) : (g.a_geo_dyn ?? g.a_geo)) ?? "";
                       const tGeoTab = (manualPersp === "home" ? g.h_geo_tab : g.a_geo_tab) ?? "";
                       const activeGeoKind: "fin" | "dyn" = dailyCardMode === "geo_dyn" ? "dyn" : manualGeoKind;
-                      const dPool = getDayPoolBefore(g.day, g.d);
                       const savedState = manualFilters[g.n];
-                      const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
-                      const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
-                      const getRowGeo = (r: HistGameRow) =>
-                        manualPersp === "home"
-                          ? rowGeoKind === "dyn"
-                            ? r.hGeoDyn ?? r.hGeo
-                            : r.hGeo
-                          : rowGeoKind === "dyn"
-                            ? r.aGeoDyn ?? r.aGeo
-                            : r.aGeo;
-                      const getRowGeoTab = (r: HistGameRow) =>
-                        manualPersp === "home" ? (r.hGeoTab ?? "") : (r.aGeoTab ?? "");
-
-                      const ch3 = computeThreeChannelIndex(t12, tGeoFin, tGeoDyn, dPool, manualPersp, tGeoTab);
-                      const autoChosen =
-                        dailyCardMode === "geo_tab"
-                          ? ch3.geoTab
-                          : dailyCardMode === "geo"
-                            ? ch3.geoFin
-                            : dailyCardMode === "geo_dyn"
-                              ? ch3.geoDyn
-                              : ch3.step;
-
                       const hasManualFilter = Boolean(
                         savedState &&
                           (Object.values(savedState.cols).some((v) => v && v !== "ALL") ||
@@ -6004,7 +6239,39 @@ export default function NbaDashboardTab({
                         dailyCardMode === "nhl_f1" ||
                         dailyCardMode === "nhl_f1_union";
 
-                      const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g, dPool) : null;
+                      const needLegacyCh3 = !isNhlSysMode || hasManualFilter;
+                      const dPool = needLegacyCh3 ? getDayPoolBefore(g.day, g.d) : [];
+                      const rowGeoKind: "fin" | "dyn" = savedState?.geoKind ?? activeGeoKind;
+                      const getRowEl12 = (r: HistGameRow) => (manualPersp === "home" ? r.h12 : r.a12);
+                      const getRowGeo = (r: HistGameRow) =>
+                        manualPersp === "home"
+                          ? rowGeoKind === "dyn"
+                            ? r.hGeoDyn ?? r.hGeo
+                            : r.hGeo
+                          : rowGeoKind === "dyn"
+                            ? r.aGeoDyn ?? r.aGeo
+                            : r.aGeo;
+                      const getRowGeoTab = (r: HistGameRow) =>
+                        manualPersp === "home" ? (r.hGeoTab ?? "") : (r.aGeoTab ?? "");
+
+                      const ch3 = computeThreeChannelIndex(
+                        t12,
+                        tGeoFin,
+                        tGeoDyn,
+                        !isNhlSysMode ? dPool : [],
+                        manualPersp,
+                        tGeoTab
+                      );
+                      const autoChosen =
+                        dailyCardMode === "geo_tab"
+                          ? ch3.geoTab
+                          : dailyCardMode === "geo"
+                            ? ch3.geoFin
+                            : dailyCardMode === "geo_dyn"
+                              ? ch3.geoDyn
+                              : ch3.step;
+
+                      const f1Pool = isNhlSysMode && manualPersp === "home" ? resolveNhlF1Pool(g) : null;
                       let cardPool = f1Pool ?? autoChosen.pool;
                       let manualOverridden = false;
 
@@ -6298,6 +6565,7 @@ export default function NbaDashboardTab({
                       return inActiveSignal;
                     })
                     .sort((a, b) => {
+                      if (isAllDatesCardMode && b.g.d !== a.g.d) return b.g.d.localeCompare(a.g.d);
                       if (a.m17 && b.m17) {
                         if (b.m17.tierRank !== a.m17.tierRank) return b.m17.tierRank - a.m17.tierRank;
                         if (b.m17.directElo !== a.m17.directElo) return b.m17.directElo - a.m17.directElo;
@@ -7569,8 +7837,9 @@ export default function NbaDashboardTab({
 
                       return (
                         <div
-                          key={g.n}
+                          key={`${g.tour || "T"}-${g.d}-${g.n}`}
                           data-testid={`nba-daily-card-${g.n}`}
+                          data-card-date={g.d}
                           className={`rounded-xl overflow-hidden flex flex-col justify-between transition-all ${cleanBorderCls}`}
                         >
                           {/* Clean 1v1 Singles Tennis Matchup Header (P1 vs P2 + Tournament + City + Surface + Round) */}
@@ -9708,6 +9977,42 @@ export default function NbaDashboardTab({
                     })}
                 </div>
               )}
+
+              {/* All-Dates Pagination Footer Bar */}
+              {isAllDatesCardMode && totalFilteredCards > CARDS_PAGE_SIZE && (
+                <div
+                  data-testid="bar-cards-pagination-bottom"
+                  dir="rtl"
+                  className="bg-indigo-50/90 border border-indigo-300 rounded-lg px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs shadow-2xs"
+                >
+                  <div className="text-indigo-950 font-extrabold">
+                    نمایش کارت‌های {pageStartIdx} تا {pageEndIdx} از مجموع {totalFilteredCards} کارت • صفحه {safeCardsPage} از {totalCardPages}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={safeCardsPage <= 1}
+                      onClick={() => {
+                        setCardsPage((p) => Math.max(1, p - 1));
+                      }}
+                      className="px-2.5 py-1.5 rounded bg-white hover:bg-indigo-100 disabled:opacity-40 text-indigo-950 border border-indigo-300 font-extrabold text-xs"
+                    >
+                      ▶ ۵۰ بازی قبلی
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="btn-cards-next-page-bottom"
+                      disabled={safeCardsPage >= totalCardPages}
+                      onClick={() => {
+                        setCardsPage((p) => Math.min(totalCardPages, p + 1));
+                      }}
+                      className="px-3.5 py-1.5 rounded bg-indigo-700 hover:bg-indigo-800 disabled:opacity-40 text-white border border-indigo-900 font-extrabold text-xs shadow-2xs"
+                    >
+                      نمایش ۵۰ بازی بعدی ◀
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -9978,13 +10283,19 @@ export default function NbaDashboardTab({
               <button
                 key={qd.date}
                 type="button"
+                data-testid={`btn-daily-slate-${qd.date}`}
                 onClick={() => {
                   setDateFilter(qd.date);
-                  if (qd.date !== "ALL") setDailyCardDate(qd.date);
+                  setDailyCardDate(qd.date);
+                  if (qd.date !== "ALL") {
+                    setMonthFilter("ALL");
+                    setSeasonFilter("ALL");
+                  }
+                  setCardsPage(1);
                   setPage(1);
                 }}
                 className={`text-xs px-2.5 py-1 rounded border font-mono transition-colors ${
-                  dateFilter === qd.date
+                  (isAllDatesCardMode ? qd.date === "ALL" : activeDailyDate === qd.date)
                     ? "bg-sky-600 text-white border-sky-700 font-bold"
                     : "bg-slate-50 hover:bg-sky-50 text-slate-700 border-slate-200"
                 }`}
@@ -9997,11 +10308,17 @@ export default function NbaDashboardTab({
             <label className="text-[11px] font-medium text-slate-600">تاریخ دلخواه:</label>
             <input
               type="date"
-              value={dateFilter === "ALL" ? "" : dateFilter}
+              data-testid="input-daily-slate-custom-date"
+              value={isAllDatesCardMode ? "" : activeDailyDate}
               onChange={(e) => {
                 const v = e.target.value || "ALL";
                 setDateFilter(v);
-                if (v !== "ALL") setDailyCardDate(v);
+                setDailyCardDate(v);
+                if (v !== "ALL") {
+                  setMonthFilter("ALL");
+                  setSeasonFilter("ALL");
+                }
+                setCardsPage(1);
                 setPage(1);
               }}
               className="h-8 rounded border border-slate-300 px-2 text-xs font-mono"
@@ -10067,9 +10384,9 @@ export default function NbaDashboardTab({
               >
                 <option value="ALL">All Months (همه ماه‌ها)</option>
                 {allMonths.map((ym) => {
-                  const mSub = patternGames.filter((g) => (seasonFilter === "ALL" || g.s === seasonFilter) && g.ym === ym);
-                  const mDone = mSub.filter((g) => Boolean(g.done)).length;
-                  const mPend = mSub.length - mDone;
+                  const mm = monthMetaByYm[ym];
+                  const mDone = mm?.done ?? 0;
+                  const mPend = mm?.pend ?? 0;
                   const suffix =
                     mDone > 0 && mPend > 0
                       ? ` (${mDone} انجام‌شده • ${mPend} آینده)`
@@ -10458,7 +10775,7 @@ export default function NbaDashboardTab({
                     const visibleHistRows = showAll ? filteredPool : filteredPool.slice(0, 60);
 
                     return (
-                      <div key={g.n} id={`manual-nba-game-row-${g.n}`} className="bg-white">
+                      <div key={`${g.tour || "T"}-${g.d}-${g.n}`} id={`manual-nba-game-row-${g.n}`} className="bg-white">
                         {/* Accordion Header Bar (Light Pale-Blue Style) */}
                         <div
                           onClick={() =>
@@ -11529,7 +11846,7 @@ export default function NbaDashboardTab({
                     const a25 = g.a25 ?? 0;
                     const mv = g.mv ?? [g.vm6, 0, 0, 0, 0];
                     return (
-                      <Fragment key={g.n}>
+                      <Fragment key={`${g.tour || "T"}-${g.d}-${g.n}`}>
                         <tr
                           onClick={() => setExpandedGame(isExp ? null : g.n)}
                           className="border-b border-slate-100 hover:bg-sky-50/70 cursor-pointer transition-colors"
