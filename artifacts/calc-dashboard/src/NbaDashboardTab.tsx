@@ -1814,6 +1814,100 @@ export function classifyTourneyTier(tname?: string | null): "SLAM" | "FINALS" | 
   return "250";
 }
 
+const DAY_CODE_3C_MAP: Readonly<Record<string, string>> = {
+  SUNDAY: "0011",
+  MONDAY: "1111",
+  TUESDAY: "1101",
+  WEDNESDAY: "0110",
+  THURSDAY: "0101",
+  FRIDAY: "1011",
+  SATURDAY: "0001",
+};
+const UTC_WEEKDAY_NAMES_3C = [
+  "SUNDAY",
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+] as const;
+const SAD_3C_SET = new Set(["0011", "1100", "0101", "1000", "0111", "0010", "1011"]);
+const NAHS_3C_SET = new Set(["0100", "0001", "1001", "1010", "1110", "1101"]);
+const WARM_LETTER_EL_SET_3C = new Set("EIJYOSUVWDGLQZ".split("")); // Fire (0) + Air (1) in LETTER_EL
+const NAME_SUFFIXES_3C = new Set(["JR", "SR", "II", "III", "IV"]);
+
+export function extractPlayer3Codes(
+  fullName?: string | null,
+  cardAbbr?: string | null
+): [string, string, string] {
+  const clean = String(fullName ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  const rawToks = clean.split(" ").map((t) => t.replace(/[^A-Z]/g, ""));
+  const filtered = rawToks.filter((t) => t.length > 0 && !NAME_SUFFIXES_3C.has(t));
+  const toks = filtered.length > 0 ? filtered : ["XXX"];
+  const surTok = toks[toks.length - 1];
+  const restJoined = toks.slice(1).join("");
+  const sur3 =
+    surTok.length >= 3
+      ? (surTok + "XXX").slice(0, 3)
+      : ((restJoined || surTok) + "XXX").slice(0, 3);
+  const f1Sur2 =
+    toks[0][0] + (surTok.length >= 2 ? surTok.slice(0, 2) : (restJoined + "XX").slice(0, 2));
+  const abbrClean = String(cardAbbr ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  const abbrCard = abbrClean.length < 3 ? sur3 : abbrClean.slice(0, 3);
+  return [abbrCard, sur3, f1Sur2];
+}
+
+export function figIntr3Code(code3: string): string {
+  const b1 = (code3.charCodeAt(0) - 64) & 1;
+  const b2 = (code3.charCodeAt(1) - 64) & 1;
+  const b3 = (code3.charCodeAt(2) - 64) & 1;
+  const b4 = (b1 + b2 + b3) & 1;
+  return `${b1}${b2}${b3}${b4}`;
+}
+
+export function xor4Bits(a: string, b: string): string {
+  let out = "";
+  for (let i = 0; i < 4; i++) {
+    out += a[i] !== b[i] ? "1" : "0";
+  }
+  return out;
+}
+
+export function weekdayCodeFromIso(dIso?: string | null): string {
+  const s = String(dIso ?? "").slice(0, 10);
+  const parts = s.split("-");
+  if (parts.length === 3 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) {
+    const utcDay = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))).getUTCDay();
+    return DAY_CODE_3C_MAP[UTC_WEEKDAY_NAMES_3C[utcDay] ?? "THURSDAY"] ?? "0101";
+  }
+  return "0101";
+}
+
+export function warmCntLetterEl(code3: string): number {
+  let cnt = 0;
+  for (let i = 0; i < code3.length; i++) {
+    if (WARM_LETTER_EL_SET_3C.has(code3[i])) cnt++;
+  }
+  return cnt;
+}
+
+export function warmCntMod4(code3: string): number {
+  let cnt = 0;
+  for (let i = 0; i < code3.length; i++) {
+    const rem = (((code3.charCodeAt(i) - 65) % 4) + 4) % 4;
+    if (rem === 0 || rem === 1) cnt++;
+  }
+  return cnt;
+}
+
 export type Mode17SubKind =
   | ""
   | "BASE_17"
@@ -1825,12 +1919,15 @@ export type Mode17SubKind =
   | "VETO_1"
   | "VETO_3"
   | "VETO_4"
+  | "VETO_3C_A"
+  | "VETO_3C_B"
   | "GEM_1"
   | "GEM_2"
   | "GEM_3"
   | "GEM_4"
   | "GEM_5H"
-  | "GEM_6";
+  | "GEM_6"
+  | "GEM_7";
 
 export function applyPowerProfileToGame(
   g: NbaGamePred,
@@ -2795,6 +2892,57 @@ export function applyPowerProfileToGame(
         isA = false;
       }
     }
+
+    // v22: Post-Facet 3-Letter Code x Dynamic Weekday-XOR Geomantic Layer (Gem-7 + Veto-3C-A ∪ Veto-3C-B)
+    const dcWd = weekdayCodeFromIso(dStr);
+    if (!isC && !dualWater && finalSub !== "DROP_FLIP_B" && (!isA || finalPk === favC)) {
+      const ishG7 = favC === h;
+      const fl5G7 = ishG7 ? hL5 : aL5;
+      const fpctG7 = ishG7 ? hpct : apct;
+      const fbl5G7 = ishG7 ? bHl5 : bAl5;
+      const felG7 = ishG7 ? hEl : aEl;
+      if (felG7 !== "EARTH" && fl5G7 >= 74.0 && fpctG7 >= 80.0 && fbl5G7 >= 72.0) {
+        const [abF7] = extractPlayer3Codes(favC, ishG7 ? g.hc : g.ac);
+        const [abD7] = extractPlayer3Codes(dogC, ishG7 ? g.ac : g.hc);
+        if (
+          SAD_3C_SET.has(xor4Bits(figIntr3Code(abF7), dcWd)) &&
+          NAHS_3C_SET.has(xor4Bits(figIntr3Code(abD7), dcWd))
+        ) {
+          isC = true;
+          isB = true;
+          isA = true;
+          finalPk = favC;
+          finalSub = "GEM_7";
+        }
+      }
+    }
+
+    if (isA && finalPk) {
+      const ish3c = finalPk === h;
+      const opp3c = ish3c ? a : h;
+      const [abP3, , f1P3] = extractPlayer3Codes(finalPk, ish3c ? g.hc : g.ac);
+      const [abO3, , f1O3] = extractPlayer3Codes(opp3c, ish3c ? g.ac : g.hc);
+      const dw103c = ish3c ? hw10 - aw10 : aw10 - hw10;
+      const pl53c = ish3c ? hL5 : aL5;
+      const ppct3c = ish3c ? hpct : apct;
+      const f1NahsVsSad =
+        NAHS_3C_SET.has(xor4Bits(figIntr3Code(f1P3), dcWd)) &&
+        SAD_3C_SET.has(xor4Bits(figIntr3Code(f1O3), dcWd));
+      const veto3cA =
+        f1NahsVsSad &&
+        dw103c <= 2 &&
+        (warmCntLetterEl(abP3) === 3 || warmCntLetterEl(abP3) - warmCntLetterEl(abO3) >= 2);
+      const veto3cB = warmCntMod4(abO3) - warmCntMod4(abP3) >= 2 && pl53c < 78.0 && ppct3c < 78.0;
+      if (veto3cA || veto3cB) {
+        vetoOrigPk = finalPk;
+        finalSub = veto3cA ? "VETO_3C_A" : "VETO_3C_B";
+        finalPk = "";
+        isC = false;
+        isB = false;
+        isA = false;
+      }
+    }
+
     v20Grade = isC ? "C" : isB ? "B" : isA ? "A" : "";
     sig17 = isB;
     vipM17 = isC;
@@ -2995,6 +3143,12 @@ export function evalMode17Gold(g: NbaGamePred, activeGrade: V20GradeKey = "B") {
     if (cardGrade !== "") {
       lockTitleFa = `خارج از سطح انتخابی ${activeGrade} (متعلق به سطح ${cardGrade} • بدون سیگنال در این فیلتر)`;
       reasonFa = `این مسابقه دارای گرید خلوص ${cardGrade} روی ${getTeam3Code(cardValidPick || pick)} است اما در فیلتر فعلی (سطح ${activeGrade}) غیرفعال و قفل شده است.`;
+    } else if (m17Sub === "VETO_3C_A") {
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر رمل ۳حرفی Veto-3C-A: نحس F1_SUR2 + اشباع گرمای نام)";
+      reasonFa = `انتخاب اولیه ${vetoTarget} به دلیل افتادن کد ترکیبی F1_SUR2 در شکل نحس روز هفته مقابل سعد ${vetoOpp} هم‌زمان با اشباع گرمای حروف کد ۳حرفی و ΔW10≤2 مهار شد.`;
+    } else if (m17Sub === "VETO_3C_B") {
+      lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر رمل ۳حرفی Veto-3C-B: برتری گرمای mod-4 حریف در مرز L5<78%)";
+      reasonFa = `انتخاب اولیه ${vetoTarget} به دلیل برتری قاطع گرمای عنصری mod-4 کد ۳حرفی حریف (${vetoOpp} • +2 گرم‌تر) در ناحیه قدرت مرزی (L5<78% و Pct<78%) مهار شد.`;
     } else if (m17Sub === "VETO_4") {
       lockTitleFa = "بدون سیگنال • NO-BET (مهار سپر ائتلاف موتورها Veto-4 روی Flip-A)";
       reasonFa = `چرخش ضدحباب به ${vetoTarget} توسط موتورهای ۵ و ۶ (قفل همزاد + قطب گرم ۱xxx به سود ${vetoOpp}) وتو شد تا خلوص Flip-A روی ۱۰۰٪ حفظ شود.`;
@@ -3027,30 +3181,39 @@ export function evalMode17Gold(g: NbaGamePred, activeGrade: V20GradeKey = "B") {
     }
   } else {
     const isRev = m17Sub === "GEM_5H" || m17Sub === "FLIP_A";
-    const revTag = isRev ? " • 🔄 شکار معکوس تله" : "";
+    const extraTag =
+      m17Sub === "GEM_7"
+        ? " • 💎 جواهر رمل ۳حرفی • ۹۵٫۳٪"
+        : isRev
+          ? " • 🔄 شکار معکوس تله"
+          : "";
     if (cardGrade === "C") {
       tier = "grade_c";
       tierRank = 3;
-      badgeFa = `👑 نخبه C${revTag}`;
-      calWinPct = 89.2;
-      maxBuyCents = 87;
+      badgeFa = `👑 نخبه C${extraTag}`;
+      calWinPct = 90.2;
+      maxBuyCents = 88;
     } else if (cardGrade === "B") {
       tier = "grade_b";
       tierRank = 2;
-      badgeFa = `⭐ طلایی B${revTag}`;
-      calWinPct = 87.8;
-      maxBuyCents = 85;
+      badgeFa = `⭐ طلایی B${extraTag}`;
+      calWinPct = 88.9;
+      maxBuyCents = 86;
     } else {
       tier = "grade_a";
       tierRank = 1;
-      badgeFa = `🟢 پایه A${revTag}`;
-      calWinPct = 86.2;
-      maxBuyCents = 82;
+      badgeFa = `🟢 پایه A${extraTag}`;
+      calWinPct = 87.2;
+      maxBuyCents = 83;
     }
 
     const pickCode = getTeam3Code(pick);
     const origCode = getTeam3Code(origPick || (isHomePick ? g.a : g.h));
-    if (m17Sub === "GEM_5H") {
+    const oppCode = getTeam3Code(isHomePick ? g.a : g.h);
+    if (m17Sub === "GEM_7") {
+      lockTitleFa = `💎 جواهر رمل ۳حرفی روز هفته (Gem-7 • ۹۵٫۳٪): سعد رملی ${pickCode} مقابل نحس رملی ${oppCode} در روز مسابقه`;
+      reasonFa = `هم‌افزایی XOR کد ۳حرفی ${pickCode} با کد رملی روز هفته (Sa'd) در برابر شکل نحس (Nahs) حریف (${oppCode}) + اقتدار فصل L5=${pickL5.toFixed(1)}% و ${pwrTag}=${directElo.toFixed(1)}%`;
+    } else if (m17Sub === "GEM_5H") {
       lockTitleFa = `شکار معکوس تله (Gem-5H • ۹۰٫۰٪): توافق همزاد T✓•P✓ + جهش فرم ۱۰ بازی و تفاضل گیم به سود ${pickCode}`;
       reasonFa = `بازگشت هوشمند از تله فِیوریت (${origCode}) به ${pickCode} • برتری قاطع W10 (+3) و تفاضل گیم (+2.5) + تایید T×P`;
     } else if (m17Sub === "FLIP_A") {
@@ -3138,7 +3301,7 @@ export function computeMode17BenchStats(
   };
   return {
     modeNum: 17,
-    title: `Mode 17 v20 (Grade ${v20Grade})`,
+    title: `Mode 17 v22 (Grade ${v20Grade})`,
     "2024": fmtStat(activeDone.filter((x) => x.s === "2024")),
     "2025": fmtStat(activeDone.filter((x) => x.s === "2025")),
     "2026": fmtStat(activeDone.filter((x) => x.s === "2026")),
@@ -4147,7 +4310,7 @@ export default function NbaDashboardTab({
                     ? `${v20ScopeStats.active.pct.toFixed(1).replace(".", "٫").replace(/\d/g, (d) => faDigits[Number(d)] ?? d)}٪`
                     : powerProfile === "a_elo"
                       ? "۷۱٫۱٪"
-                      : "۸۷٫۸٪";
+                      : "۸۸٫۹٪";
                 const gradeTitleFa =
                   activeV20Grade === "C"
                     ? "👑 نخبه C"

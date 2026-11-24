@@ -2159,7 +2159,7 @@ def run_pipeline() -> None:
 
     # 17-Mode x 3-PowerProfile Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL (+ v20 nested C/B/A grades)
     MODE_17_BENCH_LIST = list(MODE_16_LIST) + [
-        ("m17", "mode17", "Mode 17: Golden Intersection v21 (Default Grade B)"),
+        ("m17", "mode17", "Mode 17: Golden Intersection v22 (Default Grade B)"),
         ("m17c", "mode17_c", "Mode 17 Grade C: Elite Crown (C)"),
         ("m17b", "mode17_b", "Mode 17 Grade B: Golden Core (C ∪ B)"),
         ("m17a", "mode17_a", "Mode 17 Grade A: Full Volume (C ∪ B ∪ A)"),

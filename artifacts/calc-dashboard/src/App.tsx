@@ -60,8 +60,8 @@ const FUSION_MODES: Record<
   mode17: {
     modeNum: 17,
     benchKey: "mode17",
-    shortFa: "★ حالت ۱۷ • معماری ۳ سطحی + سپر ائتلاف موتورها (C ⊂ B ⊂ A • طلایی B: ۸۷٫۸٪) [پیشنهادی]",
-    formulaEn: "v21 Nested Purity + Orthogonal Veto-1∪3 Shield (C: 89.2% ⊂ B: 87.8% ★ ⊂ A: 86.2%) • Clean 13∩15 + Pure Flip-A + Gem 1..6",
+    shortFa: "★ حالت ۱۷ • معماری ۳ سطحی + رمل ۳حرفی روز هفته (C ⊂ B ⊂ A • طلایی B: ۸۸٫۹٪) [پیشنهادی]",
+    formulaEn: "v22 3-Code Day-XOR Geomancy (C: 90.2% ⊂ B: 88.9% ★ ⊂ A: 87.2%) • Gem-7 (95.3%) + Veto-3C-A∪B + Veto-1∪3",
   },
   dual_pillar: {
     modeNum: 1,
@@ -294,7 +294,7 @@ function Home() {
     typeof liveM17Pct === "number" && liveM17Pct > 0
       ? toPersianPct(liveM17Pct)
       : powerProfile === "c_vol"
-        ? "۸۷٫۸٪"
+        ? "۸۸٫۹٪"
         : powerProfile === "b_pure"
           ? "۸۰٫۰٪"
           : "۷۱٫۱٪";

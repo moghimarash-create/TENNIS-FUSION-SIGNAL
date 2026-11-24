@@ -10,11 +10,80 @@ from __future__ import annotations
 
 import datetime
 import re
+import unicodedata
 from collections import defaultdict
 from typing import Any
 
 _GD10_RE = re.compile(r"\(([+-]?\d+(?:\.\d+)?)\)")
 _L10_W_RE = re.compile(r"^(\d+)-(\d+)")
+_NON_AZ_RE = re.compile(r"[^A-Z]")
+
+DAY_CODE_3C_MAP: dict[str, str] = {
+    "SUNDAY": "0011",
+    "MONDAY": "1111",
+    "TUESDAY": "1101",
+    "WEDNESDAY": "0110",
+    "THURSDAY": "0101",
+    "FRIDAY": "1011",
+    "SATURDAY": "0001",
+}
+_PY_WEEKDAY_NAMES: tuple[str, ...] = (
+    "MONDAY",
+    "TUESDAY",
+    "WEDNESDAY",
+    "THURSDAY",
+    "FRIDAY",
+    "SATURDAY",
+    "SUNDAY",
+)
+SAD_3C_SET: frozenset[str] = frozenset({"0011", "1100", "0101", "1000", "0111", "0010", "1011"})
+NAHS_3C_SET: frozenset[str] = frozenset({"0100", "0001", "1001", "1010", "1110", "1101"})
+_WARM_LETTER_EL_SET: frozenset[str] = frozenset("EIJYOSUVWDGLQZ")  # Fire (0) + Air (1) in LETTER_EL
+_NAME_SUFFIXES_3C: frozenset[str] = frozenset({"JR", "SR", "II", "III", "IV"})
+
+
+def extract_player_3codes(full_name: str, card_abbr: str | None = None) -> tuple[str, str, str]:
+    """Pure, deterministic 3-letter code extractor (ABBR_CARD, SUR3, F1_SUR2) with 100% TS parity."""
+    norm = unicodedata.normalize("NFKD", str(full_name or ""))
+    clean = re.sub(r"\s+", " ", "".join(ch for ch in norm if not unicodedata.combining(ch))).strip().upper()
+    raw_toks = [_NON_AZ_RE.sub("", t) for t in clean.split(" ")]
+    toks = [t for t in raw_toks if t and t not in _NAME_SUFFIXES_3C] or ["XXX"]
+    sur_tok = toks[-1]
+    sur3 = (sur_tok + "XXX")[:3] if len(sur_tok) >= 3 else ((("".join(toks[1:])) or sur_tok) + "XXX")[:3]
+    f1_sur2 = toks[0][0] + (sur_tok[:2] if len(sur_tok) >= 2 else ((("".join(toks[1:])) + "XX")[:2]))
+    abbr_clean = _NON_AZ_RE.sub("", str(card_abbr or "").upper())
+    abbr_card = sur3 if len(abbr_clean) < 3 else abbr_clean[:3]
+    return abbr_card, sur3, f1_sur2
+
+
+def fig_intr_3code(code3: str) -> str:
+    """Intrinsic 4-bit geomantic figure from 3-letter code."""
+    b1 = (ord(code3[0]) - 64) & 1
+    b2 = (ord(code3[1]) - 64) & 1
+    b3 = (ord(code3[2]) - 64) & 1
+    b4 = (b1 + b2 + b3) & 1
+    return f"{b1}{b2}{b3}{b4}"
+
+
+def xor4_bits(a: str, b: str) -> str:
+    return "".join("1" if a[i] != b[i] else "0" for i in range(4))
+
+
+def weekday_code_from_iso(d_iso: str) -> str:
+    s = str(d_iso or "")[:10]
+    parts = s.split("-")
+    if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
+        wd_idx = datetime.date(int(parts[0]), int(parts[1]), int(parts[2])).weekday()
+        return DAY_CODE_3C_MAP.get(_PY_WEEKDAY_NAMES[wd_idx], "0101")
+    return "0101"
+
+
+def warm_cnt_letter_el(code3: str) -> int:
+    return sum(1 for ch in code3 if ch in _WARM_LETTER_EL_SET)
+
+
+def warm_cnt_mod4(code3: str) -> int:
+    return sum(1 for ch in code3 if ((ord(ch) - 65) % 4) in (0, 1))
 
 
 def parse_gd10_from_l10(s: str) -> float:
@@ -1233,6 +1302,58 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
                 is_C = False
                 is_B = False
                 is_A = False
+
+        # v22: Post-Facet 3-Letter Code x Dynamic Weekday-XOR Geomantic Layer (Gem-7 + Veto-3C-A ∪ Veto-3C-B)
+        dc_wd = weekday_code_from_iso(d_str)
+        if (not is_C) and (not dual_water) and final_sub != "DROP_FLIP_B" and ((not is_A) or final_pk == fav_c):
+            ish_g7 = (fav_c == h)
+            fl5_g7 = h_l5 if ish_g7 else a_l5
+            fpct_g7 = hpct if ish_g7 else apct
+            fbl5_g7 = b_hl5 if ish_g7 else b_al5
+            fel_g7 = h_el if ish_g7 else a_el
+            if fel_g7 != "EARTH" and fl5_g7 >= 74.0 and fpct_g7 >= 80.0 and fbl5_g7 >= 72.0:
+                ab_f7, _, _ = extract_player_3codes(fav_c, card.get("hc") if ish_g7 else card.get("ac"))
+                ab_d7, _, _ = extract_player_3codes(dog_c, card.get("ac") if ish_g7 else card.get("hc"))
+                if (
+                    xor4_bits(fig_intr_3code(ab_f7), dc_wd) in SAD_3C_SET
+                    and xor4_bits(fig_intr_3code(ab_d7), dc_wd) in NAHS_3C_SET
+                ):
+                    is_C = True
+                    is_B = True
+                    is_A = True
+                    final_pk = fav_c
+                    final_sub = "GEM_7"
+
+        if is_A and final_pk:
+            ish_3c = (final_pk == h)
+            opp_3c = a if ish_3c else h
+            ab_p3, _, f1_p3 = extract_player_3codes(final_pk, card.get("hc") if ish_3c else card.get("ac"))
+            ab_o3, _, f1_o3 = extract_player_3codes(opp_3c, card.get("ac") if ish_3c else card.get("hc"))
+            dw10_3c = (hw10 - aw10) if ish_3c else (aw10 - hw10)
+            pl5_3c = h_l5 if ish_3c else a_l5
+            ppct_3c = hpct if ish_3c else apct
+            f1_nahs_vs_sad = (
+                xor4_bits(fig_intr_3code(f1_p3), dc_wd) in NAHS_3C_SET
+                and xor4_bits(fig_intr_3code(f1_o3), dc_wd) in SAD_3C_SET
+            )
+            veto_3c_a = (
+                f1_nahs_vs_sad
+                and dw10_3c <= 2
+                and (warm_cnt_letter_el(ab_p3) == 3 or (warm_cnt_letter_el(ab_p3) - warm_cnt_letter_el(ab_o3)) >= 2)
+            )
+            veto_3c_b = (
+                (warm_cnt_mod4(ab_o3) - warm_cnt_mod4(ab_p3)) >= 2
+                and pl5_3c < 78.0
+                and ppct_3c < 78.0
+            )
+            if veto_3c_a or veto_3c_b:
+                veto_orig_pk = final_pk
+                final_sub = "VETO_3C_A" if veto_3c_a else "VETO_3C_B"
+                final_pk = ""
+                is_C = False
+                is_B = False
+                is_A = False
+
         v20_grade = "C" if is_C else ("B" if is_B else ("A" if is_A else ""))
         sig17 = is_B
         vip_m17 = is_C
