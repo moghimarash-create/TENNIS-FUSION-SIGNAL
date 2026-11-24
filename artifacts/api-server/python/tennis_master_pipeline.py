@@ -2157,8 +2157,13 @@ def run_pipeline() -> None:
             }
             deg3_bench["options"][opt_k]["tours"][tour_scope] = by_yr
 
-    # 17-Mode x 3-PowerProfile Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL
-    MODE_17_BENCH_LIST = list(MODE_16_LIST) + [("m17", "mode17", "Mode 17: Golden Intersection (Mode 13 ∩ Mode 15)")]
+    # 17-Mode x 3-PowerProfile Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL (+ v20 nested C/B/A grades)
+    MODE_17_BENCH_LIST = list(MODE_16_LIST) + [
+        ("m17", "mode17", "Mode 17: Golden Intersection v20 (Default Grade B)"),
+        ("m17c", "mode17_c", "Mode 17 Grade C: Elite Crown (C)"),
+        ("m17b", "mode17_b", "Mode 17 Grade B: Golden Core (C ∪ B)"),
+        ("m17a", "mode17_a", "Mode 17 Grade A: Full Volume (C ∪ B ∪ A)"),
+    ]
     by_profile: dict[str, Any] = {}
     for prof_k in ("c_vol", "b_pure", "a_elo"):
         by_profile[prof_k] = {}

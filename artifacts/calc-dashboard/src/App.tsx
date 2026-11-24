@@ -19,6 +19,7 @@ import {
   type Deg3OptionKey,
   type PowerProfileKey,
   type TennisTourScope,
+  type V20GradeKey,
 } from "./tennis-config";
 
 const queryClient = new QueryClient({
@@ -59,8 +60,8 @@ const FUSION_MODES: Record<
   mode17: {
     modeNum: 17,
     benchKey: "mode17",
-    shortFa: "★ حالت ۱۷ • تقاطع طلایی + جواهرها (۸۲٫۸٪) [پیشنهادی]",
-    formulaEn: "(Mode_13 ∩ Mode_15 + Flip_A∪B \\ Weak_T4) ∪ Gem_1..4 • 4-Tier DirectElo, Cold-0011, Anti-Bubble Flip & Gems",
+    shortFa: "★ حالت ۱۷ • معماری ۳ سطحی خلوص (C ⊂ B ⊂ A • طلایی B: ۸۷٫۱٪) [پیشنهادی]",
+    formulaEn: "v20 Nested Purity (C: 88.6% ⊂ B: 87.1% ★ ⊂ A: 85.4%) • Clean 13∩15 + Flip-A + Gem 1..4 + Gem-5H Reversal + Gem-6",
   },
   dual_pillar: {
     modeNum: 1,
@@ -185,7 +186,7 @@ function Home() {
 
   const [powerProfile, setPowerProfile] = useState<PowerProfileKey>(() => {
     try {
-      const s = window.localStorage.getItem("tennis_fusion_pwr_v2");
+      const s = window.localStorage.getItem("tennis_fusion_pwr_v3");
       if (s === "c_vol" || s === "b_pure" || s === "a_elo") return s;
     } catch {}
     return "c_vol";
@@ -193,10 +194,18 @@ function Home() {
 
   const [fusionMode, setFusionMode] = useState<FusionModeKey>(() => {
     try {
-      const s = window.localStorage.getItem("tennis_fusion_mode_v4") as FusionModeKey | null;
+      const s = window.localStorage.getItem("tennis_fusion_mode_v5") as FusionModeKey | null;
       if (s && s in FUSION_MODES) return s;
     } catch {}
     return "mode17";
+  });
+
+  const [v20Grade, setV20Grade] = useState<V20GradeKey>(() => {
+    try {
+      const s = window.localStorage.getItem("tennis_v20_grade_v1");
+      if (s === "C" || s === "B" || s === "A") return s;
+    } catch {}
+    return "B";
   });
 
   const [twinDbKind, setTwinDbKind] = useState<TwinDbKind>("team");
@@ -239,11 +248,11 @@ function Home() {
   const dynMode17Bench = useMemo<Record<TennisTourScope, ModeBenchSummary> | null>(() => {
     if (!shardGamesCache) return null;
     return {
-      ATP: computeMode17BenchStats(shardGamesCache.atp, powerProfile),
-      WTA: computeMode17BenchStats(shardGamesCache.wta, powerProfile),
-      ALL: computeMode17BenchStats([...shardGamesCache.atp, ...shardGamesCache.wta], powerProfile),
+      ATP: computeMode17BenchStats(shardGamesCache.atp, powerProfile, v20Grade),
+      WTA: computeMode17BenchStats(shardGamesCache.wta, powerProfile, v20Grade),
+      ALL: computeMode17BenchStats([...shardGamesCache.atp, ...shardGamesCache.wta], powerProfile, v20Grade),
     };
-  }, [shardGamesCache, powerProfile]);
+  }, [shardGamesCache, powerProfile, v20Grade]);
 
   const switchTour = (t: TennisTourScope) => {
     setActiveTour(t);
@@ -262,14 +271,21 @@ function Home() {
   const switchPowerProfile = (p: PowerProfileKey) => {
     setPowerProfile(p);
     try {
-      window.localStorage.setItem("tennis_fusion_pwr_v2", p);
+      window.localStorage.setItem("tennis_fusion_pwr_v3", p);
     } catch {}
   };
 
   const switchFusion = (m: FusionModeKey) => {
     setFusionMode(m);
     try {
-      window.localStorage.setItem("tennis_fusion_mode_v4", m);
+      window.localStorage.setItem("tennis_fusion_mode_v5", m);
+    } catch {}
+  };
+
+  const switchV20Grade = (gr: V20GradeKey) => {
+    setV20Grade(gr);
+    try {
+      window.localStorage.setItem("tennis_v20_grade_v1", gr);
     } catch {}
   };
 
@@ -277,14 +293,16 @@ function Home() {
   const m17PctTag =
     typeof liveM17Pct === "number" && liveM17Pct > 0
       ? toPersianPct(liveM17Pct)
-      : powerProfile === "b_pure"
-        ? "۷۸٫۰٪"
-        : powerProfile === "c_vol"
-          ? "۷۸٫۰٪"
+      : powerProfile === "c_vol"
+        ? "۸۷٫۱٪"
+        : powerProfile === "b_pure"
+          ? "۸۰٫۰٪"
           : "۷۱٫۱٪";
+  const gradeLabelTag =
+    v20Grade === "C" ? "👑 نخبه C" : v20Grade === "B" ? "⭐ طلایی B ★" : "🟢 حجم کامل A";
   const getModeShortFa = (mk: FusionModeKey) =>
     mk === "mode17"
-      ? `★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ${m17PctTag}) [پیشنهادی]`
+      ? `★ حالت ۱۷ • ${gradeLabelTag} (${m17PctTag}) [پیشنهادی]`
       : FUSION_MODES[mk].shortFa;
 
   const cur = FUSION_MODES[fusionMode];
@@ -440,7 +458,7 @@ function Home() {
           </div>
         </div>
 
-        {/* Top Bar 2: Clean Single-Row 17-Mode Fusion Selector + Collapsible 2024/2025/2026 Benchmark Table */}
+        {/* Top Bar 2: Clean Active v20 Engine Summary + Collapsible 2024/2025/2026 Benchmark Inspector */}
         <div
           dir="rtl"
           className="mb-4 rounded-xl border-2 border-sky-300 bg-sky-50/90 p-2.5 shadow-2xs space-y-2.5"
@@ -448,21 +466,18 @@ function Home() {
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
-              <span className="px-2 py-1 rounded-md bg-emerald-800 text-white text-[11px] font-extrabold shrink-0">
-                موتور فعال (۱۷ حالت):
+              <span className="px-2.5 py-1 rounded-md bg-emerald-800 text-white text-xs font-extrabold shrink-0">
+                {getModeShortFa(fusionMode)}
               </span>
-              <select
-                value={fusionMode}
-                onChange={(e) => switchFusion(e.target.value as FusionModeKey)}
-                data-testid="select-fusion-mode"
-                className="h-8 rounded-lg border-2 border-emerald-600 bg-white px-2.5 text-xs font-extrabold text-slate-950 shadow-2xs max-w-full"
-              >
-                {SELECT_MODE_KEYS.map((mk) => (
-                  <option key={mk} value={mk}>
-                    {fusionMode === mk ? `✓ ${getModeShortFa(mk)}` : getModeShortFa(mk)}
-                  </option>
-                ))}
-              </select>
+              {fusionMode !== "mode17" && (
+                <button
+                  type="button"
+                  onClick={() => switchFusion("mode17")}
+                  className="px-2.5 py-1 rounded-md bg-amber-400 hover:bg-amber-500 text-slate-950 border border-amber-600 text-xs font-extrabold"
+                >
+                  بازگشت به حالت ۱۷ ★
+                </button>
+              )}
               {curBench && (
                 <span
                   data-testid="badge-active-mode-bench"
@@ -470,7 +485,7 @@ function Home() {
                   dir="ltr"
                 >
                   {fusionMode === "mode17" && dynMode17Bench
-                    ? `Total (${activeTour}): ${curBench.total?.pct ?? 0}% (${curBench.total?.rec ?? "0/0"}) • ATP: ${dynMode17Bench.ATP.total.pct}% (${dynMode17Bench.ATP.total.rec}) • WTA: ${dynMode17Bench.WTA.total.pct}% (${dynMode17Bench.WTA.total.rec}) • Last50: ${curBench.last50?.pct ?? 0}%`
+                    ? `Grade ${v20Grade} (${activeTour}): ${curBench.total?.pct ?? 0}% (${curBench.total?.rec ?? "0/0"}) • ATP: ${dynMode17Bench.ATP.total.pct}% (${dynMode17Bench.ATP.total.rec}) • WTA: ${dynMode17Bench.WTA.total.pct}% (${dynMode17Bench.WTA.total.rec}) • Last50: ${curBench.last50?.pct ?? 0}%`
                     : `Total: ${curBench.total?.pct ?? 0}% (${curBench.total?.rec ?? "0/0"}) • 2026: ${curBench["2026"]?.pct ?? 0}% • Last50: ${curBench.last50?.pct ?? 0}%`}
                 </span>
               )}
@@ -482,7 +497,7 @@ function Home() {
               onClick={() => setOpenBench((v) => !v)}
               className="px-3 py-1.5 rounded-lg bg-white hover:bg-sky-100 border border-sky-300 text-sky-950 text-xs font-extrabold inline-flex items-center gap-1.5 shadow-2xs"
             >
-              {openBench ? "بستن جدول بنچمارک ۱۷ حالت (۲۰۲۴–۲۰۲۶)" : "جدول بنچمارک ۱۷ حالت (۲۰۲۴–۲۰۲۶)"}
+              {openBench ? "بستن جدول بنچمارک و آرشیو (۲۰۲۴–۲۰۲۶)" : "جدول بنچمارک و آرشیو (۲۰۲۴–۲۰۲۶)"}
               {openBench ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </button>
           </div>
@@ -490,9 +505,23 @@ function Home() {
           {openBench && (
             <div className="bg-white rounded-lg border border-sky-200 p-3 space-y-3 overflow-x-auto">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-sky-100">
-                <span className="text-xs font-extrabold text-sky-950">
-                  مقایسه بدون آینده‌نگری ۱۷ حالت تلفیقی (`{activeTour}` • `{DEG3_OPTIONS[deg3Opt].code}` • `{POWER_PROFILES[powerProfile].badgeFa}`):
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-extrabold text-sky-950">
+                    بازرس حالت‌های تلفیقی:
+                  </span>
+                  <select
+                    value={fusionMode}
+                    onChange={(e) => switchFusion(e.target.value as FusionModeKey)}
+                    data-testid="select-fusion-mode"
+                    className="h-8 rounded-lg border border-emerald-600 bg-white px-2.5 text-xs font-extrabold text-slate-950"
+                  >
+                    {SELECT_MODE_KEYS.map((mk) => (
+                      <option key={mk} value={mk}>
+                        {fusionMode === mk ? `✓ ${getModeShortFa(mk)}` : getModeShortFa(mk)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="inline-flex items-center rounded-lg border border-sky-300 bg-sky-50/70 p-0.5 text-[11px] font-bold">
                   <span className="px-2 text-slate-600 inline-flex items-center gap-1">
@@ -584,11 +613,13 @@ function Home() {
           tour={activeTour}
           deg3Opt={deg3Opt}
           powerProfile={powerProfile}
+          v20Grade={v20Grade}
+          onChangeV20Grade={switchV20Grade}
         />
 
         <footer className="mt-8 pt-4 border-t border-border/50 text-center">
           <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest">
-            TENNIS-FUSION-SIGNAL • Clean 2-Box 17-Mode Astro-Gematria Fusion (ATP DEG1=121 [1° LEO] • WTA DEG1=47 [17° TAURUS] • KXATPMATCH / KXWTAMATCH)
+            TENNIS-FUSION-SIGNAL • Clean 2-Box v20 Nested C⊂B⊂A Astro-Gematria Fusion (ATP DEG1=121 [1° LEO] • WTA DEG1=47 [17° TAURUS] • KXATPMATCH / KXWTAMATCH)
           </p>
         </footer>
       </div>
@@ -638,9 +669,12 @@ class AppErrorBoundary extends Component<
                   window.localStorage.removeItem("tennis_fusion_deg3_v3");
                   window.localStorage.removeItem("tennis_fusion_pwr_v1");
                   window.localStorage.removeItem("tennis_fusion_pwr_v2");
+                  window.localStorage.removeItem("tennis_fusion_pwr_v3");
                   window.localStorage.removeItem("tennis_fusion_mode_v2");
                   window.localStorage.removeItem("tennis_fusion_mode_v3");
                   window.localStorage.removeItem("tennis_fusion_mode_v4");
+                  window.localStorage.removeItem("tennis_fusion_mode_v5");
+                  window.localStorage.removeItem("tennis_v20_grade_v1");
                 } catch {}
                 window.location.reload();
               }}

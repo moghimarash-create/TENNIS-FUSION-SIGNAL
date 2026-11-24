@@ -14,11 +14,17 @@ from collections import defaultdict
 from typing import Any
 
 _GD10_RE = re.compile(r"\(([+-]?\d+(?:\.\d+)?)\)")
+_L10_W_RE = re.compile(r"^(\d+)-(\d+)")
 
 
 def parse_gd10_from_l10(s: str) -> float:
     m = _GD10_RE.search(str(s or ""))
     return float(m.group(1)) if m else 0.0
+
+
+def parse_l10_wins(s: str) -> int:
+    m = _L10_W_RE.match(str(s or "").strip())
+    return int(m.group(1)) if m else 0
 
 
 def log5(pa: float, pb: float) -> float:
@@ -505,7 +511,43 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         m13 = modes["anti_nobet_smart"]
         m15 = modes["fusion4_elem"]
         sig17 = bool(m13["sig"] and m15["sig"] and m13["pick"] and m13["pick"] == m15["pick"])
-        modes["mode17"] = {"sig": sig17, "vip": bool(sig17 and m13["vip"]), "pick": m13["pick"] if sig17 else ""}
+        pk17 = m13["pick"] if sig17 else ""
+        in_t12_e = False
+        vip_e = False
+        if sig17:
+            g1_e = fm.get("geo1xxx") or {}
+            pp_e = (card.get("pwr_p") or {}).get("a_elo") or card.get("wtp") or {}
+            ish_e = (pk17 == card["h"])
+            d_elo_e = round(float(pp_e.get("hpct" if ish_e else "apct", 50.0)), 1)
+            opp_el_e = str(pp_e.get("ael" if ish_e else "hel", "AIR"))
+            p0011_e = float(g1_e.get("h_0011" if ish_e else "a_0011", 0.0))
+            p1xxx_e = float(g1_e.get("h_sum" if ish_e else "a_sum", 0.0))
+            vip13_e = bool(m13.get("vip"))
+            in_t12_e = bool(
+                (d_elo_e >= 75.0 and p0011_e < 0 and vip13_e)
+                or (p0011_e <= -8.0 and p1xxx_e < 0 and vip13_e)
+                or (d_elo_e >= 58.0 and p0011_e <= -8.0 and vip13_e)
+            )
+            vip_e = bool(
+                in_t12_e
+                or (d_elo_e >= 75.0 and opp_el_e == "EARTH")
+                or (d_elo_e >= 60.0 and p0011_e < 0)
+            )
+        gr_e = "C" if (sig17 and in_t12_e) else ("B" if (sig17 and vip_e) else ("A" if sig17 else ""))
+        modes["mode17"] = {
+            "sig": sig17,
+            "vip": bool(sig17 and m13["vip"]),
+            "pick": pk17,
+            "grade": gr_e,
+            "sub": "BASE_17" if sig17 else "",
+            "orig_pick": pk17,
+            "sig_c": gr_e == "C",
+            "sig_b": gr_e in ("C", "B"),
+            "sig_a": sig17,
+        }
+        modes["mode17_c"] = {"sig": gr_e == "C", "vip": gr_e == "C", "pick": pk17 if gr_e == "C" else "", "grade": gr_e if gr_e == "C" else ""}
+        modes["mode17_b"] = {"sig": gr_e in ("C", "B"), "vip": gr_e == "C", "pick": pk17 if gr_e in ("C", "B") else "", "grade": gr_e if gr_e in ("C", "B") else ""}
+        modes["mode17_a"] = {"sig": sig17, "vip": vip_e, "pick": pk17, "grade": gr_e}
         return modes
 
     pp = card["pwr_p"][profile_key]
@@ -928,35 +970,59 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         is_m13 = False
         vip_m13 = False
 
-    sig17 = bool(is_m13 and is_m15 and pk_m13 and pk_m13 == pk_m15)
-    pk_m17 = pk_m13 if sig17 else ""
-    vip_m17 = False
-    if sig17:
-        ish17 = (pk_m17 == h)
+    base_sig17 = bool(is_m13 and is_m15 and pk_m13 and pk_m13 == pk_m15)
+    base_pk17 = pk_m13 if base_sig17 else ""
+    in_t12 = False
+    is_t3 = False
+    if base_sig17:
+        ish17 = (base_pk17 == h)
         d_elo = hpct if ish17 else apct
         opp_el = a_el if ish17 else h_el
         p0011 = h_0011_sum if ish17 else a_0011_sum
         p1xxx = h_sum if ish17 else a_sum
-        if (
+        in_t12 = bool(
             (d_elo >= 75.0 and p0011 < 0 and vip_m13)
             or (p0011 <= -8.0 and p1xxx < 0 and vip_m13)
             or (d_elo >= 58.0 and p0011 <= -8.0 and vip_m13)
-            or (d_elo >= 75.0 and opp_el == "EARTH")
-            or (d_elo >= 60.0 and p0011 < 0)
-        ):
-            vip_m17 = True
+        )
+        is_t3 = (not in_t12) and bool((d_elo >= 75.0 and opp_el == "EARTH") or (d_elo >= 60.0 and p0011 < 0))
+    is_t4 = base_sig17 and (not in_t12) and (not is_t3)
+    in_t34 = not in_t12
+    vip_m17 = bool(base_sig17 and (in_t12 or is_t3))
 
-    m17_sub = ""
-    m17_orig_pick = pk_m17
+    sig17 = base_sig17
+    pk_m17 = base_pk17
+    m17_sub = "BASE_17" if base_sig17 else ""
+    m17_orig_pick = base_pk17
+    v20_grade = "C" if (base_sig17 and in_t12) else ("B" if (base_sig17 and is_t3) else ("A" if base_sig17 else ""))
+    is_C = v20_grade == "C"
+    is_B = v20_grade in ("C", "B")
+    is_A = base_sig17
+
     sm_meta = card.get("st_meta") or {}
     bp_prof = (card.get("pwr_p") or {}).get("b_pure") or {}
     if profile_key == "c_vol" and sm_meta and bp_prof:
         t_tier = classify_tourney_tier(str(card.get("tourney") or ""))
         rnd_u = str(card.get("rnd") or "R32").strip().upper()
+        d_str = str(card.get("d") or "")
+        day_num = int(d_str[8:10]) if len(d_str) >= 10 and d_str[8:10].isdigit() else 15
         b_hl5 = round(float(bp_prof.get("l5h", 50.0)), 1)
         b_al5 = round(100.0 - b_hl5, 1)
-        if sig17 and not vip_m17:
-            ish17 = (pk_m17 == h)
+        ap_prof = (card.get("pwr_p") or {}).get("a_elo") or card.get("wtp") or {}
+        e_hl5 = round(float(ap_prof.get("l5h", 50.0)), 1)
+        e_al5 = round(100.0 - e_hl5, 1)
+        hw10 = parse_l10_wins(str(sm_meta.get("h_l10") or ""))
+        aw10 = parse_l10_wins(str(sm_meta.get("a_l10") or ""))
+        h_gd10 = parse_gd10_from_l10(str(sm_meta.get("h_l10") or ""))
+        a_gd10 = parse_gd10_from_l10(str(sm_meta.get("a_l10") or ""))
+        h_pyth = float(sm_meta.get("h_pyth", 50.0))
+        a_pyth = float(sm_meta.get("a_pyth", 50.0))
+
+        v19_sig = False
+        v19_pk = ""
+        v19_sub = ""
+        if base_sig17 and is_t4:
+            ish17 = (base_pk17 == h)
             opp17 = a if ish17 else h
             p_l5 = h_l5 if ish17 else a_l5
             p_bl5 = b_hl5 if ish17 else b_al5
@@ -968,26 +1034,31 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
             p_1sum = h_sum if ish17 else a_sum
             o_1sum = a_sum if ish17 else h_sum
             if t_tier in ("250", "500") and p_bl5 < 60.0:
-                pk_m17 = opp17
-                vip_m17 = True
-                m17_sub = "FLIP_A"
+                v19_sig = True
+                v19_pk = opp17
+                v19_sub = "FLIP_A"
             elif t_tier in ("250", "500") and p_l5 < 75.0 and o_rk <= 50 and o_p12 < p_p12:
-                pk_m17 = opp17
-                vip_m17 = True
-                m17_sub = "FLIP_B"
+                v19_sig = False
+                v19_pk = ""
+                v19_sub = "DROP_FLIP_B"
             elif (
                 p_l5 < 65.0
                 or (t_tier in ("250", "500") and p_l5 < 75.0)
                 or (p_l5 < 75.0 and o_gf < p_gf and o_p12 < p_p12)
                 or (rnd_u in ("SF", "F") and t_tier in ("250", "500") and o_1sum < p_1sum and (tpk != ppk))
             ):
-                sig17 = False
-                pk_m17 = ""
-                vip_m17 = False
-                m17_sub = "DROP_T4"
-        elif (not sig17) and (not dual_water):
-            h_gd10 = parse_gd10_from_l10(str(sm_meta.get("h_l10") or ""))
-            a_gd10 = parse_gd10_from_l10(str(sm_meta.get("a_l10") or ""))
+                v19_sig = False
+                v19_pk = ""
+                v19_sub = "DROP_T4"
+            else:
+                v19_sig = True
+                v19_pk = base_pk17
+                v19_sub = "BASE_17"
+        elif base_sig17:
+            v19_sig = True
+            v19_pk = base_pk17
+            v19_sub = "BASE_17"
+        elif (not base_sig17) and (not dual_water):
             maj23_raw = str(g1.get("maj23_win") or maj23_win)
             for cand_pk in (h, a):
                 ish_c = (cand_pk == h)
@@ -997,7 +1068,7 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
                     continue
                 p_l5 = h_l5 if ish_c else a_l5
                 p_bl5 = b_hl5 if ish_c else b_al5
-                p_pyth = float(sm_meta.get("h_pyth" if ish_c else "a_pyth", 50.0))
+                p_pyth = h_pyth if ish_c else a_pyth
                 p_0011 = h_0011_sum if ish_c else a_0011_sum
                 o_0011 = a_0011_sum if ish_c else h_0011_sum
                 p_gd10 = h_gd10 if ish_c else a_gd10
@@ -1009,29 +1080,145 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
                 m12_ok = bool(is_m12 and pk_m12 == cand_pk)
                 m15_ok = bool(is_m15 and pk_m15 == cand_pk)
                 if p_l5 >= 68.0 and p_bl5 >= 68.0 and dp_ok and maj23_ok:
-                    sig17 = True
-                    pk_m17 = cand_pk
-                    vip_m17 = True
-                    m17_sub = "GEM_1"
+                    v19_sig = True
+                    v19_pk = cand_pk
+                    v19_sub = "GEM_1"
                     break
                 elif p_l5 >= 82.0 and p_pyth >= 64.0 and p_0011 < 0 and p_0011 < o_0011:
-                    sig17 = True
-                    pk_m17 = cand_pk
-                    vip_m17 = True
-                    m17_sub = "GEM_2"
+                    v19_sig = True
+                    v19_pk = cand_pk
+                    v19_sub = "GEM_2"
                     break
                 elif p_l5 >= 75.0 and p_bl5 >= 68.0 and m12_ok:
-                    sig17 = True
-                    pk_m17 = cand_pk
-                    vip_m17 = True
-                    m17_sub = "GEM_3"
+                    v19_sig = True
+                    v19_pk = cand_pk
+                    v19_sub = "GEM_3"
                     break
                 elif m15_ok and p_l5 >= 77.0 and p_pyth >= 66.0 and p_gd10 > o_gd10 and p_1cnt >= 1 and p_1sum < 0:
-                    sig17 = True
-                    pk_m17 = cand_pk
-                    vip_m17 = True
-                    m17_sub = "GEM_4"
+                    v19_sig = True
+                    v19_pk = cand_pk
+                    v19_sub = "GEM_4"
                     break
+
+        fav_c = h if (h_l5 > a_l5 or (h_l5 == a_l5 and hpct >= apct)) else a
+        dog_c = a if fav_c == h else h
+        rawC = False
+        rawB = False
+        rawA = False
+        final_pk = ""
+        final_sub = v19_sub
+        if v19_sig:
+            pk = v19_pk
+            ish = (pk == h)
+            opp = a if ish else h
+            p_l5 = h_l5 if ish else a_l5
+            p_pct = hpct if ish else apct
+            p_el5 = e_hl5 if ish else e_al5
+            p_1cnt = h_cnt if ish else a_cnt
+            p_1sum = h_sum if ish else a_sum
+            o_1sum = a_sum if ish else h_sum
+            dpyth = (h_pyth - a_pyth) if ish else (a_pyth - h_pyth)
+            dw10 = (hw10 - aw10) if ish else (aw10 - hw10)
+            tp_both_opp = (tpk == opp and ppk == opp)
+            m12_pk = bool(is_m12 and pk_m12 == pk)
+            if v19_sub in ("FLIP_A", "GEM_1", "GEM_2", "GEM_3"):
+                rawC = True
+                rawB = True
+                rawA = True
+                final_pk = pk
+                final_sub = v19_sub
+            elif v19_sub == "BASE_17":
+                drop_b = in_t34 and (
+                    (p_1cnt == 0)
+                    or (is_t3 and t_tier != "SLAM" and p_l5 < 78.0)
+                    or (day_num <= 15 and dw10 <= 1)
+                    or (p_l5 < 78.0 and p_pct < 68.0 and o_1sum < p_1sum)
+                    or (p_el5 < 55.0)
+                )
+                drop_c = drop_b or (in_t34 and t_tier != "SLAM" and ((p_pct < 73.0 and not m12_pk) or dpyth < 12.0))
+                drop_a = in_t34 and (
+                    (p_1cnt == 0 and o_1sum < p_1sum)
+                    or (is_t3 and t_tier != "SLAM" and p_l5 < 76.0)
+                    or (day_num <= 15 and dw10 <= 1 and dpyth < 14.0)
+                    or (p_el5 < 55.0)
+                )
+                rawC = not drop_c
+                rawB = not drop_b
+                rawA = not drop_a
+                final_pk = pk
+                final_sub = "BASE_17" if (rawC or rawB or rawA) else "DROP_BASE17"
+            elif v19_sub == "GEM_4":
+                rawC = bool(p_pct >= 78.0 and dw10 >= 2 and not tp_both_opp)
+                rawB = bool(p_pct >= 78.0 and not tp_both_opp)
+                rawA = bool(p_pct >= 74.0 and dw10 >= 1 and not tp_both_opp)
+                final_pk = pk
+                final_sub = "GEM_4" if (rawC or rawB or rawA) else "DROP_GEM4"
+        elif v19_sub != "DROP_FLIP_B":
+            ish_f = (fav_c == h)
+            f_pyth = h_pyth if ish_f else a_pyth
+            d_pyth = a_pyth if ish_f else h_pyth
+            f_w10 = hw10 if ish_f else aw10
+            d_w10 = aw10 if ish_f else hw10
+            f_gd10 = h_gd10 if ish_f else a_gd10
+            d_gd10 = a_gd10 if ish_f else h_gd10
+            fav_l5 = h_l5 if ish_f else a_l5
+            fav_pct = hpct if ish_f else apct
+            fav_bl5 = b_hl5 if ish_f else b_al5
+            fav_el5 = e_hl5 if ish_f else e_al5
+            fav_trap = htrap_lv if ish_f else atrap_lv
+            fav_el = h_el if ish_f else a_el
+            if (
+                (tpk == dog_c and ppk == dog_c)
+                and (d_pyth >= f_pyth - 3.0)
+                and (d_w10 - f_w10 >= 3)
+                and (d_gd10 - f_gd10 >= 2.5)
+            ):
+                rawC = True
+                rawB = True
+                rawA = True
+                final_pk = dog_c
+                final_sub = "GEM_5H"
+            elif (not dual_water) and fav_el != "EARTH" and not (tpk == dog_c and ppk == dog_c):
+                m13_ok = bool(is_m13 and pk_m13 == fav_c)
+                m14_ok = bool(is_sm14 and pk_sm14 == fav_c)
+                m16_ok = bool(is_m16 and pk_m16 == fav_c)
+                dw_ok = (f_w10 - d_w10 >= 2)
+                c_clean = (fav_trap == 0 and dw_ok)
+                titan = (fav_trap > 0 and fav_l5 >= 86.0 and fav_pct >= 84.0 and fav_el5 >= 68.0 and dw_ok)
+                gem6_cb = (
+                    c_clean
+                    and (
+                        (fav_l5 >= 82.0 and fav_bl5 >= 75.0 and (f_pyth - d_pyth) >= 14.0 and (m14_ok or m16_ok or fav_pct >= 82.0))
+                        or (m13_ok and fav_l5 >= 80.0 and fav_bl5 >= 74.0 and fav_el5 >= 62.0)
+                    )
+                ) or titan
+                gem6_a = (
+                    c_clean
+                    and (
+                        (fav_l5 >= 82.0 and fav_bl5 >= 75.0 and (f_pyth - d_pyth) >= 14.0)
+                        or (m13_ok and fav_l5 >= 80.0 and fav_bl5 >= 74.0 and fav_el5 >= 62.0)
+                    )
+                ) or titan
+                if gem6_cb:
+                    rawC = True
+                    rawB = True
+                    rawA = True
+                    final_pk = fav_c
+                    final_sub = "GEM_6"
+                elif gem6_a:
+                    rawA = True
+                    final_pk = fav_c
+                    final_sub = "GEM_6"
+
+        is_C = bool(rawC)
+        is_B = bool(is_C or rawB)
+        is_A = bool(is_B or rawA)
+        v20_grade = "C" if is_C else ("B" if is_B else ("A" if is_A else ""))
+        sig17 = is_B
+        vip_m17 = is_C
+        pk_m17 = final_pk if is_A else ""
+        m17_sub = final_sub
+        m17_orig_pick = base_pk17 or fav_c
 
     return {
         "dual_pillar":     {"sig": is_dual_pillar, "vip": is_vip_cross, "pick": pk_dp},
@@ -1051,5 +1238,18 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         "smart_elem_14":   {"sig": is_sm14,        "vip": vip_sm14,     "pick": pk_sm14},
         "fusion4_elem":    {"sig": is_m15,         "vip": vip_m15,      "pick": pk_m15},
         "referee6_ranked": {"sig": is_m16,         "vip": vip_m16,      "pick": pk_m16},
-        "mode17":          {"sig": sig17,          "vip": vip_m17,      "pick": pk_m17, "sub": m17_sub, "orig_pick": m17_orig_pick},
+        "mode17":          {
+            "sig": sig17,
+            "vip": vip_m17,
+            "pick": pk_m17 if (sig17 or profile_key == "c_vol") else "",
+            "grade": v20_grade,
+            "sub": m17_sub,
+            "orig_pick": m17_orig_pick,
+            "sig_c": is_C,
+            "sig_b": is_B,
+            "sig_a": is_A,
+        },
+        "mode17_c":        {"sig": is_C, "vip": is_C, "pick": pk_m17 if is_C else "", "grade": v20_grade if is_C else "", "sub": m17_sub},
+        "mode17_b":        {"sig": is_B, "vip": is_C, "pick": pk_m17 if is_B else "", "grade": v20_grade if is_B else "", "sub": m17_sub},
+        "mode17_a":        {"sig": is_A, "vip": is_B, "pick": pk_m17 if is_A else "", "grade": v20_grade if is_A else "", "sub": m17_sub},
     }
