@@ -84,59 +84,72 @@ app.use((req, res, next) => {
     return;
   }
 
-  const relPath = rawPath === "/" || rawPath === "" ? "index.html" : rawPath.replace(/^\/+/, "");
+  const cleanRel = rawPath === "/" || rawPath === "" ? "index.html" : rawPath.replace(/^\/+/, "");
+  const relCandidates = cleanRel.startsWith("data/")
+    ? [cleanRel, cleanRel.slice(5)]
+    : [cleanRel];
   const acceptEncoding = String(req.headers["accept-encoding"] || "");
 
-  for (const baseDir of [DIST_PUBLIC_DIR, PUBLIC_DIR]) {
-    const candidate = path.resolve(baseDir, relPath);
-    if (!candidate.startsWith(baseDir) || !fs.existsSync(candidate)) continue;
-    try {
-      const st = fs.statSync(candidate);
-      if (!st.isFile()) continue;
+  for (const relPath of relCandidates) {
+    for (const baseDir of [DIST_PUBLIC_DIR, PUBLIC_DIR]) {
+      const candidate = path.resolve(baseDir, relPath);
+      if (!candidate.startsWith(baseDir) || !fs.existsSync(candidate)) continue;
+      try {
+        const st = fs.statSync(candidate);
+        if (!st.isFile()) continue;
 
-      const compressible =
-        candidate.endsWith(".json") ||
-        candidate.endsWith(".js") ||
-        candidate.endsWith(".mjs") ||
-        candidate.endsWith(".css") ||
-        candidate.endsWith(".html");
+        const compressible =
+          candidate.endsWith(".json") ||
+          candidate.endsWith(".js") ||
+          candidate.endsWith(".mjs") ||
+          candidate.endsWith(".css") ||
+          candidate.endsWith(".html");
 
-      res.status(200);
-      res.setHeader("Content-Type", getMimeType(candidate));
-
-      if (compressible && acceptEncoding.includes("gzip")) {
-        let cached = gzipCache.get(candidate);
-        if (!cached || cached.mtimeMs !== st.mtimeMs) {
-          const rawBuf = fs.readFileSync(candidate);
-          cached = { mtimeMs: st.mtimeMs, buf: zlib.gzipSync(rawBuf, { level: 1 }) };
-          if (gzipCache.size >= MAX_GZIP_CACHE_ENTRIES) {
-            const oldestKey = gzipCache.keys().next().value;
-            if (oldestKey) gzipCache.delete(oldestKey);
-          }
-          gzipCache.set(candidate, cached);
+        res.status(200);
+        res.setHeader("Content-Type", getMimeType(candidate));
+        if (candidate.endsWith(".json") || candidate.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-cache, must-revalidate");
+          res.setHeader("Pragma", "no-cache");
+          res.setHeader("Expires", "0");
+        } else if (relPath.startsWith("assets/")) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         }
-        res.setHeader("Content-Encoding", "gzip");
-        res.setHeader("Vary", "Accept-Encoding");
-        res.setHeader("Content-Length", String(cached.buf.length));
-        if (req.method === "HEAD") res.end();
-        else res.end(cached.buf);
-      } else {
-        const rawBuf = fs.readFileSync(candidate);
-        res.setHeader("Content-Length", String(rawBuf.length));
-        if (req.method === "HEAD") res.end();
-        else res.end(rawBuf);
+
+        if (compressible && acceptEncoding.includes("gzip")) {
+          let cached = gzipCache.get(candidate);
+          if (!cached || cached.mtimeMs !== st.mtimeMs) {
+            const rawBuf = fs.readFileSync(candidate);
+            cached = { mtimeMs: st.mtimeMs, buf: zlib.gzipSync(rawBuf, { level: 1 }) };
+            if (gzipCache.size >= MAX_GZIP_CACHE_ENTRIES) {
+              const oldestKey = gzipCache.keys().next().value;
+              if (oldestKey) gzipCache.delete(oldestKey);
+            }
+            gzipCache.set(candidate, cached);
+          }
+          res.setHeader("Content-Encoding", "gzip");
+          res.setHeader("Vary", "Accept-Encoding");
+          res.setHeader("Content-Length", String(cached.buf.length));
+          if (req.method === "HEAD") res.end();
+          else res.end(cached.buf);
+        } else {
+          const rawBuf = fs.readFileSync(candidate);
+          res.setHeader("Content-Length", String(rawBuf.length));
+          if (req.method === "HEAD") res.end();
+          else res.end(rawBuf);
+        }
+        return;
+      } catch {
+        // fall through
       }
-      return;
-    } catch {
-      // fall through
     }
   }
 
   // SPA fallback to index.html for client-side routes
   const indexHtml = path.join(DIST_PUBLIC_DIR, "index.html");
-  if (!path.extname(relPath) && fs.existsSync(indexHtml)) {
+  if (!path.extname(cleanRel) && fs.existsSync(indexHtml)) {
     res.status(200);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, must-revalidate");
     res.sendFile(indexHtml);
     return;
   }

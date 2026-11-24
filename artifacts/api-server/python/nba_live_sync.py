@@ -47,16 +47,17 @@ def format_score_p1_p2(score_wl: str, p1_won: bool) -> str:
     return " ".join(flipped)
 
 
-def fetch_espn_tennis_date(tour: str, d_iso: str) -> dict[tuple[str, str], tuple[str, int, int, str]]:
+def fetch_espn_tennis_date(tour: str, d_iso: str) -> dict[tuple[str, str], tuple[str, int, int, str, str]]:
     ds = d_iso.replace("-", "")
     tlc = tour.lower()
     want_slug = "mens-singles" if tlc == "atp" else "womens-singles"
     url = f"https://site.api.espn.com/apis/site/v2/sports/tennis/{tlc}/scoreboard?dates={ds}"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     data = json.loads(urllib.request.urlopen(req, timeout=12).read().decode("utf-8"))
-    finals: dict[tuple[str, str], tuple[str, int, int, str]] = {}
+    finals: dict[tuple[str, str], tuple[str, int, int, str, str]] = {}
     for ev in data.get("events", []):
         ename = str(ev.get("name") or "").strip()
+        ev_d = str(ev.get("date") or "")
         if any(bad in ename for bad in ("Davis Cup", "Billie Jean", "BJK", "Challenger", "125")):
             continue
         for grp in ev.get("groupings", []):
@@ -66,8 +67,11 @@ def fetch_espn_tennis_date(tour: str, d_iso: str) -> dict[tuple[str, str], tuple
                 r_disp = str(((comp.get("round") or {}).get("displayName")) or "").strip()
                 if "qualif" in r_disp.lower():
                     continue
-                if str(comp.get("date") or "")[:10] != d_iso:
+                raw_cd = str(comp.get("date") or comp.get("startDate") or "")
+                if raw_cd[:10] != d_iso:
                     continue
+                hm = raw_cd[11:16] if len(raw_cd) >= 16 and "T" in raw_cd else ""
+                utc_ts = raw_cd if (hm and hm != "00:00" and not (raw_cd == ev_d and hm in ("04:00", "05:00"))) else ""
                 st_type = ((comp.get("status") or {}).get("type") or {})
                 if not st_type.get("completed"):
                     continue
@@ -117,8 +121,8 @@ def fetch_espn_tennis_date(tour: str, d_iso: str) -> dict[tuple[str, str], tuple
                 sc_str = " ".join(set_toks)
                 w_ck = " ".join(sorted(wn.lower().replace("-", " ").split()))
                 l_ck = " ".join(sorted(ln.lower().replace("-", " ").split()))
-                finals[(w_ck, l_ck)] = (w_ck, sum(w_ls), sum(l_ls), sc_str)
-                finals[(l_ck, w_ck)] = (w_ck, sum(w_ls), sum(l_ls), sc_str)
+                finals[(w_ck, l_ck)] = (w_ck, sum(w_ls), sum(l_ls), sc_str, utc_ts)
+                finals[(l_ck, w_ck)] = (w_ck, sum(w_ls), sum(l_ls), sc_str, utc_ts)
     return finals
 
 
@@ -150,7 +154,7 @@ def main() -> None:
             pass
     dates_to_check = sorted(date_set)
 
-    finals_by_tour: dict[str, dict[tuple[str, str], tuple[str, int, int, str]]] = {"ATP": {}, "WTA": {}}
+    finals_by_tour: dict[str, dict[tuple[str, str], tuple[str, int, int, str, str]]] = {"ATP": {}, "WTA": {}}
     for tour in ("ATP", "WTA"):
         for d_iso in dates_to_check:
             try:
@@ -178,7 +182,8 @@ def main() -> None:
         "wl_b": 0.47,
         "sf": {"Hard": 0.49, "Clay": 0.49, "Grass": 0.49},
         "w10": 0, "l10": 0, "p10_c": 0.485, "gdiff10": 0.0,
-        "last_w": False, "el": "EARTH", "rk": 999,
+        "last_w": False, "last_surf": None, "days_rest": 14,
+        "el": "EARTH", "rk": 999,
     }
     canon_snap_idx: dict[str, dict[str, dict]] = {"ATP": {}, "WTA": {}}
     for tr_k in ("ATP", "WTA"):
@@ -212,6 +217,9 @@ def main() -> None:
                     int(tr_doc.get("nAct") or 120),
                     sf,
                     g["wtp"],
+                    d_iso=str(g.get("d") or ""),
+                    tourney=str(g.get("tourney") or ""),
+                    rnd=str(g.get("rnd") or "R32"),
                 )
                 g["st_meta"] = st_m
                 g["pwr_p"] = pwr_m
@@ -219,7 +227,10 @@ def main() -> None:
             if str(g.get("d") or "") in date_set:
                 hit = finals_by_tour.get(tour, {}).get((h_ck, a_ck))
                 if hit:
-                    w_ck, wg, lg, sc_s = hit
+                    w_ck, wg, lg, sc_s, utc_ts = hit
+                    if utc_ts and not g.get("ts"):
+                        g["ts"] = utc_ts
+                        changed = True
                     p1_won = bool(w_ck == h_ck)
                     resolved_winner = g["h"] if p1_won else g["a"]
                     hp = wg if p1_won else lg

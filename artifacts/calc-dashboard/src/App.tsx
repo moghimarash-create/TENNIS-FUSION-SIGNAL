@@ -14,6 +14,7 @@ import {
   DEG3_OPTIONS,
   POWER_PROFILES,
   POWER_PROFILE_KEYS,
+  SHARD_BUILD_VERSION,
   TENNIS_TOURS,
   type Deg3OptionKey,
   type PowerProfileKey,
@@ -58,7 +59,7 @@ const FUSION_MODES: Record<
   mode17: {
     modeNum: 17,
     benchKey: "mode17",
-    shortFa: "★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ۷۱٫۱٪) [پیشنهادی]",
+    shortFa: "★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ۷۹٫۹٪) [پیشنهادی]",
     formulaEn: "Mode_13(anti_nobet_smart).sig AND Mode_15(fusion4_elem).sig AND (Pick_13 === Pick_15) • 4-Tier DirectElo & 0011 Badges",
   },
   dual_pillar: {
@@ -159,10 +160,16 @@ const FUSION_MODES: Record<
   },
 };
 
+function toPersianPct(pct: number): string {
+  const faDigits = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
+  const s = (Math.round(pct * 10) / 10).toFixed(1).replace(".", "٫");
+  return `${s.replace(/\d/g, (d) => faDigits[Number(d)] ?? d)}٪`;
+}
+
 function Home() {
   const [activeTour, setActiveTour] = useState<TennisTourScope>(() => {
     try {
-      const saved = window.localStorage.getItem("tennis_fusion_tour_v2");
+      const saved = window.localStorage.getItem("tennis_fusion_tour_v3");
       if (saved === "ATP" || saved === "WTA" || saved === "ALL") return saved;
     } catch {}
     return "ATP";
@@ -170,7 +177,7 @@ function Home() {
 
   const [deg3Opt, setDeg3Opt] = useState<Deg3OptionKey>(() => {
     try {
-      const saved = window.localStorage.getItem("tennis_fusion_deg3_v2");
+      const saved = window.localStorage.getItem("tennis_fusion_deg3_v3");
       if (saved === "opt1" || saved === "opt2" || saved === "opt3") return saved;
     } catch {}
     return "opt3";
@@ -178,7 +185,7 @@ function Home() {
 
   const [powerProfile, setPowerProfile] = useState<PowerProfileKey>(() => {
     try {
-      const s = window.localStorage.getItem("tennis_fusion_pwr_v1");
+      const s = window.localStorage.getItem("tennis_fusion_pwr_v2");
       if (s === "c_vol" || s === "b_pure" || s === "a_elo") return s;
     } catch {}
     return "c_vol";
@@ -186,7 +193,7 @@ function Home() {
 
   const [fusionMode, setFusionMode] = useState<FusionModeKey>(() => {
     try {
-      const s = window.localStorage.getItem("tennis_fusion_mode_v3") as FusionModeKey | null;
+      const s = window.localStorage.getItem("tennis_fusion_mode_v4") as FusionModeKey | null;
       if (s && s in FUSION_MODES) return s;
     } catch {}
     return "mode17";
@@ -198,17 +205,11 @@ function Home() {
   const [shardGamesCache, setShardGamesCache] = useState<{ atp: any[]; wta: any[] } | null>(null);
 
   useEffect(() => {
-    fetch("/fusion_modes_benchmark.json")
+    fetch(`/fusion_modes_benchmark.json?v=${SHARD_BUILD_VERSION}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d) {
           setBenchData(d);
-          try {
-            const hasSaved = window.localStorage.getItem("tennis_fusion_deg3_v2");
-            if (!hasSaved && (d.bestDefaultDeg3 === "opt1" || d.bestDefaultDeg3 === "opt2" || d.bestDefaultDeg3 === "opt3")) {
-              setDeg3Opt(d.bestDefaultDeg3);
-            }
-          } catch {}
         }
       })
       .catch(() => {});
@@ -217,11 +218,11 @@ function Home() {
   useEffect(() => {
     let cancelled = false;
     const yrs = ["2024", "2025", "2026"];
-    const atpUrls = yrs.map((yr) => `/fusion_atp_${deg3Opt}_${yr}.json`);
-    const wtaUrls = yrs.map((yr) => `/fusion_wta_${deg3Opt}_${yr}.json`);
+    const atpUrls = yrs.map((yr) => `/fusion_atp_${deg3Opt}_${yr}.json?v=${SHARD_BUILD_VERSION}`);
+    const wtaUrls = yrs.map((yr) => `/fusion_wta_${deg3Opt}_${yr}.json?v=${SHARD_BUILD_VERSION}`);
     Promise.all([
-      Promise.all(atpUrls.map((u) => fetch(u).then((r) => (r.ok ? r.json() : { games: [] })))),
-      Promise.all(wtaUrls.map((u) => fetch(u).then((r) => (r.ok ? r.json() : { games: [] })))),
+      Promise.all(atpUrls.map((u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { games: [] })))),
+      Promise.all(wtaUrls.map((u) => fetch(u, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { games: [] })))),
     ])
       .then(([atpDocs, wtaDocs]) => {
         if (cancelled) return;
@@ -247,33 +248,40 @@ function Home() {
   const switchTour = (t: TennisTourScope) => {
     setActiveTour(t);
     try {
-      window.localStorage.setItem("tennis_fusion_tour_v2", t);
+      window.localStorage.setItem("tennis_fusion_tour_v3", t);
     } catch {}
   };
 
   const switchDeg3 = (o: Deg3OptionKey) => {
     setDeg3Opt(o);
     try {
-      window.localStorage.setItem("tennis_fusion_deg3_v2", o);
+      window.localStorage.setItem("tennis_fusion_deg3_v3", o);
     } catch {}
   };
 
   const switchPowerProfile = (p: PowerProfileKey) => {
     setPowerProfile(p);
     try {
-      window.localStorage.setItem("tennis_fusion_pwr_v1", p);
+      window.localStorage.setItem("tennis_fusion_pwr_v2", p);
     } catch {}
   };
 
   const switchFusion = (m: FusionModeKey) => {
     setFusionMode(m);
     try {
-      window.localStorage.setItem("tennis_fusion_mode_v3", m);
+      window.localStorage.setItem("tennis_fusion_mode_v4", m);
     } catch {}
   };
 
+  const liveM17Pct = dynMode17Bench?.[activeTour]?.total?.pct;
   const m17PctTag =
-    powerProfile === "b_pure" ? "۷۷٫۹٪" : powerProfile === "c_vol" ? "۷۶٫۴٪" : "۷۱٫۱٪";
+    typeof liveM17Pct === "number" && liveM17Pct > 0
+      ? toPersianPct(liveM17Pct)
+      : powerProfile === "b_pure"
+        ? "۷۸٫۰٪"
+        : powerProfile === "c_vol"
+          ? "۷۸٫۰٪"
+          : "۷۱٫۱٪";
   const getModeShortFa = (mk: FusionModeKey) =>
     mk === "mode17"
       ? `★ حالت ۱۷ • تقاطع طلایی (۱۳ ∩ ۱۵ — ${m17PctTag}) [پیشنهادی]`
@@ -625,10 +633,14 @@ class AppErrorBoundary extends Component<
               onClick={() => {
                 try {
                   window.localStorage.removeItem("tennis_fusion_tour_v2");
+                  window.localStorage.removeItem("tennis_fusion_tour_v3");
                   window.localStorage.removeItem("tennis_fusion_deg3_v2");
+                  window.localStorage.removeItem("tennis_fusion_deg3_v3");
                   window.localStorage.removeItem("tennis_fusion_pwr_v1");
+                  window.localStorage.removeItem("tennis_fusion_pwr_v2");
                   window.localStorage.removeItem("tennis_fusion_mode_v2");
                   window.localStorage.removeItem("tennis_fusion_mode_v3");
+                  window.localStorage.removeItem("tennis_fusion_mode_v4");
                 } catch {}
                 window.location.reload();
               }}

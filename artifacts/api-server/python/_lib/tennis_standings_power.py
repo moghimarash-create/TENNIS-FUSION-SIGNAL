@@ -1,7 +1,8 @@
 """
 Zero-Lookahead Season/52-Week Standings, Surface Games Pythagorean (k=3.5),
-Standings Quartile Elements (FIRE/AIR/WATER/EARTH), Last-10 Form & 3-Way Power Profiles
-(c_vol, b_pure, a_elo) for TENNIS-FUSION-SIGNAL.
+Standings Quartile Elements (FIRE/AIR/WATER/EARTH), Last-10 Form, Rookie Shrinkage,
+Early-Month / Jan 1-7 / ATP-WTA 250 / Finals Protective Shields & Symmetric Neutral-Court
+3-Way Power Profiles (c_vol, b_pure, a_elo) for TENNIS-FUSION-SIGNAL.
 
 100% Birthdate-Free (BIRTHDATE_USED = False) & 100% Zero-Lookahead (r.date < match.date).
 """
@@ -58,22 +59,61 @@ def dominant_elem_info(vec: list[int] | tuple[int, ...]) -> tuple[str, int, bool
     return f"TIE({'+'.join(w[0] for w in winners)})", mx, True
 
 
+def classify_tourney_tier(tname: str) -> str:
+    u = str(tname or "").upper()
+    if any(x in u for x in ("AUSTRALIAN OPEN", "ROLAND GARROS", "FRENCH OPEN", "WIMBLEDON", "US OPEN")):
+        return "SLAM"
+    if any(x in u for x in ("FINALS", "UNITED CUP", "OLYMPIC")):
+        return "FINALS"
+    if any(
+        x in u
+        for x in (
+            "INDIAN WELLS", "MIAMI", "MONTE CARLO", "MONTE-CARLO", "MADRID", "ROME", "INTERNAZIONALI",
+            "CANADA", "MONTREAL", "TORONTO", "CINCINNATI", "SHANGHAI", "PARIS", "WUHAN", "DOHA", "DUBAI",
+            "BEIJING", "GUADALAJARA",
+        )
+    ):
+        return "1000"
+    if any(
+        x in u
+        for x in (
+            "ROTTERDAM", "RIO", "ACAPULCO", "BARCELONA", "HALLE", "QUEEN", "HAMBURG", "WASHINGTON",
+            "TOKYO", "VIENNA", "BASEL", "LINZ", "STUTTGART", "CHARLESTON", "BERLIN", "EASTBOURNE",
+            "SAN DIEGO", "MONTERREY", "SEOUL", "NINGBO", "ZHENGZHOU", "STRASBOURG", "BAD HOMBURG",
+            "BRISBANE", "ADELAIDE", "DALLAS", "MUNICH",
+        )
+    ):
+        return "500"
+    return "250"
+
+
 class TennisStandingsTracker:
-    """Strictly Zero-Lookahead per-tour Standings & Surface Games Pythagorean tracker."""
+    """Strictly Zero-Lookahead per-tour Standings, Surface Games Pythagorean & Tournament Context tracker."""
 
     def __init__(self, tour: str) -> None:
         self.tour = tour.upper()
-        # Per-player chronological list of (date_obj, season_str, surface_str, won_bool, g_won, g_lost)
-        self.hist_log: dict[str, list[tuple[datetime.date, str, str, bool, int, int]]] = defaultdict(list)
+        # Per-player chronological list of (date_obj, season_str, surface_str, tourney_str, won_bool, g_won, g_lost)
+        self.hist_log: dict[str, list[tuple[datetime.date, str, str, str, bool, int, int]]] = defaultdict(list)
         self._cur_date: str | None = None
         self._day_cache: dict[str, dict[str, Any]] = {}
         self._rank_map: dict[str, int] = {}
         self._n_act: int = 0
 
-    def commit_match(self, d_iso: str, season: str, surface: str, w_name: str, l_name: str, w_g: int, l_g: int) -> None:
+    def commit_match(
+        self,
+        d_iso: str,
+        season: str,
+        surface: str,
+        w_name: str,
+        l_name: str,
+        w_g: int,
+        l_g: int,
+        tourney: str = "",
+    ) -> None:
         dt = datetime.date.fromisoformat(d_iso)
-        self.hist_log[w_name].append((dt, str(season), str(surface), True, int(w_g), int(l_g)))
-        self.hist_log[l_name].append((dt, str(season), str(surface), False, int(l_g), int(w_g)))
+        t_str = str(tourney or "")
+        self.hist_log[w_name].append((dt, str(season), str(surface), t_str, True, int(w_g), int(l_g)))
+        self.hist_log[l_name].append((dt, str(season), str(surface), t_str, False, int(l_g), int(w_g)))
 
     def begin_date(self, d_iso: str) -> None:
         if self._cur_date == d_iso:
@@ -112,14 +152,14 @@ class TennisStandingsTracker:
         l10 = lg[-10:]
 
         n_ytd = len(ytd)
-        w_ytd = sum(1 for x in ytd if x[3])
-        gw_ytd = sum(x[4] for x in ytd)
-        gl_ytd = sum(x[5] for x in ytd)
+        w_ytd = sum(1 for x in ytd if x[4])
+        gw_ytd = sum(x[5] for x in ytd)
+        gl_ytd = sum(x[6] for x in ytd)
 
         n_365 = len(w365)
-        w_365 = sum(1 for x in w365 if x[3])
-        gw_365 = sum(x[4] for x in w365)
-        gl_365 = sum(x[5] for x in w365)
+        w_365 = sum(1 for x in w365 if x[4])
+        gw_365 = sum(x[5] for x in w365)
+        gl_365 = sum(x[6] for x in w365)
 
         p_ytd = (w_ytd + 6.0 * 0.48) / (n_ytd + 6.0)
         p_365 = (w_365 + 10.0 * 0.47) / (n_365 + 10.0)
@@ -140,20 +180,22 @@ class TennisStandingsTracker:
         for sf in ("Hard", "Clay", "Grass"):
             s365 = [x for x in w365 if x[2] == sf]
             s730 = [x for x in w730 if x[2] == sf]
-            ps1 = pyth_games(sum(x[4] for x in s365), sum(x[5] for x in s365), 3.5, 55.0, 0.49)
-            ps2 = pyth_games(sum(x[4] for x in s730), sum(x[5] for x in s730), 3.5, 75.0, 0.49)
+            ps1 = pyth_games(sum(x[5] for x in s365), sum(x[6] for x in s365), 3.5, 55.0, 0.49)
+            ps2 = pyth_games(sum(x[5] for x in s730), sum(x[6] for x in s730), 3.5, 75.0, 0.49)
             ws = min(0.65, 0.08 * len(s730))
             sf_map[sf] = ws * (0.65 * ps1 + 0.35 * ps2) + (1.0 - ws) * py_all
 
         n10 = len(l10)
-        w10 = sum(1 for x in l10 if x[3])
-        gw10 = sum(x[4] for x in l10)
-        gl10 = sum(x[5] for x in l10)
+        w10 = sum(1 for x in l10 if x[4])
+        gw10 = sum(x[5] for x in l10)
+        gl10 = sum(x[6] for x in l10)
         p10_wl = (w10 + 4.0 * 0.48) / (n10 + 4.0)
         p10_py = pyth_games(gw10, gl10, 3.5, 40.0, 0.49)
         p10_c = 0.50 * p10_wl + 0.50 * p10_py
         gdiff10 = round((gw10 - gl10) / max(1, n10), 1)
-        last_w = bool(lg[-1][3]) if lg else False
+        last_w = bool(lg[-1][4]) if lg else False
+        last_surf = str(lg[-1][2]) if lg else None
+        days_rest = (dt - lg[-1][0]).days if lg else 999
 
         st_sc = 0.55 * wl_b + 0.45 * py_all + 0.03 * min(1.0, n_365 / 25.0) * (wl_b - 0.50)
 
@@ -173,7 +215,10 @@ class TennisStandingsTracker:
             "p10_c": p10_c,
             "gdiff10": gdiff10,
             "last_w": last_w,
+            "last_surf": last_surf,
+            "days_rest": days_rest,
             "st_sc": st_sc,
+            "recent_ev": lg[-8:],
         }
         self._day_cache[pl] = snap
         return snap
@@ -195,6 +240,8 @@ class TennisStandingsTracker:
         h: str,
         a: str,
         elo_wtp: dict[str, Any],
+        tourney: str = "",
+        rnd: str = "R32",
     ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
         """Returns compact (st_meta, pwr_p) for match h vs a strictly prior to d_iso."""
         self.begin_date(d_iso)
@@ -204,7 +251,9 @@ class TennisStandingsTracker:
         ela, rka, _ = self.get_elem_and_rank(a, d_iso)
         sf = surface if surface in ("Hard", "Clay", "Grass") else "Hard"
 
-        return build_st_and_profiles_from_snaps(sh, sa, elh, ela, rkh, rka, n_act, sf, elo_wtp)
+        return build_st_and_profiles_from_snaps(
+            sh, sa, elh, ela, rkh, rka, n_act, sf, elo_wtp, d_iso=d_iso, tourney=tourney, rnd=rnd
+        )
 
     def export_live_snapshot(self, ref_date_iso: str) -> dict[str, Any]:
         """Exports compact latest player standings dictionary for live ESPN sync."""
@@ -222,6 +271,8 @@ class TennisStandingsTracker:
                 "p10_c": round(s["p10_c"], 4),
                 "gdiff10": s["gdiff10"],
                 "last_w": s["last_w"],
+                "last_surf": s["last_surf"],
+                "days_rest": s["days_rest"],
                 "el": el, "rk": rk,
             }
         return {"tour": self.tour, "refDate": ref_date_iso, "nAct": self._n_act, "players": players_out}
@@ -237,18 +288,69 @@ def build_st_and_profiles_from_snaps(
     n_act: int,
     sf: str,
     elo_wtp: dict[str, Any],
+    d_iso: str = "",
+    tourney: str = "",
+    rnd: str = "R32",
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    # 1. Pure NBA-Style Table + Surface Games Pyth (b_pure: 75% SurfPyth + 15% Standings W-L + 10% L10)
-    raw_b_h = 0.75 * float(sh["sf"][sf]) + 0.15 * float(sh["wl_b"]) + 0.10 * float(sh["p10_c"])
-    raw_b_a = 0.75 * float(sa["sf"][sf]) + 0.15 * float(sa["wl_b"]) + 0.10 * float(sa["p10_c"])
+    mo, dy, yr_s = 6, 15, ""
+    dt_cur: datetime.date | None = None
+    if len(d_iso) >= 10:
+        try:
+            dt_cur = datetime.date.fromisoformat(d_iso[:10])
+            mo, dy, yr_s = dt_cur.month, dt_cur.day, str(dt_cur.year)
+        except Exception:
+            pass
+
+    # 1. Rookie / Small-Sample Shrinkage toward neutral tour prior when n_365 < 14
+    n365_h = int(sh.get("n_365", 0))
+    n365_a = int(sa.get("n_365", 0))
+    raw_sf_h = float(sh["sf"][sf])
+    raw_sf_a = float(sa["sf"][sf])
+    sf_h = raw_sf_h if n365_h >= 14 else ((n365_h / 14.0) * raw_sf_h + (1.0 - n365_h / 14.0) * 0.485)
+    sf_a = raw_sf_a if n365_a >= 14 else ((n365_a / 14.0) * raw_sf_a + (1.0 - n365_a / 14.0) * 0.485)
+    wl_h = float(sh["wl_b"]) if n365_h >= 14 else ((n365_h / 14.0) * float(sh["wl_b"]) + (1.0 - n365_h / 14.0) * 0.48)
+    wl_a = float(sa["wl_b"]) if n365_a >= 14 else ((n365_a / 14.0) * float(sa["wl_b"]) + (1.0 - n365_a / 14.0) * 0.48)
+
+    # 2. Early-January (Jan 1-7) & Off-Season (>30d rest with 0 YTD matches) Cold-Reset Dampener
+    rest_h = int(sh.get("days_rest", 14))
+    rest_a = int(sa.get("days_rest", 14))
+    p10_h = float(sh.get("p10_c", 0.49))
+    p10_a = float(sa.get("p10_c", 0.49))
+    if (mo == 1 and dy <= 7) or (int(sh.get("n_ytd", 0)) == 0 and rest_h >= 30):
+        p10_h = 0.40 * p10_h + 0.60 * 0.49
+    if (mo == 1 and dy <= 7) or (int(sa.get("n_ytd", 0)) == 0 and rest_a >= 30):
+        p10_a = 0.40 * p10_a + 0.60 * 0.49
+
+    gdiff10_h = float(sh.get("gdiff10", 0.0))
+    gdiff10_a = float(sa.get("gdiff10", 0.0))
+
+    # Prior wins & game-diff in the current tournament strictly before d_iso
+    ev_wh, ev_wa, ev_gdh, ev_gda = 0, 0, 0, 0
+    if dt_cur is not None and tourney:
+        for r_ev in sh.get("recent_ev") or ():
+            if r_ev[1] == yr_s and r_ev[3] == tourney and (dt_cur - r_ev[0]).days <= 16:
+                if r_ev[4]:
+                    ev_wh += 1
+                ev_gdh += int(r_ev[5]) - int(r_ev[6])
+        for r_ev in sa.get("recent_ev") or ():
+            if r_ev[1] == yr_s and r_ev[3] == tourney and (dt_cur - r_ev[0]).days <= 16:
+                if r_ev[4]:
+                    ev_wa += 1
+                ev_gda += int(r_ev[5]) - int(r_ev[6])
+
+    # 3. Pure NBA-Style Table + Surface Games Pyth (b_pure: 75% SurfPyth + 15% Standings W-L + 10% L10)
+    raw_b_h = 0.75 * sf_h + 0.15 * wl_h + 0.10 * p10_h
+    raw_b_a = 0.75 * sf_a + 0.15 * wl_a + 0.10 * p10_a
     hp_b = 100.0 * stretch_prob(raw_b_h, 1.35)
     ap_b = 100.0 * stretch_prob(raw_b_a, 1.35)
     l5_b = 100.0 * log5(hp_b / 100.0, ap_b / 100.0)
 
-    # 2. Calibrated Hybrid c_vol (40% Direct Surface Elo + 60% NBA-Style Surface Games Pyth + Anti-Fame-Trap)
-    raw_c_h = 0.70 * float(sh["sf"][sf]) + 0.20 * float(sh["wl_b"]) + 0.10 * float(sh["p10_c"])
-    raw_c_a = 0.70 * float(sa["sf"][sf]) + 0.20 * float(sa["wl_b"]) + 0.10 * float(sa["p10_c"])
-    pure_l5h = 100.0 * log5(raw_c_h, raw_c_a)
+    # 4. Calibrated Neutral-Court Hybrid c_vol (Season Standings + Surface Pyth + Smart Shields)
+    raw_c_h = 0.70 * sf_h + 0.20 * wl_h + 0.10 * p10_h
+    raw_c_a = 0.70 * sf_a + 0.20 * wl_a + 0.10 * p10_a
+    pure_p01 = log5(raw_c_h, raw_c_a)
+    pure_l5h = 100.0 * pure_p01
+    pure_l5a = 100.0 - pure_l5h
 
     elo_hpct = float(elo_wtp.get("hpct", 50.0))
     elo_apct = float(elo_wtp.get("apct", 50.0))
@@ -256,24 +358,85 @@ def build_st_and_profiles_from_snaps(
     elo_hel = str(elo_wtp.get("hel", "AIR"))
     elo_ael = str(elo_wtp.get("ael", "AIR"))
 
-    hp_c = 0.40 * elo_hpct + 0.60 * (100.0 * stretch_prob(raw_c_h, 1.85))
-    ap_c = 0.40 * elo_apct + 0.60 * (100.0 * stretch_prob(raw_c_a, 1.85))
-    l5_c = 0.40 * elo_l5h + 0.60 * (100.0 * stretch_prob(log5(raw_c_h, raw_c_a), 1.65))
+    # Neutral-Court P2 Unlock: when P2 genuinely dominates Season Standings + Surface Pyth + L10,
+    # remove stale 8-year Career Elo anchor so breakout P2 contenders are evaluated purely on current dominance!
+    p2_dom = (pure_l5a >= 62.0 and sf_a >= 0.56 and gdiff10_a >= 0.8 and p10_a > p10_h)
+    w_e = 0.0 if p2_dom else 0.40
+    hp_c = w_e * elo_hpct + (1.0 - w_e) * (100.0 * stretch_prob(raw_c_h, 1.85))
+    ap_c = w_e * elo_apct + (1.0 - w_e) * (100.0 * stretch_prob(raw_c_a, 1.85))
+    l5_c = w_e * elo_l5h + (1.0 - w_e) * (100.0 * stretch_prob(pure_p01, 1.85 if p2_dom else 1.70))
 
-    # Fame-vs-Form Divergence Trap flags (active when picked side lacks Twin UltraLock & lacks deep 0011<=-8):
-    # - Trails in Season/Surface Pyth (<48.5%) OR (trails <52% & L10 deficit >0.06)
-    # - OR Fame Bubble >= 18% (Elo_H2H - Pure_Table_Log5 >= 18%) while coming off a loss vs opponent coming off a win!
-    htrap_c = (
-        (pure_l5h < 48.5)
-        or (pure_l5h < 52.0 and float(sh["p10_c"]) + 0.06 < float(sa["p10_c"]))
-        or ((elo_l5h - pure_l5h) >= 18.0 and (not bool(sh["last_w"])) and bool(sa["last_w"]))
+    t_tier = classify_tourney_tier(tourney) if tourney else "500"
+    rnd_u = str(rnd or "R32").upper()
+    last_sf_h = sh.get("last_surf")
+    last_sf_a = sa.get("last_surf")
+    surf_sw_h = (last_sf_h is not None and last_sf_h != sf)
+    surf_sw_a = (last_sf_a is not None and last_sf_a != sf)
+
+    def calc_smart_shield(
+        is_p2: bool,
+        pure_x: float,
+        elo_x: float,
+        sfx: float,
+        gdx: float,
+        gdy: float,
+        n365x: int,
+        n365y: int,
+        last_wx: bool,
+        last_wy: bool,
+        p10x: float,
+        p10y: float,
+        restx: int,
+        sw_x: bool,
+        sw_y: bool,
+        ev_wx: int,
+        ev_wy: int,
+        ev_gdx: int,
+        ev_gdy: int,
+    ) -> int:
+        # Neutral-court P2 picks require verified season + surface dominance (blocks coin-flip P2 noise)
+        if is_p2 and not (pure_x >= 60.0 and sfx >= 0.55 and gdx >= 0.5 and p10x > p10y):
+            return 2
+        # Core Surface Competence, Negative L10 Form & Small-Sample Rookie Shield
+        if pure_x < 51.5 or sfx < 0.505:
+            return 2
+        if gdx < -0.5 and gdy >= 0.0 and pure_x < 62.0:
+            return 2
+        if n365x < 12 and n365y >= 20 and pure_x < 65.0:
+            return 2
+        if (elo_x - pure_x) >= 16.0 and (((not last_wx) and last_wy) or p10x < p10y):
+            return 2
+        # Shield A: Finals / Semifinals Hot-Opponent Guard
+        if rnd_u in ("F", "SF"):
+            if rnd_u == "F" and (pure_x < 58.0 or sfx < 0.56 or gdx < gdy - 0.5):
+                return 2
+            if ev_wy >= 3 and ev_gdy >= ev_gdx + 4 and pure_x < 61.0:
+                return 2
+        # Shield B: ATP/WTA 250 Low-Stakes, Bye-Rust & Surface-Switch Guard
+        if t_tier == "250":
+            if sfx < 0.538 or pure_x < 55.0 or (gdx < 0.0 and pure_x < 60.0):
+                return 2
+            if ev_wx == 0 and ((ev_wy >= 1 and pure_x < 60.5) or (sw_x and not sw_y and pure_x < 59.5) or (restx >= 18 and pure_x < 59.5)):
+                return 2
+        # Shield C: Early-Month (Days 1-7) & Jan 1-7 Season-Opening Cold Guard
+        if dy <= 7:
+            if mo == 1 and (sfx < 0.565 or gdx < 0.5 or pure_x < 60.0):
+                return 2
+            if sfx < 0.550 or gdx < 0.2 or pure_x < 56.0:
+                return 2
+            if ev_wx == 0 and ((ev_wy >= 1 and pure_x < 61.0) or (restx >= 15 and pure_x < 61.0) or (sw_x and not sw_y and pure_x < 60.5) or (gdx < gdy and pure_x < 61.0)):
+                return 2
+        return 0
+
+    htrap_c = calc_smart_shield(
+        False, pure_l5h, elo_l5h, sf_h, gdiff10_h, gdiff10_a, n365_h, n365_a,
+        bool(sh.get("last_w")), bool(sa.get("last_w")), p10_h, p10_a, rest_h, surf_sw_h, surf_sw_a,
+        ev_wh, ev_wa, ev_gdh, ev_gda,
     )
-    pure_l5a = 100.0 - pure_l5h
-    elo_l5a = 100.0 - elo_l5h
-    atrap_c = (
-        (pure_l5a < 48.5)
-        or (pure_l5a < 52.0 and float(sa["p10_c"]) + 0.06 < float(sh["p10_c"]))
-        or ((elo_l5a - pure_l5a) >= 18.0 and (not bool(sa["last_w"])) and bool(sh["last_w"]))
+    atrap_c = calc_smart_shield(
+        True, pure_l5a, 100.0 - elo_l5h, sf_a, gdiff10_a, gdiff10_h, n365_a, n365_h,
+        bool(sa.get("last_w")), bool(sh.get("last_w")), p10_a, p10_h, rest_a, surf_sw_a, surf_sw_h,
+        ev_wa, ev_wh, ev_gda, ev_gdh,
     )
 
     h_wl_str = f"{sh['w_ytd']}-{sh['l_ytd']}" if int(sh["n_ytd"]) > 0 else f"{sh['w_365']}-{sh['l_365']}"
@@ -285,10 +448,10 @@ def build_st_and_profiles_from_snaps(
         "h_rk": int(rkh),
         "a_rk": int(rka),
         "n_act": int(n_act),
-        "h_l10": f"{sh['w10']}-{sh['l10']} ({float(sh['gdiff10']):+.1f})",
-        "a_l10": f"{sa['w10']}-{sa['l10']} ({float(sa['gdiff10']):+.1f})",
-        "h_pyth": round(100.0 * float(sh["sf"][sf]), 1),
-        "a_pyth": round(100.0 * float(sa["sf"][sf]), 1),
+        "h_l10": f"{sh['w10']}-{sh['l10']} ({gdiff10_h:+.1f})",
+        "a_l10": f"{sa['w10']}-{sa['l10']} ({gdiff10_a:+.1f})",
+        "h_pyth": round(100.0 * sf_h, 1),
+        "a_pyth": round(100.0 * sf_a, 1),
     }
 
     pwr_p = {
@@ -298,8 +461,8 @@ def build_st_and_profiles_from_snaps(
             "l5h": round(l5_c, 1),
             "hel": elh,
             "ael": ela,
-            "htrap": int(bool(htrap_c)),
-            "atrap": int(bool(atrap_c)),
+            "htrap": int(htrap_c),
+            "atrap": int(atrap_c),
         },
         "b_pure": {
             "hpct": round(hp_b, 1),
@@ -307,8 +470,8 @@ def build_st_and_profiles_from_snaps(
             "l5h": round(l5_b, 1),
             "hel": elh,
             "ael": ela,
-            "htrap": 0,
-            "atrap": 0,
+            "htrap": int(htrap_c),
+            "atrap": int(atrap_c),
         },
         "a_elo": {
             "hpct": round(elo_hpct, 1),
@@ -326,7 +489,7 @@ def build_st_and_profiles_from_snaps(
 def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[str, dict[str, Any]]:
     """
     Fast, exact scalar evaluator for Modes 1..17 under profile_key ('c_vol' | 'b_pure' | 'a_elo').
-    100% identical to client-side TypeScript applyPowerProfileToGame()!
+    100% bit-for-bit identical to client-side TypeScript applyPowerProfileToGame()!
     """
     fm = card["fusion_meta"]
     if profile_key == "a_elo":
@@ -345,8 +508,8 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     apct = round(float(pp["apct"]), 1)
     h_el = str(pp["hel"])
     a_el = str(pp["ael"])
-    htrap = bool(pp.get("htrap", 0))
-    atrap = bool(pp.get("atrap", 0))
+    htrap_lv = int(pp.get("htrap", 0))
+    atrap_lv = int(pp.get("atrap", 0))
 
     tm = fm["team"]
     pl = fm["player"]
@@ -355,18 +518,26 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     f30_t = int(tm["f30"])
     f30_p = int(pl["f30"])
 
-    mel_t = matchup_elem(h_l5 if tpk == h else a_l5)
-    f1_guard_t = bool(card.get("f1_guard", False))
-    nat_t = bool(card.get("is_nat", False))
+    tl5 = h_l5 if tpk == h else a_l5
+    pl5 = h_l5 if ppk == h else a_l5
+    mel_t = matchup_elem(tl5)
+    mel_p = matchup_elem(pl5)
+
     idx3 = card.get("idx3") or {}
-    fav_v4_t = int(idx3.get("vh", 0) if tpk == h else idx3.get("va", 0))
-    min_o4_t = int(idx3.get("minD", 0))
+    f1_guard_t = bool(tm.get("guard_sym", tm.get("guard", card.get("f1_guard", False)))) if tl5 >= 56.0 else bool(tm.get("guard", card.get("f1_guard", False)))
+    f1_guard_p = bool(pl.get("guard_sym", pl.get("guard", pl.get("sig", False)))) if pl5 >= 56.0 else bool(pl.get("guard", pl.get("sig", False)))
+
+    nat_t = bool(tm.get("nat", card.get("is_nat", False)))
+    nat_p = bool(pl.get("nat", False))
+    fav_v4_t = int(tm.get("vh", idx3.get("vh", 0)) if tpk == h else tm.get("va", idx3.get("va", 0)))
+    fav_v4_p = int(pl.get("vh", 0) if ppk == h else pl.get("va", 0))
+    min_o4_t = int(tm.get("minD", idx3.get("minD", 0)))
+    min_o4_p = int(pl.get("minD", 0))
+
     t_sig = bool(f1_guard_t and mel_t != "EARTH")
     t_vip = bool(t_sig and (mel_t == "FIRE" or (nat_t and fav_v4_t == 4 and min_o4_t >= 2)))
-
-    mel_p = matchup_elem(h_l5 if f30_p >= 0 else a_l5)
-    p_sig = bool(pl["sig"] and mel_p != "EARTH")
-    p_vip = bool(p_sig and (pl["vip"] or mel_p == "FIRE"))
+    p_sig = bool(f1_guard_p and mel_p != "EARTH")
+    p_vip = bool(p_sig and (mel_p == "FIRE" or (nat_p and fav_v4_p == 4 and min_o4_p >= 2)))
 
     sgn_t = 1 if tpk == h else -1
     sgn_p = 1 if ppk == h else -1
@@ -474,7 +645,7 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         is_m11 = False
 
     dual_earth_hold = (h_el == "EARTH" and a_el == "EARTH")
-    cand_m12 = pk_m9 if is_m9 else (pk_m11 if is_m11 else pk_dp)
+    cand_m12 = pk_m9 if is_m9 else (pk_m11 if is_m11 else (pk_dp if is_dual_pillar else fav_elo))
     clash_3of3_hold = bool(triple3_win and triple3_win != cand_m12)
     cand_l5 = h_l5 if cand_m12 == h else a_l5
     cand_0 = h_0sum if cand_m12 == h else a_0sum
@@ -511,7 +682,7 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
         is_m13, vip_m13, pk_m13 = False, False, p13
     elif is_m11 and pk_m11 == p13 and p13_el != "EARTH" and p13_l5 >= 75.0:
         is_m13, vip_m13, pk_m13 = True, bool(p13_l5 >= 80.0), p13
-    elif (not is_m11) and o13_el != "EARTH" and (not is_3of3_p13) and ((dp_o13 and o13_l5 >= 52.0) or (raw_fb13 and o13_l5 >= 60.0)):
+    elif (not is_m11) and o13_el != "EARTH" and (not is_3of3_p13) and ((dp_o13 and o13_l5 >= 54.0) or (raw_fb13 and o13_l5 >= 60.0)):
         is_m13, vip_m13, pk_m13 = True, False, o13
     else:
         is_m13, vip_m13, pk_m13 = False, False, p13
@@ -557,7 +728,12 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     p_lead_14 = h_lead_cnt if p14 == h else a_lead_cnt
     o_lead_14 = a_lead_cnt if p14 == h else h_lead_cnt
 
-    has_trap_14 = bool((base_m14_sig and t12_code == "TOT12_BIPOLAR_HARMONY" and pl5_14 < 75.0) or (base_m14_sig and p14 == a and p_warm_14 < 0) or (base_m14_sig and dual_water))
+    # Neutral-court symmetric Mode 14 trap (pl5_14 < 50.0 replaces legacy NBA p14 == a away lock!)
+    has_trap_14 = bool(
+        (base_m14_sig and t12_code == "TOT12_BIPOLAR_HARMONY" and pl5_14 < 75.0)
+        or (base_m14_sig and pl5_14 < 50.0 and p_warm_14 < 0)
+        or (base_m14_sig and dual_water)
+    )
     sm14_kind = "M14_HOLD_NEUTRAL"
     if base_m14_sig:
         if has_trap_14:
@@ -608,12 +784,13 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     ep_sum_ok = False if not ef_pick else (h_ef_sum > a_ef_sum if ep_is_h else a_ef_sum > h_ef_sum)
     ep_m11_dir = bool(ef_pick and pk_m11 == ef_pick)
     ep_m11_sig = bool(ef_pick and is_m11 and pk_m11 == ef_pick)
-    sug_team_sig = bool(t_sig and tpk == sug_pick)
+    sug_team_sig = bool((t_sig and tpk == sug_pick) or (p_sig and ppk == sug_pick))
     agree_boxes = bool(ef_pick and sug_pick == ef_pick)
     clash_boxes = bool(ef_pick and sug_pick != ef_pick)
     sat_trap = ef_rule in ("AIR_SAT8_SMALL", "EARTH_SAT10_SMALL")
 
-    p1_hit = bool(not dual_water and agree_boxes and ep_is_h and ep_m11_dir and (ep_l5 >= 58.0 or (ef_tier == "STRONG" and ep_l5 >= 52.0)))
+    # Neutral-court symmetric Pattern 1 (removed NBA ep_is_h home lock!)
+    p1_hit = bool(not dual_water and agree_boxes and ep_m11_dir and (ep_l5 >= 58.0 or (ef_tier == "STRONG" and ep_l5 >= 53.0)))
     p2_hit = bool(not dual_water and agree_boxes and (is_sm14 or (ef_tier == "STRONG" and (ep_m11_sig or sug_team_sig or (ep_p12_ok and ep_sum_ok and ep_l5 >= 60.0)))))
     p3_hit = bool(not dual_water and ef_pick and ef_tier == "STRONG" and ep_p12_ok and ep_l5 >= 62.0 and (agree_boxes or not is_sm14))
     p4_air_trap = bool(clash_boxes and (sug_team_sig or (is_sm14 and sug_l5 >= 75.0)) and sat_trap)
@@ -656,7 +833,7 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     opp_sug_l5 = h_l5 if opp_sug == h else a_l5
     b1_pick = h if b1_h > b1_a else (a if b1_a > b1_h else "")
     rev_m12 = bool(not dual_water and is_m12 and pk_m12 == opp_sug and (opp_sug_l5 < 50.0 or opp_sug_l5 >= 55.0))
-    rev_h_m11 = bool(not dual_water and opp_sug == h and is_m11 and pk_m11 == opp_sug and ef_pick == opp_sug)
+    rev_h_m11 = bool(not dual_water and opp_sug_l5 >= 52.0 and is_m11 and pk_m11 == opp_sug and ef_pick == opp_sug)
     dir_m12 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m12 and pk_m12 == sug_pick and sug_l5 >= 60.0)
     dir_m11_b1 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m11 and pk_m11 == sug_pick and b1_pick == sug_pick and sug_l5 >= 65.0)
 
@@ -723,20 +900,25 @@ def eval_card_modes_for_profile(card: dict[str, Any], profile_key: str) -> dict[
     is_m16 = bool((top_hit and delta_pts >= 8.0) or delta_pts >= 5.5 or (delta_pts >= 4.0 and ef_strong_m16))
     vip_m16 = bool(top_hit and delta_pts >= 18.0)
 
-    # Anti-Fame-vs-Form Divergence Veto when !is_m12 and p0011 > -8.0
-    if (htrap or atrap) and (not is_m12):
+    # Smart Protective Shields (Finals / ATP-WTA 250 / Days 1-7 / Jan 1-7 / Surface Competence / Fame-vs-Form)
+    if htrap_lv > 0 or atrap_lv > 0:
         if is_m13:
-            ish13 = (pk_m13 == h)
-            p0_13 = h_0011_sum if ish13 else a_0011_sum
-            if ((ish13 and htrap) or ((not ish13) and atrap)) and p0_13 > -8.0:
+            tr13 = htrap_lv if pk_m13 == h else atrap_lv
+            p0_13 = h_0011_sum if pk_m13 == h else a_0011_sum
+            if tr13 >= 2 or (tr13 == 1 and (not is_m12) and p0_13 > -8.0):
                 is_m13 = False
                 vip_m13 = False
         if is_m15:
-            ish15 = (pk_m15 == h)
-            p0_15 = h_0011_sum if ish15 else a_0011_sum
-            if ((ish15 and htrap) or ((not ish15) and atrap)) and p0_15 > -8.0:
+            tr15 = htrap_lv if pk_m15 == h else atrap_lv
+            p0_15 = h_0011_sum if pk_m15 == h else a_0011_sum
+            if tr15 >= 2 or (tr15 == 1 and (not is_m12) and p0_15 > -8.0):
                 is_m15 = False
                 vip_m15 = False
+
+    # Neutral-Court P2 Astro Confirmation
+    if is_m13 and pk_m13 == a and not (a_0011_sum < 0 or triple3_win == a or is_m12):
+        is_m13 = False
+        vip_m13 = False
 
     sig17 = bool(is_m13 and is_m15 and pk_m13 and pk_m13 == pk_m15)
     pk_m17 = pk_m13 if sig17 else ""

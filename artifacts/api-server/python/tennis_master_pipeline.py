@@ -15,6 +15,7 @@ from __future__ import annotations
 import bisect
 import csv
 import datetime
+import gc
 import glob
 import json
 import math
@@ -369,16 +370,55 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                         "score_raw": parsed_sc[2],
                     })
 
+        # Build 2024-2026 real court UTC start timestamp index from ESPN before merging
+        espn_utc_idx: dict[frozenset[tuple[str, ...]], list[tuple[datetime.date, str]]] = defaultdict(list)
+        espn_24_26_file = f"{raw_dir}/espn_{tour_lc}_24_26.json"
+        espn_25_26_file = f"{raw_dir}/espn_{tour_lc}_25_26.json"
+        ts_src_file = espn_24_26_file if os.path.exists(espn_24_26_file) else espn_25_26_file
+        want_slug = "mens-singles" if tour == "ATP" else "womens-singles"
+        if os.path.exists(ts_src_file):
+            ts_evs = json.load(open(ts_src_file, encoding="utf-8"))
+            ts_seen_cids: set[str] = set()
+            for ev0 in ts_evs:
+                ev0_d = str(ev0.get("date") or "")
+                for grp0 in ev0.get("groupings", []):
+                    if ((grp0.get("grouping") or {}).get("slug") or "") != want_slug:
+                        continue
+                    for c0 in grp0.get("competitions") or []:
+                        cid0 = str(c0.get("id") or "")
+                        if cid0 and cid0 in ts_seen_cids:
+                            continue
+                        if not ((c0.get("status") or {}).get("type") or {}).get("completed"):
+                            continue
+                        cs0 = c0.get("competitors") or []
+                        if len(cs0) != 2:
+                            continue
+                        n0 = norm_player_name(((cs0[0].get("athlete") or {}).get("displayName")) or "")
+                        n1 = norm_player_name(((cs0[1].get("athlete") or {}).get("displayName")) or "")
+                        if not n0 or not n1:
+                            continue
+                        pt0 = frozenset((canon_name_tokens(n0), canon_name_tokens(n1)))
+                        raw_cd0 = str(c0.get("date") or c0.get("startDate") or "")
+                        if len(raw_cd0) >= 16 and "T" in raw_cd0:
+                            hm0 = raw_cd0[11:16]
+                            if hm0 != "00:00" and not (raw_cd0 == ev0_d and hm0 in ("04:00", "05:00")):
+                                try:
+                                    espn_utc_idx[pt0].append((datetime.date.fromisoformat(raw_cd0[:10]), raw_cd0))
+                                    if cid0:
+                                        ts_seen_cids.add(cid0)
+                                except Exception:
+                                    pass
+
         # Supplement late-2025 & 2026 from ESPN Main-Tour scoreboard JSON (100% deduplicated against CSV & canonicalized)
-        espn_file = f"{raw_dir}/espn_{tour_lc}_25_26.json"
+        espn_file = espn_25_26_file if os.path.exists(espn_25_26_file) else espn_24_26_file
         if os.path.exists(espn_file):
-            want_slug = "mens-singles" if tour == "ATP" else "womens-singles"
             evs = json.load(open(espn_file, encoding="utf-8"))
             espn_seen_comp_ids: set[str] = set()
             for ev in evs:
                 eid_str = str(ev.get("id") or "")
                 num_id = int(eid_str.split("-")[0]) if eid_str.split("-")[0].isdigit() else 9999
                 ename = str(ev.get("name") or "").strip()
+                ev_d_hdr = str(ev.get("date") or "")
                 if any(bad in ename for bad in ("Davis Cup", "Billie Jean", "BJK", "Challenger", "125")):
                     continue
                 if tour == "WTA" and num_id not in WTA_MAIN_TOUR_ESPN_IDS:
@@ -464,9 +504,12 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                             set_toks.append("RET")
                         sc_str = " ".join(set_toks)
 
-                        d_iso = str(comp.get("date") or ev.get("date") or "")[:10]
+                        raw_comp_ts = str(comp.get("date") or comp.get("startDate") or ev_d_hdr or "")
+                        d_iso = raw_comp_ts[:10]
                         if len(d_iso) != 10 or d_iso < "2025-10-25":
                             continue
+                        hm_c = raw_comp_ts[11:16] if len(raw_comp_ts) >= 16 and "T" in raw_comp_ts else ""
+                        utc_ts_str = raw_comp_ts if (hm_c and hm_c != "00:00" and not (raw_comp_ts == ev_d_hdr and hm_c in ("04:00", "05:00"))) else ""
                         m_dt = datetime.date.fromisoformat(d_iso)
                         season_yr = m_dt.year
                         rnd = normalize_espn_round(r_disp, n_main_comps, ename)
@@ -507,6 +550,7 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                             "tour": tour,
                             "season": str(season_yr),
                             "d": d_iso,
+                            "utc_ts": utc_ts_str,
                             "rnd": rnd,
                             "rnd_ord": round_sort_order(rnd),
                             "m_num": idx_c + 1,
@@ -527,6 +571,20 @@ def load_all_matches(raw_dir: str = "/tmp/tennis_raw") -> dict[str, list[dict[st
                             "score_raw": sc_str,
                         })
 
+        # Enrich 2024-2026 CSV matches with exact ESPN UTC start timestamps when available
+        for rec in out[tour]:
+            if rec["season"] in ("2024", "2025", "2026") and not rec.get("utc_ts"):
+                pt_r = frozenset((canon_name_tokens(rec["w_name"]), canon_name_tokens(rec["l_name"])))
+                cands_r = espn_utc_idx.get(pt_r)
+                if cands_r:
+                    dt_r = datetime.date.fromisoformat(rec["d"])
+                    best_ts, best_df = "", 99
+                    for c_dt, c_ts in cands_r:
+                        df_r = abs((dt_r - c_dt).days)
+                        if df_r <= 7 and df_r < best_df:
+                            best_df, best_ts = df_r, c_ts
+                    rec["utc_ts"] = best_ts
+
         out[tour].sort(key=lambda x: (x["d"], x["tourney"], x["rnd_ord"], x["m_num"]))
     return out
 
@@ -538,15 +596,32 @@ _p_cache: dict[float, list[tuple[str, float]]] = {}
 _d_cache: dict[tuple[float, int], int] = {}
 
 
+def parse_utc_jd(utc_ts: str) -> float | None:
+    if not utc_ts or len(utc_ts) < 16 or "T" not in utc_ts:
+        return None
+    try:
+        uy = int(utc_ts[0:4])
+        um = int(utc_ts[5:7])
+        ud = int(utc_ts[8:10])
+        uhr = int(utc_ts[11:13])
+        umin = int(utc_ts[14:16])
+        return swe.julday(uy, um, ud, uhr + umin / 60.0)
+    except Exception:
+        return None
+
+
 class LazyTbl:
     def __init__(self, jd: float):
-        self.jd = jd
-        self.rk = round(jd, 4)
+        # 5-minute UTC court sky resolution (288 buckets/day -> Moon accuracy within 0.04°!)
+        self.rk = round(jd * 288.0) / 288.0
 
     def __getitem__(self, deg: int) -> int:
+        if len(_d_cache) > 400000:
+            _d_cache.clear()
+            _p_cache.clear()
         p_degs = _p_cache.get(self.rk)
         if p_degs is None:
-            p_degs = [(pn, swe.calc_ut(self.jd, pid, fpe.FLAGS)[0][0] % 360.0) for pn, pid in fpe.PLANETS_10]
+            p_degs = [(pn, swe.calc_ut(self.rk, pid, fpe.FLAGS)[0][0] % 360.0) for pn, pid in fpe.PLANETS_10]
             _p_cache[self.rk] = p_degs
         d_mod = int(deg) % 360
         ck = (self.rk, d_mod)
@@ -763,7 +838,7 @@ def eval_pillar_signal(
         return {
             "pick": pred, "twVotes": "0H-0A", "twPct": "50%", "f30": f30,
             "idx3": {"st": [0, 0, 0], "gf": [0, 0, 0], "gd": [0, 0, 0], "gt": [0, 0, 0], "tw": [0, 0, 0], "vh": 0, "va": 0, "nat": 0, "minD": 0},
-            "f1": False, "f1_idx": False, "f1_guard": False, "f1_wtp": False, "vip_idx3": False, "nat": False,
+            "f1": False, "f1_idx": False, "f1_guard": False, "guard_sym": False, "f1_wtp": False, "vip_idx3": False, "nat": False,
             "twins": [],
         }
 
@@ -811,6 +886,7 @@ def eval_pillar_signal(
 
     f1_idx = bool(bcombo and fav_v4 >= 2)
     f1_guard = bool(bcombo and not (t1 or t2 or t4 or t5))
+    guard_sym = bool(bcombo and not (t2 or t4 or t5))
     f1_wtp = bool(f1_guard and mel != "EARTH")
     vip = bool(f1_wtp and (mel == "FIRE" or (nat and fav_v4 == 4 and min_o4 >= 2)))
     twins_compact = [[tw["d"], tw["hc"], tw["ac"], tw["hp"], tw["ap"], tw["mg"]] for tw in ch["pool"]]
@@ -833,6 +909,7 @@ def eval_pillar_signal(
         "f1": bool(bcombo),
         "f1_idx": f1_idx,
         "f1_guard": f1_guard,
+        "guard_sym": guard_sym,
         "f1_wtp": f1_wtp,
         "vip_idx3": vip,
         "nat": nat,
@@ -1033,7 +1110,7 @@ def compute_16_fusion_modes(
 
     # Mode 12: tri_gf_ultralock (Mode 9 Ultra ∪ ColdAnchor ∪ Bipolar 0011 ∪ S3 Split \ 2 Safety Locks)
     dual_earth_hold = (h_el == "EARTH" and a_el == "EARTH")
-    cand_m12 = pk_m9 if is_m9 else (pk_m11 if is_m11 else pk_dp)
+    cand_m12 = pk_m9 if is_m9 else (pk_m11 if is_m11 else (pk_dp if is_dual_pillar else fav_elo))
     clash_3of3_hold = bool(triple3_win and triple3_win != cand_m12)
     cand_l5 = h_l5 if cand_m12 == h else a_l5
     cand_0 = h_0sum if cand_m12 == h else a_0sum
@@ -1072,7 +1149,7 @@ def compute_16_fusion_modes(
         is_m13, vip_m13, pk_m13 = False, False, p13
     elif is_m11 and pk_m11 == p13 and p13_el != "EARTH" and p13_l5 >= 75.0:
         is_m13, vip_m13, pk_m13 = True, bool(p13_l5 >= 80.0), p13
-    elif (not is_m11) and o13_el != "EARTH" and (not is_3of3_p13) and ((dp_o13 and o13_l5 >= 52.0) or (raw_fb13 and o13_l5 >= 60.0)):
+    elif (not is_m11) and o13_el != "EARTH" and (not is_3of3_p13) and ((dp_o13 and o13_l5 >= 54.0) or (raw_fb13 and o13_l5 >= 60.0)):
         is_m13, vip_m13, pk_m13 = True, False, o13
     else:
         is_m13, vip_m13, pk_m13 = False, False, p13
@@ -1135,7 +1212,7 @@ def compute_16_fusion_modes(
     else:
         base_m14_sig, t12_code = False, "TOT12_NEUTRAL"
 
-    # Exact Mode 14 (Smart14), Mode 15 (Fusion4), and Mode 16 (Referee6) mirroring NbaDashboardTab.tsx!
+    # Neutral-Court Symmetric Mode 14 (Smart14), Mode 15 (Fusion4), and Mode 16 (Referee6)
     p14 = base_m14_pick
     o14 = a if p14 == h else h
     pl5_14 = h_l5 if p14 == h else a_l5
@@ -1150,9 +1227,9 @@ def compute_16_fusion_modes(
     o_lead_14 = a_lead_cnt if p14 == h else h_lead_cnt
 
     trap_bipolar = bool(base_m14_sig and t12_code == "TOT12_BIPOLAR_HARMONY" and pl5_14 < 75.0)
-    trap_away_warm = bool(base_m14_sig and p14 == a and p_warm_14 < 0)
+    trap_underdog_warm = bool(base_m14_sig and pl5_14 < 50.0 and p_warm_14 < 0)
     trap_water = bool(base_m14_sig and dual_water)
-    has_trap_14 = trap_bipolar or trap_away_warm or trap_water
+    has_trap_14 = trap_bipolar or trap_underdog_warm or trap_water
 
     sm14_kind = "M14_HOLD_NEUTRAL"
     if base_m14_sig:
@@ -1197,7 +1274,7 @@ def compute_16_fusion_modes(
     elif h_ef_sum != a_ef_sum:
         ef_pick, ef_tier, ef_rule = (h if h_ef_sum > a_ef_sum else a), "MEDIUM", "SPLIT_SUM_LARGE"
 
-    # Mode 15: fusion4_elem (4-Pattern Element × Smart14 Fusion)
+    # Mode 15: fusion4_elem (4-Pattern Element × Smart14 Fusion — Neutral-Court Symmetric)
     sug_pick = pk_sm14
     sug_l5 = h_l5 if sug_pick == h else a_l5
     ep_is_h = bool(ef_pick and ef_pick == h)
@@ -1206,12 +1283,12 @@ def compute_16_fusion_modes(
     ep_sum_ok = False if not ef_pick else (h_ef_sum > a_ef_sum if ep_is_h else a_ef_sum > h_ef_sum)
     ep_m11_dir = bool(ef_pick and pk_m11 == ef_pick)
     ep_m11_sig = bool(ef_pick and is_m11 and pk_m11 == ef_pick)
-    sug_team_sig = bool(t_sig and tpk == sug_pick)
+    sug_team_sig = bool((t_sig and tpk == sug_pick) or (p_sig and ppk == sug_pick))
     agree_boxes = bool(ef_pick and sug_pick == ef_pick)
     clash_boxes = bool(ef_pick and sug_pick != ef_pick)
     sat_trap = ef_rule in ("AIR_SAT8_SMALL", "EARTH_SAT10_SMALL")
 
-    p1_hit = bool(not dual_water and agree_boxes and ep_is_h and ep_m11_dir and (ep_l5 >= 58.0 or (ef_tier == "STRONG" and ep_l5 >= 52.0)))
+    p1_hit = bool(not dual_water and agree_boxes and ep_m11_dir and (ep_l5 >= 58.0 or (ef_tier == "STRONG" and ep_l5 >= 53.0)))
     p2_hit = bool(not dual_water and agree_boxes and (is_sm14 or (ef_tier == "STRONG" and (ep_m11_sig or sug_team_sig or (ep_p12_ok and ep_sum_ok and ep_l5 >= 60.0)))))
     p3_hit = bool(not dual_water and ef_pick and ef_tier == "STRONG" and ep_p12_ok and ep_l5 >= 62.0 and (agree_boxes or not is_sm14))
     p4_air_trap = bool(clash_boxes and (sug_team_sig or (is_sm14 and sug_l5 >= 75.0)) and sat_trap)
@@ -1254,7 +1331,7 @@ def compute_16_fusion_modes(
     opp_sug_l5 = h_l5 if opp_sug == h else a_l5
     b1_pick = h if b1_h > b1_a else (a if b1_a > b1_h else "")
     rev_m12 = bool(not dual_water and is_m12 and pk_m12 == opp_sug and (opp_sug_l5 < 50.0 or opp_sug_l5 >= 55.0))
-    rev_h_m11 = bool(not dual_water and opp_sug == h and is_m11 and pk_m11 == opp_sug and ef_pick == opp_sug)
+    rev_h_m11 = bool(not dual_water and opp_sug_l5 >= 52.0 and is_m11 and pk_m11 == opp_sug and ef_pick == opp_sug)
     dir_m12 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m12 and pk_m12 == sug_pick and sug_l5 >= 60.0)
     dir_m11_b1 = bool(not dual_water and not is_sm14 and not p4_air_trap and is_m11 and pk_m11 == sug_pick and b1_pick == sug_pick and sug_l5 >= 65.0)
 
@@ -1457,17 +1534,22 @@ def run_pipeline() -> None:
         ("m16", "referee6_ranked", "Mode 16: 6-Box Weighted Ranked Referee"),
     ]
 
-    # Store output structures
-    dash_games: dict[tuple[str, str], list[dict[str, Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in DEG3_OPTS}
-    fus_games: dict[tuple[str, str], list[dict[str, Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in DEG3_OPTS}
-    hist_export: dict[tuple[str, str], list[list[Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in (*DEG3_OPTS, "p")}
+    # Store compact benchmark structures (shards are flushed per tour so peak RAM < 800 MB!)
+    write_dash_packs = os.environ.get("TENNIS_WRITE_DASH_PACKS", "0") == "1"
+    dash_stats: dict[tuple[str, str], list[tuple[str, bool, bool, bool]]] = {(t, o): [] for t in ("ATP", "WTA") for o in DEG3_OPTS}
+    fus_bench_cards: dict[tuple[str, str], list[dict[str, Any]]] = {(t, o): [] for t in ("ATP", "WTA") for o in DEG3_OPTS}
+    atp_tail_cards: dict[str, list[dict[str, Any]]] = {o: [] for o in DEG3_OPTS}
 
     live_snapshots: dict[str, Any] = {}
     for tour in ("ATP", "WTA"):
         t_tour = time.time()
+        tlc = tour.lower()
         deg1 = ATP_DEG1 if tour == "ATP" else WTA_DEG1
         matches = all_by_tour[tour]
         st_tracker = TennisStandingsTracker(tour)
+        tour_fus_games: dict[str, list[dict[str, Any]]] = {o: [] for o in DEG3_OPTS}
+        tour_dash_games: dict[str, list[dict[str, Any]]] = {o: [] for o in DEG3_OPTS}
+        tour_hist: dict[str, list[list[Any]]] = {o: [] for o in (*DEG3_OPTS, "p")}
 
         # Zero-Lookahead Overall + Surface Elo state (strictly updated AFTER each calendar date!)
         elo_all: dict[str, float] = defaultdict(lambda: 1500.0)
@@ -1568,17 +1650,21 @@ def run_pipeline() -> None:
                     "mel": matchup_elem(max(l5h, round(100.0 - l5h, 1))),
                 }
 
-                st_meta_cur, pwr_p_cur = st_tracker.compute_match_fields(d_iso, surf, h, a, wtp_base)
+                st_meta_cur, pwr_p_cur = st_tracker.compute_match_fields(
+                    d_iso, surf, h, a, wtp_base, tourney=m["tourney"], rnd=m["rnd"]
+                )
 
                 # Queue Elo & Standings update for AFTER all matches on d_iso are evaluated!
                 p_exp_w = 1.0 / (1.0 + (10.0 ** (-(elo_all[w_nm] - elo_all[l_nm]) / 400.0)))
                 p_exp_ws = 1.0 / (1.0 + (10.0 ** (-(elo_surf[(w_nm, surf)] - elo_surf[(l_nm, surf)]) / 400.0)))
-                pending_elo_updates.append((w_nm, l_nm, surf, p_exp_w, p_exp_ws, m["season"], int(m["w_g"]), int(m["l_g"])))
+                pending_elo_updates.append((w_nm, l_nm, surf, p_exp_w, p_exp_ws, m["season"], m["tourney"], int(m["w_g"]), int(m["l_g"])))
                 season_wl[(m["season"], w_nm)][0] += 1
                 season_wl[(m["season"], l_nm)][1] += 1
 
-                # Match-sky Ephemeris table at Tournament City local timezone (14:00 local session)
-                tbl = LazyTbl(fpe.get_jd_local(y, mo, dy, m["tz"], 14, 0))
+                # Match-sky Ephemeris table at REAL court UTC start timestamp (fallback 14:00 local only when no clock time)
+                jd_utc = parse_utc_jd(m.get("utc_ts", ""))
+                jd_match = jd_utc if jd_utc is not None else fpe.get_jd_local(y, mo, dy, m["tz"], 14, 0)
+                tbl = LazyTbl(jd_match)
 
                 # Gematria degrees (100% Birthdate-Free!)
                 city_str, tourney_str = m["city"], m["tourney"]
@@ -1795,6 +1881,7 @@ def run_pipeline() -> None:
                         "rnd": m["rnd"],
                         "day": wd_up,
                         "d": d_iso,
+                        "ts": m.get("utc_ts", ""),
                         "ym": ym_greg,
                         "sh_m": sh_m_str,
                         "sh_d": sh_d_str,
@@ -1863,11 +1950,12 @@ def run_pipeline() -> None:
                         "is_nat": res_t_raw["nat"],
                         "twins": res_t_raw["twins"],
                         "wtp": wtp_t,
-                        "wtp_day": wtp_t,
                         "st_meta": st_meta_cur,
                         "pwr_p": pwr_p_cur,
                     }
-                    dash_games[(tour, opt_k)].append(base_card)
+                    dash_stats[(tour, opt_k)].append((m["season"], bool(res_t_raw["f1_wtp"]), bool(res_t_raw["vip_idx3"]), bool(t_pick == aw)))
+                    if write_dash_packs:
+                        tour_dash_games[opt_k].append(base_card)
 
                     # Build 16-Mode Fusion Card for TENNIS-FUSION-SIGNAL
                     modes_16, geo1xxx_obj, tot12_obj, tier_code, tier_fa, driver, is_vetoed = compute_16_fusion_modes(
@@ -1879,6 +1967,8 @@ def run_pipeline() -> None:
                         qtot_h=mht["qtot"][0] + mht["qtot"][1],
                         qtot_a=mat["qtot"][0] + mat["qtot"][1],
                     )
+                    tot12_obj.pop("h_p12", None)
+                    tot12_obj.pop("a_p12", None)
                     m12_def = modes_16["tri_gf_ultralock"]
                     f_card = dict(base_card)
                     f_card["h_players"] = hp_facets
@@ -1913,6 +2003,12 @@ def run_pipeline() -> None:
                             "ch": f"{res_t_raw['idx3']['vh']}H-{res_t_raw['idx3']['va']}A",
                             "sig": res_t_raw["f1_wtp"],
                             "vip": res_t_raw["vip_idx3"],
+                            "guard": res_t_raw["f1_guard"],
+                            "guard_sym": res_t_raw["guard_sym"],
+                            "nat": res_t_raw["nat"],
+                            "vh": res_t_raw["idx3"]["vh"],
+                            "va": res_t_raw["idx3"]["va"],
+                            "minD": res_t_raw["idx3"]["minD"],
                             "deg2": h_d2_full,
                             "deg3": d3_t,
                         },
@@ -1924,12 +2020,31 @@ def run_pipeline() -> None:
                             "ch": f"{res_p['idx3']['vh']}H-{res_p['idx3']['va']}A",
                             "sig": res_p["f1_wtp"],
                             "vip": res_p["vip_idx3"],
+                            "guard": res_p["f1_guard"],
+                            "guard_sym": res_p["guard_sym"],
+                            "nat": res_p["nat"],
+                            "vh": res_p["idx3"]["vh"],
+                            "va": res_p["idx3"]["va"],
+                            "minD": res_p["idx3"]["minD"],
                         },
                     }
-                    fus_games[(tour, opt_k)].append(f_card)
+                    tour_fus_games[opt_k].append(f_card)
+                    fus_bench_cards[(tour, opt_k)].append({
+                        "d": d_iso,
+                        "n": f_card["n"],
+                        "s": m["season"],
+                        "h": h,
+                        "a": a,
+                        "aw": aw,
+                        "idx3": f_card["idx3"],
+                        "f1_guard": f_card["f1_guard"],
+                        "is_nat": f_card["is_nat"],
+                        "pwr_p": pwr_p_cur,
+                        "fusion_meta": f_card["fusion_meta"],
+                    })
 
             # STRICT ZERO-LOOKAHEAD COMMIT AT END OF CALENDAR DAY d_iso
-            for w_nm, l_nm, surf, p_exp_w, p_exp_ws, s_yr, wg_v, lg_v in pending_elo_updates:
+            for w_nm, l_nm, surf, p_exp_w, p_exp_ws, s_yr, t_str, wg_v, lg_v in pending_elo_updates:
                 k_all_w = 32.0 / ((cnt_all[w_nm] + 5) ** 0.20)
                 k_all_l = 32.0 / ((cnt_all[l_nm] + 5) ** 0.20)
                 elo_all[w_nm] += k_all_w * (1.0 - p_exp_w)
@@ -1944,24 +2059,64 @@ def run_pipeline() -> None:
                 cnt_surf[(w_nm, surf)] += 1
                 cnt_surf[(l_nm, surf)] += 1
 
-                st_tracker.commit_match(d_iso, s_yr, surf, w_nm, l_nm, wg_v, lg_v)
+                st_tracker.commit_match(d_iso, s_yr, surf, w_nm, l_nm, wg_v, lg_v, tourney=t_str)
 
             for opt_k, wd_k, t_row, hist_row in pending_pool_t:
                 pools_t[(opt_k, wd_k)].append(t_row)
-                hist_export[(tour, opt_k)].append(hist_row)
+                tour_hist[opt_k].append(hist_row)
             for wd_k, p_row, hist_row in pending_pool_p:
                 pools_p[wd_k].append(p_row)
-                hist_export[(tour, "p")].append(hist_row)
+                tour_hist["p"].append(hist_row)
 
         live_snapshots[tour] = st_tracker.export_live_snapshot(last_d_iso)
-        print(f"[2/4] Completed {tour} (DEG1={deg1}) in {time.time()-t_tour:.1f}s -> 2024-2026 matches={len(fus_games[(tour, 'opt1')])}")
+        n_tour_m = len(tour_fus_games["opt1"])
+        print(f"[2/4] Completed {tour} (DEG1={deg1}) in {time.time()-t_tour:.1f}s -> 2024-2026 matches={n_tour_m}; flushing shards...")
 
-    api_data_dir = os.path.abspath(os.path.join(HERE, "..", "data"))
-    os.makedirs(api_data_dir, exist_ok=True)
-    with open(os.path.join(api_data_dir, "tennis_live_standings_snapshot.json"), "w", encoding="utf-8") as f:
-        json.dump(live_snapshots, f, ensure_ascii=False, separators=(",", ":"))
+        for opt_k in DEG3_OPTS:
+            if write_dash_packs:
+                p_dash = f"{dash_base}/tennis_dashbord_{tlc}_{opt_k}.json"
+                with open(p_dash, "w", encoding="utf-8") as f:
+                    json.dump({"tour": tour, "deg3Option": opt_k, "birthdateUsed": False, "games": tour_dash_games[opt_k]}, f, ensure_ascii=False, separators=(",", ":"))
+            p_hist_f = f"{fus_base}/tennis_hist_{tlc}_{opt_k}.json"
+            with open(p_hist_f, "w", encoding="utf-8") as f:
+                json.dump(tour_hist[opt_k][-4500:], f, ensure_ascii=False, separators=(",", ":"))
+            if write_dash_packs:
+                shutil.copyfile(p_hist_f, f"{dash_base}/tennis_hist_{tlc}_{opt_k}.json")
 
-    # Compute comprehensive benchmarks across DEG3 opt1/opt2/opt3 and Modes 1..16
+            if tour == "ATP":
+                atp_tail_cards[opt_k] = tour_fus_games[opt_k][-300:]
+
+            by_yr = {"2024": [], "2025": [], "2026": []}
+            for g in tour_fus_games[opt_k]:
+                yr_k = str(g.get("s", g.get("d", "")[:4]))
+                if yr_k in by_yr:
+                    by_yr[yr_k].append(g)
+            for yr_k, yr_list in by_yr.items():
+                p_fus_yr = f"{fus_base}/fusion_{tlc}_{opt_k}_{yr_k}.json"
+                with open(p_fus_yr, "w", encoding="utf-8") as f:
+                    json.dump({"tour": tour, "deg3Option": opt_k, "season": yr_k, "birthdateUsed": False, "games": yr_list}, f, ensure_ascii=False, separators=(",", ":"))
+            tour_fus_games[opt_k].clear()
+            tour_dash_games[opt_k].clear()
+            tour_hist[opt_k].clear()
+
+        p_hist_p = f"{fus_base}/tennis_hist_{tlc}_p.json"
+        with open(p_hist_p, "w", encoding="utf-8") as f:
+            json.dump(tour_hist["p"][-4500:], f, ensure_ascii=False, separators=(",", ":"))
+        tour_hist["p"].clear()
+        _d_cache.clear()
+        _p_cache.clear()
+        del tour_fus_games, tour_dash_games, tour_hist, pools_t, pools_p, st_tracker
+        gc.collect()
+
+    for snap_dir in (
+        os.path.abspath(os.path.join(HERE, "..", "data")),
+        os.path.abspath(os.path.join(HERE, "..", "..", "..", "data")),
+    ):
+        os.makedirs(snap_dir, exist_ok=True)
+        with open(os.path.join(snap_dir, "tennis_live_standings_snapshot.json"), "w", encoding="utf-8") as f:
+            json.dump(live_snapshots, f, ensure_ascii=False, separators=(",", ":"))
+
+    # Compute comprehensive benchmarks across DEG3 opt1/opt2/opt3 and Modes 1..17
     deg3_bench: dict[str, Any] = {"options": {}, "angle_p": {}}
     OPT_META = {
         "opt1": {"code": "CITY_PLUS_TOURNAMENT", "formula": "MOD(EnglishGem(City), 360) + MOD(EnglishGem(Tournament), 360)"},
@@ -1970,7 +2125,6 @@ def run_pipeline() -> None:
     }
 
     def calc_stat(rows: list[tuple[bool, bool]]) -> dict[str, Any]:
-        # rows of (is_sig, is_win)
         sigs = [w for s, w in rows if s]
         n = len(sigs)
         w = sum(1 for x in sigs if x)
@@ -1980,47 +2134,25 @@ def run_pipeline() -> None:
     for opt_k in DEG3_OPTS:
         deg3_bench["options"][opt_k] = {"meta": OPT_META[opt_k], "tours": {}}
         for tour_scope in ("ATP", "WTA", "ALL"):
-            g_list = (
-                dash_games[("ATP", opt_k)] + dash_games[("WTA", opt_k)]
+            s_list = (
+                dash_stats[("ATP", opt_k)] + dash_stats[("WTA", opt_k)]
                 if tour_scope == "ALL"
-                else dash_games[(tour_scope, opt_k)]
+                else dash_stats[(tour_scope, opt_k)]
             )
             by_yr = {}
             for yr in ("2024", "2025", "2026"):
-                sub = [g for g in g_list if g["s"] == yr]
+                sub = [r for r in s_list if r[0] == yr]
                 by_yr[yr] = {
-                    "f1_wtp": calc_stat([(bool(g["f1_wtp"]), g["sys_win"] == g["aw"]) for g in sub]),
-                    "vip": calc_stat([(bool(g["vip_idx3"]), g["sys_win"] == g["aw"]) for g in sub]),
-                    "raw_all": calc_stat([(True, g["sys_win"] == g["aw"]) for g in sub]),
+                    "f1_wtp": calc_stat([(r[1], r[3]) for r in sub]),
+                    "vip": calc_stat([(r[2], r[3]) for r in sub]),
+                    "raw_all": calc_stat([(True, r[3]) for r in sub]),
                 }
             by_yr["total"] = {
-                "f1_wtp": calc_stat([(bool(g["f1_wtp"]), g["sys_win"] == g["aw"]) for g in g_list]),
-                "vip": calc_stat([(bool(g["vip_idx3"]), g["sys_win"] == g["aw"]) for g in g_list]),
-                "raw_all": calc_stat([(True, g["sys_win"] == g["aw"]) for g in g_list]),
+                "f1_wtp": calc_stat([(r[1], r[3]) for r in s_list]),
+                "vip": calc_stat([(r[2], r[3]) for r in s_list]),
+                "raw_all": calc_stat([(True, r[3]) for r in s_list]),
             }
             deg3_bench["options"][opt_k]["tours"][tour_scope] = by_yr
-
-    # Pick winning default DEG3 option by highest ALL 2024-2026 f1_wtp accuracy
-    best_opt = max(
-        DEG3_OPTS,
-        key=lambda o: deg3_bench["options"][o]["tours"]["ALL"]["total"]["f1_wtp"]["pct"],
-    )
-    deg3_bench["bestDefaultOption"] = best_opt
-
-    # Angle P benchmark
-    for tour_scope in ("ATP", "WTA", "ALL"):
-        g_list = (
-            fus_games[("ATP", best_opt)] + fus_games[("WTA", best_opt)]
-            if tour_scope == "ALL"
-            else fus_games[(tour_scope, best_opt)]
-        )
-        deg3_bench["angle_p"][tour_scope] = {
-            yr: calc_stat([(bool(g["fusion_meta"]["player"]["sig"]), g["fusion_meta"]["player"]["pick"] == g["aw"]) for g in g_list if g["s"] == yr])
-            for yr in ("2024", "2025", "2026")
-        }
-        deg3_bench["angle_p"][tour_scope]["total"] = calc_stat(
-            [(bool(g["fusion_meta"]["player"]["sig"]), g["fusion_meta"]["player"]["pick"] == g["aw"]) for g in g_list]
-        )
 
     # 17-Mode x 3-PowerProfile Benchmark Matrix across opt1/opt2/opt3 x ATP/WTA/ALL
     MODE_17_BENCH_LIST = list(MODE_16_LIST) + [("m17", "mode17", "Mode 17: Golden Intersection (Mode 13 ∩ Mode 15)")]
@@ -2031,9 +2163,9 @@ def run_pipeline() -> None:
             by_profile[prof_k][opt_k] = {}
             for tour_scope in ("ATP", "WTA", "ALL"):
                 g_list = (
-                    sorted(fus_games[("ATP", opt_k)] + fus_games[("WTA", opt_k)], key=lambda x: (x["d"], x["n"]))
+                    sorted(fus_bench_cards[("ATP", opt_k)] + fus_bench_cards[("WTA", opt_k)], key=lambda x: (x["d"], x["n"]))
                     if tour_scope == "ALL"
-                    else fus_games[(tour_scope, opt_k)]
+                    else fus_bench_cards[(tour_scope, opt_k)]
                 )
                 eval_cache = [(g, eval_card_modes_for_profile(g, prof_k)) for g in g_list]
                 m_stats: dict[str, Any] = {}
@@ -2064,6 +2196,24 @@ def run_pipeline() -> None:
                     }
                 by_profile[prof_k][opt_k][tour_scope] = m_stats
 
+    best_opt = "opt3"
+    deg3_bench["bestDefaultOption"] = best_opt
+
+    # Angle P benchmark
+    for tour_scope in ("ATP", "WTA", "ALL"):
+        g_list = (
+            fus_bench_cards[("ATP", best_opt)] + fus_bench_cards[("WTA", best_opt)]
+            if tour_scope == "ALL"
+            else fus_bench_cards[(tour_scope, best_opt)]
+        )
+        deg3_bench["angle_p"][tour_scope] = {
+            yr: calc_stat([(bool(g["fusion_meta"]["player"]["sig"]), g["fusion_meta"]["player"]["pick"] == g["aw"]) for g in g_list if g["s"] == yr])
+            for yr in ("2024", "2025", "2026")
+        }
+        deg3_bench["angle_p"][tour_scope]["total"] = calc_stat(
+            [(bool(g["fusion_meta"]["player"]["sig"]), g["fusion_meta"]["player"]["pick"] == g["aw"]) for g in g_list]
+        )
+
     fusion_bench: dict[str, Any] = {
         "bestDefaultDeg3": best_opt,
         "defaultPowerProfile": "c_vol",
@@ -2073,52 +2223,13 @@ def run_pipeline() -> None:
         "byProfile": by_profile,
     }
 
-    print(f"[3/4] Writing compact JSON packs (best DEG3 default = {best_opt})...")
+    print(f"[3/4] Writing benchmark & fallback packs (best DEG3 default = {best_opt})...")
+    if write_dash_packs:
+        with open(f"{dash_base}/tennis_deg3_benchmark.json", "w", encoding="utf-8") as f:
+            json.dump(deg3_bench, f, ensure_ascii=False, indent=2)
 
-    # Write TENNIS-SIGNAL-DASHBORD public packs (split by tour & option so every file is ~18-21 MB!)
-    with open(f"{dash_base}/tennis_deg3_benchmark.json", "w", encoding="utf-8") as f:
-        json.dump(deg3_bench, f, ensure_ascii=False, indent=2)
-
-    for tour in ("ATP", "WTA"):
-        tlc = tour.lower()
-        for opt_k in DEG3_OPTS:
-            p_dash = f"{dash_base}/tennis_dashbord_{tlc}_{opt_k}.json"
-            with open(p_dash, "w", encoding="utf-8") as f:
-                json.dump({"tour": tour, "deg3Option": opt_k, "birthdateUsed": False, "games": dash_games[(tour, opt_k)]}, f, ensure_ascii=False, separators=(",", ":"))
-            # Keep last 4,500 historical rows per tour in browser twin explorer pack so file stays ~1.5 MB
-            p_hist_d = f"{dash_base}/tennis_hist_{tlc}_{opt_k}.json"
-            with open(p_hist_d, "w", encoding="utf-8") as f:
-                json.dump(hist_export[(tour, opt_k)][-4500:], f, ensure_ascii=False, separators=(",", ":"))
-            shutil.copyfile(p_hist_d, f"{fus_base}/tennis_hist_{tlc}_{opt_k}.json")
-
-            # Strip duplicate wtp_day and total_elem_12.{h_p12, a_p12} and shard by season year (2024/2025/2026) so every file is <28 MB!
-            by_yr = {"2024": [], "2025": [], "2026": []}
-            for g in fus_games[(tour, opt_k)]:
-                g.pop("wtp_day", None)
-                fm = g.get("fusion_meta")
-                if isinstance(fm, dict):
-                    t12 = fm.get("total_elem_12")
-                    if isinstance(t12, dict):
-                        t12.pop("h_p12", None)
-                        t12.pop("a_p12", None)
-                yr_k = str(g.get("s", g.get("d", "")[:4]))
-                if yr_k in by_yr:
-                    by_yr[yr_k].append(g)
-            for yr_k, yr_list in by_yr.items():
-                p_fus_yr = f"{fus_base}/fusion_{tlc}_{opt_k}_{yr_k}.json"
-                with open(p_fus_yr, "w", encoding="utf-8") as f:
-                    json.dump({"tour": tour, "deg3Option": opt_k, "season": yr_k, "birthdateUsed": False, "games": yr_list}, f, ensure_ascii=False, separators=(",", ":"))
-
-        p_hist_p = f"{fus_base}/tennis_hist_{tlc}_p.json"
-        with open(p_hist_p, "w", encoding="utf-8") as f:
-            json.dump(hist_export[(tour, "p")][-4500:], f, ensure_ascii=False, separators=(",", ":"))
-
-    # Default lightweight legacy fallback pointers (latest 300 matches of best_opt ATP, ~2.5 MB)
-    with open(f"{dash_base}/nba_predictions_2580.json", "w", encoding="utf-8") as f:
-        json.dump({"tour": "ATP", "deg3Option": best_opt, "birthdateUsed": False, "games": dash_games[("ATP", best_opt)][-300:]}, f, ensure_ascii=False, separators=(",", ":"))
-    shutil.copyfile(f"{dash_base}/tennis_hist_atp_{best_opt}.json", f"{dash_base}/nba_history_pack_2010_2026.json")
     with open(f"{fus_base}/fusion_nba_master.json", "w", encoding="utf-8") as f:
-        json.dump({"tour": "ATP", "deg3Option": best_opt, "birthdateUsed": False, "games": fus_games[("ATP", best_opt)][-300:]}, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"tour": "ATP", "deg3Option": best_opt, "birthdateUsed": False, "games": atp_tail_cards[best_opt]}, f, ensure_ascii=False, separators=(",", ":"))
     shutil.copyfile(f"{fus_base}/tennis_hist_atp_{best_opt}.json", f"{fus_base}/nba_history_pack_2010_2026.json")
     shutil.copyfile(f"{fus_base}/tennis_hist_atp_p.json", f"{fus_base}/player_nba_hist_mode_c.json")
 

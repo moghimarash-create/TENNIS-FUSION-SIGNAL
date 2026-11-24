@@ -17,6 +17,7 @@ export type Deg3OptionKey = "opt1" | "opt2" | "opt3";
 export const ARCHITECTURE_MODE = "ASTRO_GEMATRIA_NAME_AND_MATCH_SKY" as const;
 export const BIRTHDATE_USED = false as const;
 export const TENNIS_SHEETS_WRITE_ENABLED = false as const;
+export const SHARD_BUILD_VERSION = "v18_fix1" as const;
 
 export const ENGLISH_GEM_MAP: Readonly<Record<string, number>> = {
   A: 1,
@@ -159,15 +160,15 @@ export const POWER_PROFILES: Record<
 > = {
   c_vol: {
     key: "c_vol",
-    shortFa: "⚡ هیبرید جدول فصل + Pyth (۷۶٫۴٪ • پیشنهادی ★)",
+    shortFa: "⚡ هیبرید جدول فصل + Pyth (۷۹٫۹٪ • پیشنهادی ★)",
     badgeFa: "هیبرید جدول فصل + Surface Pyth",
-    formulaEn: "40% Direct_Surface_Elo + 60% NBA-Style_Surface_Games_Pyth(k=3.5, Season_WL, L10) + Standings_Element + Anti-Fame-Trap",
+    formulaEn: "Neutral-Court Hybrid (Surface_Games_Pyth k=3.5 + Season_WL + L10) + Smart Shields (Early-Month/Finals/250/Rookie)",
   },
   b_pure: {
     key: "b_pure",
-    shortFa: "🏆 جدول خالص فصل NBA-Style (۷۸٫۰٪ • الماس ۹۱٫۵٪)",
+    shortFa: "🏆 جدول خالص فصل NBA-Style (۸۰٫۰٪ • الماس ۸۹٫۶٪)",
     badgeFa: "جدول خالص فصل + Surface Pyth",
-    formulaEn: "75% Surface_Games_Pyth(k=3.5) + 15% Season_52w_WL + 10% Last10_Form + Standings_Quartile_Element(FIRE/AIR/WATER/EARTH)",
+    formulaEn: "75% Surface_Games_Pyth(k=3.5) + 15% Season_52w_WL + 10% Last10_Form + Standings_Quartile_Element + Smart Shields",
   },
   a_elo: {
     key: "a_elo",
